@@ -42,13 +42,12 @@ def test_project_and_file_flow() -> None:
 
     res = client.post(
         f"/api/projects/{project_id}/files",
-        files={"upload": ("hello.txt", b"hello", "text/plain")},
+        files={"file": ("hello.txt", b"hello", "text/plain")},
     )
     assert res.status_code == 200
-    file_id = UUID(res.json()["id"])
+    file_id = UUID(res.json()["file_id"])
     assert res.json()["size_bytes"] == 5
 
     res = client.get(f"/api/projects/{project_id}/files")
     assert res.status_code == 200
     assert any(UUID(f["id"]) == file_id for f in res.json())
-

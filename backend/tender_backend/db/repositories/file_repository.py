@@ -22,13 +22,14 @@ class FileRepository:
         self,
         conn: Connection,
         *,
+        file_id: UUID | None = None,
         project_id: UUID,
         filename: str,
         content_type: str,
         size_bytes: int,
         storage_key: str | None = None,
     ) -> ProjectFile:
-        file_id = uuid4()
+        file_id = file_id or uuid4()
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
                 """
@@ -73,4 +74,3 @@ class FileRepository:
             )
             for r in rows
         ]
-
