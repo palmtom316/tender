@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+tender_ai_gateway/__init__.py
+tender_ai_gateway/main.py
+tender_ai_gateway/task_profiles.py
+tender_ai_gateway.egg-info/PKG-INFO
+tender_ai_gateway.egg-info/SOURCES.txt
+tender_ai_gateway.egg-info/dependency_links.txt
+tender_ai_gateway.egg-info/requires.txt
+tender_ai_gateway.egg-info/top_level.txt

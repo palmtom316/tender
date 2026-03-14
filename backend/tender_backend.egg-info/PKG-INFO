@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: tender-backend
+Version: 0.1.0
+Summary: Business API for the tender authoring system.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi<1.0,>=0.115
+Requires-Dist: pydantic-settings<3.0,>=2.4
+Requires-Dist: uvicorn[standard]<1.0,>=0.30
+Provides-Extra: dev
+Requires-Dist: httpx<1.0,>=0.27; extra == "dev"
+Requires-Dist: pytest<9.0,>=8.3; extra == "dev"
+
+# Backend
+
+FastAPI business API for the tender system.
+

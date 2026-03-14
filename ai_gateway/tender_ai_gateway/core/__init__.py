@@ -1,0 +1,2 @@
+"""Core gateway settings."""
+

@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+tender_backend/__init__.py
+tender_backend/main.py
+tender_backend.egg-info/PKG-INFO
+tender_backend.egg-info/SOURCES.txt
+tender_backend.egg-info/dependency_links.txt
+tender_backend.egg-info/requires.txt
+tender_backend.egg-info/top_level.txt

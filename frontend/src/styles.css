@@ -1,0 +1,91 @@
+:root {
+  color: #0f172a;
+  background:
+    radial-gradient(circle at top left, rgba(13, 148, 136, 0.2), transparent 35%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  font-family: "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.shell {
+  width: min(1120px, calc(100vw - 48px));
+  margin: 0 auto;
+  padding: 56px 0 72px;
+}
+
+.hero {
+  margin-bottom: 32px;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: #0f766e;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(40px, 6vw, 72px);
+  line-height: 0.95;
+}
+
+.subtitle {
+  max-width: 720px;
+  margin-top: 16px;
+  color: #334155;
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.card {
+  padding: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.06);
+}
+
+.index {
+  display: inline-block;
+  margin-bottom: 24px;
+  color: #0f766e;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+
+.card p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    width: min(100vw - 32px, 1120px);
+    padding-top: 40px;
+  }
+}
+

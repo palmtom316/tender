@@ -1,0 +1,9 @@
+cluster.name: tender-opensearch
+node.name: tender-opensearch-1
+network.host: 0.0.0.0
+discovery.type: single-node
+bootstrap.memory_lock: true
+plugins.security.disabled: true
+
+indices.query.bool.max_clause_count: 4096
+path.logs: /usr/share/opensearch/logs
