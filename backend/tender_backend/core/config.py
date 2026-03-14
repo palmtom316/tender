@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "Tender Backend"
     app_env: str = "development"
     api_prefix: str = "/api"
+    database_url: str | None = None
     version: str = "0.1.0"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -15,4 +16,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

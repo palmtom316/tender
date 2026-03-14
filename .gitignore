@@ -17,3 +17,5 @@ frontend/vite.config.d.ts
 .idea/
 .vscode/
 .omx/
+.worktrees/
+.worktrees/
