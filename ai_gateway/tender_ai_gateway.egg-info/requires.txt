@@ -1,7 +1,0 @@
-fastapi<1.0,>=0.115
-pydantic-settings<3.0,>=2.4
-uvicorn[standard]<1.0,>=0.30
-
-[dev]
-httpx<1.0,>=0.27
-pytest<9.0,>=8.3
