@@ -143,6 +143,28 @@ services:
     ports:
       - "${AI_GATEWAY_PORT:-8100}:8100"
 
+  worker-io:
+    image: python:3.12-slim
+    container_name: tender-worker-io
+    profiles: ["app"]
+    working_dir: /workspace/backend
+    command:
+      [
+        "sh",
+        "-c",
+        "pip install -e '.[dev]' && celery -A tender_backend.workers.celery_app worker -Q io_tasks -l info",
+      ]
+    environment:
+      APP_ENV: local
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
+      CELERY_BROKER_URL: redis://redis:6379/0
+    volumes:
+      - ../backend:/workspace/backend
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+
   frontend:
     image: node:20-alpine
     container_name: tender-frontend

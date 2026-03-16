@@ -18,4 +18,7 @@ frontend/vite.config.d.ts
 .vscode/
 .omx/
 .worktrees/
-.worktrees/
+
+# Sample files (binary assets for dev/UAT only)
+docs/samples/**/*.pdf
+docs/samples/**/*.docx

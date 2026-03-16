@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     version: str = "0.1.0"
     default_primary_model: str = "deepseek-chat"
     default_fallback_model: str = "qwen-max"
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    qwen_api_key: str = ""
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    default_timeout: int = 60
+    default_retry_count: int = 2
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
