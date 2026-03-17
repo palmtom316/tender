@@ -1,22 +1,27 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listFiles, uploadFile, type ProjectFile } from "../lib/api";
+import { listFiles, uploadFile, type ProjectFile } from "../../lib/api";
+import { useNavigation } from "../../lib/NavigationContext";
 
-interface UploadPageProps {
-  projectId: string;
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function UploadPage({ projectId }: UploadPageProps) {
+export function UploadContent() {
+  const { projectId } = useNavigation();
   const queryClient = useQueryClient();
   const [dragging, setDragging] = useState(false);
 
   const { data: files = [], isLoading } = useQuery({
     queryKey: ["files", projectId],
-    queryFn: () => listFiles(projectId),
+    queryFn: () => listFiles(projectId!),
+    enabled: !!projectId,
   });
 
   const upload = useMutation({
-    mutationFn: (file: File) => uploadFile(projectId, file),
+    mutationFn: (file: File) => uploadFile(projectId!, file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["files", projectId] });
     },
@@ -39,19 +44,17 @@ export function UploadPage({ projectId }: UploadPageProps) {
     [handleFiles],
   );
 
+  if (!projectId) {
+    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+  }
+
   return (
-    <div className="page">
-      <div className="page-header">
-        <a href="/" className="back-link">&larr; 返回项目列表</a>
-        <h1>文件上传</h1>
-      </div>
+    <div>
+      <h1 className="section-heading">文件上传</h1>
 
       <div
         className={`drop-zone ${dragging ? "drop-zone--active" : ""}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => {
@@ -64,24 +67,22 @@ export function UploadPage({ projectId }: UploadPageProps) {
         }}
       >
         <p className="drop-zone-text">
-          {upload.isPending
-            ? "上传中..."
-            : "拖拽文件到此处，或点击选择文件"}
+          {upload.isPending ? "上传中..." : "拖拽文件到此处，或点击选择文件"}
         </p>
         <p className="drop-zone-hint">支持 PDF、DOC、DOCX 格式</p>
       </div>
 
       {upload.isError && (
-        <p className="error">上传失败: {(upload.error as Error).message}</p>
+        <p className="text-error">上传失败: {(upload.error as Error).message}</p>
       )}
 
-      <h2>已上传文件</h2>
+      <h2 className="section-heading" style={{ fontSize: "var(--text-lg)" }}>已上传文件</h2>
       {isLoading ? (
-        <p>加载中...</p>
+        <div className="spinner" />
       ) : files.length === 0 ? (
-        <p className="empty">暂无文件</p>
+        <p className="empty-state">暂无文件</p>
       ) : (
-        <table className="file-table">
+        <table className="data-table">
           <thead>
             <tr>
               <th>文件名</th>
@@ -104,10 +105,4 @@ export function UploadPage({ projectId }: UploadPageProps) {
       )}
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

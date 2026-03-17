@@ -1,0 +1,95 @@
+/* ── Forms ── */
+.clay-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--text-base);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.clay-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.clay-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.clay-textarea {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: 1.7;
+  color: var(--color-text);
+  outline: none;
+  resize: vertical;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.clay-textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+/* Drop zone */
+.drop-zone {
+  padding: var(--space-12) var(--space-6);
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+  margin-bottom: var(--space-8);
+}
+
+.drop-zone:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.drop-zone--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.drop-zone-text {
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+}
+
+.drop-zone-hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* Inline form row */
+.form-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* Label */
+.form-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+/* Form group */
+.form-group {
+  margin-bottom: var(--space-4);
+}

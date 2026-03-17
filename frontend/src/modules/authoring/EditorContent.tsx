@@ -1,45 +1,19 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchDrafts, updateDraft } from "../../lib/api";
+import { useNavigation } from "../../lib/NavigationContext";
+import { ClayButton } from "../../components/ui/ClayButton";
 
-interface ChapterEditorPageProps {
-  projectId: string;
-}
-
-interface Draft {
-  id: string;
-  chapter_code: string;
-  content_md: string;
-  updated_at: string;
-}
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
-const TOKEN = localStorage.getItem("tender_token") ?? "dev-token";
-const headers = { Authorization: `Bearer ${TOKEN}` };
-
-async function fetchDrafts(projectId: string): Promise<Draft[]> {
-  const res = await fetch(`${BASE_URL}/api/projects/${projectId}/drafts`, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-async function updateDraft(draftId: string, contentMd: string): Promise<Draft> {
-  const res = await fetch(`${BASE_URL}/api/drafts/${draftId}`, {
-    method: "PUT",
-    headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({ content_md: contentMd }),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-export function ChapterEditorPage({ projectId }: ChapterEditorPageProps) {
+export function EditorContent() {
+  const { projectId } = useNavigation();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
 
   const { data: drafts = [], isLoading } = useQuery({
     queryKey: ["drafts", projectId],
-    queryFn: () => fetchDrafts(projectId),
+    queryFn: () => fetchDrafts(projectId!),
+    enabled: !!projectId,
   });
 
   const save = useMutation({
@@ -50,24 +24,25 @@ export function ChapterEditorPage({ projectId }: ChapterEditorPageProps) {
     },
   });
 
+  if (!projectId) {
+    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+  }
+
   const selected = drafts.find((d) => d.id === selectedId);
 
-  const handleSelect = (draft: Draft) => {
+  const handleSelect = (draft: { id: string; content_md: string }) => {
     setSelectedId(draft.id);
     setEditContent(draft.content_md);
   };
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <a href={`/projects/${projectId}/requirements`} className="back-link">&larr; 返回</a>
-        <h1>章节编辑</h1>
-      </div>
+    <div>
+      <h1 className="section-heading">章节编辑</h1>
 
       <div className="editor-layout">
         <aside className="outline-panel">
           <h2>提纲</h2>
-          {isLoading && <p>加载中...</p>}
+          {isLoading && <div className="spinner" />}
           {drafts.map((d) => (
             <div
               key={d.id}
@@ -81,7 +56,7 @@ export function ChapterEditorPage({ projectId }: ChapterEditorPageProps) {
             </div>
           ))}
           {!isLoading && drafts.length === 0 && (
-            <p className="empty">暂无章节草稿</p>
+            <p className="empty-state">暂无章节草稿</p>
           )}
         </aside>
 
@@ -90,22 +65,22 @@ export function ChapterEditorPage({ projectId }: ChapterEditorPageProps) {
             <>
               <div className="editor-toolbar">
                 <h2>{selected.chapter_code}</h2>
-                <button
-                  className="btn-primary"
+                <ClayButton
                   onClick={() => save.mutate({ id: selected.id, content: editContent })}
                   disabled={save.isPending}
                 >
                   {save.isPending ? "保存中..." : "保存"}
-                </button>
+                </ClayButton>
               </div>
               <textarea
-                className="editor-textarea"
+                className="clay-textarea"
+                style={{ flex: 1, minHeight: 400 }}
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
               />
             </>
           ) : (
-            <p className="empty">请从左侧选择章节</p>
+            <p className="empty-state">请从左侧选择章节</p>
           )}
         </main>
       </div>

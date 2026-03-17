@@ -1,0 +1,86 @@
+/* ── Design Tokens ── */
+:root {
+  /* Brand palette */
+  --color-primary: #C4956A;
+  --color-primary-hover: #B07E55;
+  --color-primary-active: #9A6B44;
+  --color-primary-light: rgba(196, 149, 106, 0.12);
+
+  /* Surfaces */
+  --color-sidebar: #F0EDE8;
+  --color-sidebar-hover: #E8E4DE;
+  --color-sidebar-active: #DED8D0;
+  --color-workspace: #FAFAF8;
+  --color-surface: #FFFFFF;
+  --color-surface-raised: #FFFFFF;
+
+  /* Text */
+  --color-text: #3D3529;
+  --color-text-secondary: #8A7E70;
+  --color-text-muted: #B5AB9E;
+  --color-text-on-primary: #FFFFFF;
+
+  /* Borders */
+  --color-border: #E5E0D8;
+  --color-border-light: #F0EDE8;
+
+  /* Semantic */
+  --color-success: #5B8C5A;
+  --color-success-bg: #EDF5ED;
+  --color-warning: #C49A3C;
+  --color-warning-bg: #FBF5E6;
+  --color-danger: #C25B50;
+  --color-danger-bg: #FBEEED;
+  --color-info: #5B8CA5;
+  --color-info-bg: #EDF3F7;
+
+  /* Shadows – clay style */
+  --shadow-clay: 0 2px 8px rgba(61, 53, 41, 0.06);
+  --shadow-clay-raised: 0 4px 16px rgba(61, 53, 41, 0.08);
+  --shadow-clay-inset: inset 0 2px 4px rgba(61, 53, 41, 0.10);
+  --shadow-clay-button: 0 2px 6px rgba(61, 53, 41, 0.08), inset 0 -2px 4px rgba(61, 53, 41, 0.06);
+  --shadow-clay-button-pressed: inset 0 2px 6px rgba(61, 53, 41, 0.15);
+
+  /* Radius */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Typography */
+  --font-sans: "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-mono: "Menlo", "Monaco", "Noto Sans SC", monospace;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.35s ease;
+
+  /* Layout */
+  --sidebar-width: 220px;
+  --sidebar-collapsed: 56px;
+  --topbar-height: 36px;
+  --tab-height: 44px;
+  --copilot-width: 360px;
+}
