@@ -80,7 +80,7 @@ class BuildClauseTree(WorkflowStep):
         with _get_conn() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 sections = cur.execute(
-                    """SELECT id, section_code, title, level, body AS text,
+                    """SELECT id, section_code, title, level, text,
                               page_start, page_end
                        FROM document_section
                        WHERE document_id = %s
