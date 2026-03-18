@@ -104,21 +104,23 @@
 | 编号 | 来源 | 严重度 | 状态 |
 |---|---|---|---|
 | B-01 | 投标专家 | P0 | pending |
-| B-02 | 投标专家 | P1 | pending |
-| B-03 | 投标专家 | P1 | pending |
-| B-04 | 投标专家 | P2 | pending |
-| B-05 | 投标专家 | P2 | pending |
-| B-06 | 投标专家 | P2 | pending |
-| A-01 | AI专家 | P0 | pending |
-| A-02 | AI专家 | P0 | pending |
-| A-03 | AI专家 | P1 | pending |
-| A-04 | AI专家 | P1 | pending |
-| A-05 | AI专家 | P2 | pending |
-| C-01 | 架构师 | P0 | pending |
-| C-02 | 架构师 | P0 | pending |
-| C-03 | 架构师 | P1 | pending |
-| C-04 | 架构师 | P1 | pending |
-| C-05 | 架构师 | P1 | pending |
-| C-06 | 架构师 | P1 | pending |
-| C-07 | 架构师 | P2 | pending |
-| C-08 | 架构师 | P2 | pending |
+| B-02 | 投标专家 | P1 | resolved |
+| B-03 | 投标专家 | P1 | resolved |
+| B-04 | 投标专家 | P2 | resolved |
+| B-05 | 投标专家 | P2 | resolved |
+| B-06 | 投标专家 | P2 | resolved |
+| A-01 | AI专家 | P0 | resolved |
+| A-02 | AI专家 | P0 | resolved |
+| A-03 | AI专家 | P1 | resolved |
+| A-04 | AI专家 | P1 | resolved |
+| A-05 | AI专家 | P2 | resolved |
+| C-01 | 架构师 | P0 | resolved |
+| C-02 | 架构师 | P0 | resolved |
+| C-03 | 架构师 | P1 | resolved |
+| C-04 | 架构师 | P1 | resolved |
+| C-05 | 架构师 | P1 | resolved |
+| C-06 | 架构师 | P1 | resolved |
+| C-07 | 架构师 | P2 | resolved |
+| C-08 | 架构师 | P2 | resolved |
+
+> 状态更新记录：2026-03-16（对照 `docs/reports/2026-03-16-plan-progress-check.md`；当前唯一阻断项为 B-01 / D08 验收样本落实）。

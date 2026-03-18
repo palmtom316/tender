@@ -18,7 +18,10 @@ export function ReviewIssuesContent() {
 
   const { data: issues = [], isLoading } = useQuery({
     queryKey: ["review-issues", projectId],
-    queryFn: () => fetchReviewIssues(projectId!),
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchReviewIssues(projectId, { signal });
+    },
     enabled: !!projectId,
   });
 

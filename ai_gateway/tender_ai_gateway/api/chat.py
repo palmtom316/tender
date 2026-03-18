@@ -8,6 +8,12 @@ from tender_ai_gateway.token_tracker import tracker
 router = APIRouter(prefix="/ai", tags=["chat"])
 
 
+class ProviderOverride(BaseModel):
+    base_url: str
+    api_key: str
+    model: str
+
+
 class ChatRequest(BaseModel):
     task_type: str = Field(..., examples=["generate_section"])
     provider_hint: str | None = Field(default=None, examples=["deepseek"])
@@ -16,6 +22,8 @@ class ChatRequest(BaseModel):
     messages: list[dict[str, str]]
     temperature: float = 0.3
     max_tokens: int = 4096
+    primary_override: ProviderOverride | None = None
+    fallback_override: ProviderOverride | None = None
 
 
 class ChatResponse(BaseModel):
@@ -50,6 +58,8 @@ def chat(request: ChatRequest) -> ChatResponse:
             messages=request.messages,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
+            primary_override=request.primary_override,
+            fallback_override=request.fallback_override,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"All providers failed: {exc}")

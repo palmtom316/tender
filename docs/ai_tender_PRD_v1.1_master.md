@@ -304,29 +304,34 @@ docxtpl
 
 # 八、AI模型策略
 
-推荐模型：
+推荐模型策略（统一口径）：
 
 主模型：
+
+```
+DeepSeek
+```
+
+备模型：
 
 ```
 Qwen
 ```
 
-备选：
+可选扩展：
 
 ```
-DeepSeek
-GLM
+GLM（或其他 OpenAI-compatible / Claude-compatible providers；BYOK）
 ```
 
-任务分工：
+任务分工（主备一致，按任务 profile 固定；失败/超时自动 fallback）：
 
-|任务|模型|
-|---|---|
-结构化抽取|Qwen|
-长文档理解|Qwen|
-章节生成|Qwen / DeepSeek|
-审校|Qwen|
+|任务|主模型|备模型|
+|---|---|---|
+结构化抽取|DeepSeek|Qwen|
+长文档理解|DeepSeek|Qwen|
+章节生成|DeepSeek|Qwen|
+审校|DeepSeek|Qwen|
 
 ---
 
@@ -903,4 +908,3 @@ CREATE TABLE synonym_dictionary (
 - Word模板导出
 - 工程行业同义词增强检索
 - 表格人工纠错机制
-

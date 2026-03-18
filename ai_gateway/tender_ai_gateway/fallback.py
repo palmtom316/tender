@@ -35,25 +35,51 @@ class ProviderConfig:
     model: str
 
 
-def _get_providers(task_type: str) -> tuple[ProviderConfig, ProviderConfig]:
-    """Resolve primary and fallback provider configs for a task type."""
+def _get_providers(
+    task_type: str,
+    primary_override: Any | None = None,
+    fallback_override: Any | None = None,
+) -> tuple[ProviderConfig, ProviderConfig]:
+    """Resolve primary and fallback provider configs for a task type.
+
+    When override objects are provided (with base_url, api_key, model attrs),
+    they take precedence over env-var / profile defaults.
+    """
     settings = get_settings()
     profile = TASK_PROFILES.get(task_type, {})
     primary_model = profile.get("primary_model", settings.default_primary_model)
     fallback_model = profile.get("fallback_model", settings.default_fallback_model)
 
-    primary = ProviderConfig(
-        name="deepseek",
-        base_url=settings.deepseek_base_url,
-        api_key=settings.deepseek_api_key,
-        model=primary_model,
-    )
-    fallback = ProviderConfig(
-        name="qwen",
-        base_url=settings.qwen_base_url,
-        api_key=settings.qwen_api_key,
-        model=fallback_model,
-    )
+    if primary_override and primary_override.base_url and primary_override.api_key:
+        primary = ProviderConfig(
+            name="override-primary",
+            base_url=primary_override.base_url,
+            api_key=primary_override.api_key,
+            model=primary_override.model or primary_model,
+        )
+    else:
+        primary = ProviderConfig(
+            name="deepseek",
+            base_url=settings.deepseek_base_url,
+            api_key=settings.deepseek_api_key,
+            model=primary_model,
+        )
+
+    if fallback_override and fallback_override.base_url and fallback_override.api_key:
+        fallback = ProviderConfig(
+            name="override-fallback",
+            base_url=fallback_override.base_url,
+            api_key=fallback_override.api_key,
+            model=fallback_override.model or fallback_model,
+        )
+    else:
+        fallback = ProviderConfig(
+            name="qwen",
+            base_url=settings.qwen_base_url,
+            api_key=settings.qwen_api_key,
+            model=fallback_model,
+        )
+
     return primary, fallback
 
 
@@ -63,10 +89,12 @@ def call_with_fallback(
     messages: list[dict[str, str]],
     temperature: float = 0.3,
     max_tokens: int = 4096,
+    primary_override: Any | None = None,
+    fallback_override: Any | None = None,
 ) -> CompletionResult:
     """Call primary provider, fall back to secondary on failure."""
     settings = get_settings()
-    primary, fallback = _get_providers(task_type)
+    primary, fallback = _get_providers(task_type, primary_override, fallback_override)
 
     for attempt, provider in enumerate([primary, fallback]):
         if not provider.api_key:

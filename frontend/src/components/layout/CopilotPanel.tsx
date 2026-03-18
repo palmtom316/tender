@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Icon } from "../ui/Icon";
 
 interface Message {
@@ -12,6 +12,7 @@ export function CopilotPanel() {
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: "你好！我是 Tender AI 助手，有什么可以帮你的吗？" },
   ]);
+  const responseTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Keyboard shortcut: Ctrl+/
   useEffect(() => {
@@ -25,6 +26,11 @@ export function CopilotPanel() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // Cleanup pending response timeout on unmount
+  useEffect(() => {
+    return () => clearTimeout(responseTimeoutRef.current);
+  }, []);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text) return;
@@ -33,7 +39,7 @@ export function CopilotPanel() {
     setInput("");
 
     // Placeholder response
-    setTimeout(() => {
+    responseTimeoutRef.current = setTimeout(() => {
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "收到您的问题，AI 功能即将上线，敬请期待。" },

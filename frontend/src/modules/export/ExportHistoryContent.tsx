@@ -8,7 +8,10 @@ export function ExportHistoryContent() {
 
   const { data: exports = [], isLoading } = useQuery({
     queryKey: ["exports", projectId],
-    queryFn: () => fetchExports(projectId!),
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchExports(projectId, { signal });
+    },
     enabled: !!projectId,
   });
 

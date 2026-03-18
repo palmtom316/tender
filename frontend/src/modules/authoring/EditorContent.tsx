@@ -12,7 +12,10 @@ export function EditorContent() {
 
   const { data: drafts = [], isLoading } = useQuery({
     queryKey: ["drafts", projectId],
-    queryFn: () => fetchDrafts(projectId!),
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchDrafts(projectId, { signal });
+    },
     enabled: !!projectId,
   });
 

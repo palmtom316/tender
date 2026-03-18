@@ -14,7 +14,10 @@ export function ComplianceContent() {
 
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ["compliance-matrix", projectId],
-    queryFn: () => fetchComplianceMatrix(projectId!),
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchComplianceMatrix(projectId, { signal });
+    },
     enabled: !!projectId,
   });
 

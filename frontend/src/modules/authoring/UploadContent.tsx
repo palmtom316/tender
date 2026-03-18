@@ -16,12 +16,18 @@ export function UploadContent() {
 
   const { data: files = [], isLoading } = useQuery({
     queryKey: ["files", projectId],
-    queryFn: () => listFiles(projectId!),
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return listFiles(projectId, { signal });
+    },
     enabled: !!projectId,
   });
 
   const upload = useMutation({
-    mutationFn: (file: File) => uploadFile(projectId!, file),
+    mutationFn: (file: File) => {
+      if (!projectId) throw new Error("No project selected");
+      return uploadFile(projectId, file);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["files", projectId] });
     },

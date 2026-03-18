@@ -23,7 +23,10 @@ export function RequirementsContent() {
 
   const { data: requirements = [], isLoading } = useQuery({
     queryKey: ["requirements", projectId, filter],
-    queryFn: () => fetchRequirements(projectId!, filter || undefined),
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchRequirements(projectId, filter || undefined, { signal });
+    },
     enabled: !!projectId,
   });
 

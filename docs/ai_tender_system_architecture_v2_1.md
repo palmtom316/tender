@@ -3,7 +3,7 @@
 版本：System Architecture 2.1  
 范围：技术标编制系统  
 部署：局域网 Docker / Docker Compose  
-模型：BYOK 国产商业模型 API（Qwen / DeepSeek / GLM）
+模型：BYOK 国产商业模型 API（DeepSeek（主）/ Qwen（备）；可扩展 GLM 等）
 
 约束条件：
 - 不使用 Embedding
@@ -58,7 +58,7 @@ Workflow Engine / Tool Registry / AI Gateway
 | PostgreSQL | OpenSearch | MinIO | Redis      |
 -----------------------------------------------
   ↓
-外部模型 API（Qwen / DeepSeek / GLM）
+外部模型 API（DeepSeek / Qwen / 可选 GLM 等）
 ```
 
 ---
@@ -67,21 +67,22 @@ Workflow Engine / Tool Registry / AI Gateway
 
 ## 3.1 服务清单
 
-建议一期 Docker Compose 直接部署以下服务：
+建议一期 Docker Compose 直接部署以下服务（以仓库 `infra/docker-compose.yml` 为准）：
 
-- `nginx`
 - `frontend`
 - `backend`
-- `worker-workflow`
 - `worker-io`
-- `worker-gpu`（如 MinerU 需要 GPU）
 - `postgres`
 - `redis`
 - `opensearch`
 - `minio`
+- `opensearch-dashboards`（可选）
+- `minio-init`（初始化容器）
 - `ai-gateway`
 
 ## 3.2 Compose 示例
+
+> 注：以下为“架构示意”示例，可能包含可选项（如 `nginx`、`worker-workflow`、`worker-gpu`）。工程实现与可运行配置以仓库 `infra/docker-compose.yml` 为准。
 
 ```yaml
 version: "3.9"
@@ -114,7 +115,7 @@ services:
 
   worker-workflow:
     build: ./backend
-    command: celery -A app.workers.celery_app worker -Q workflow_tasks -l info
+    command: celery -A tender_backend.workers.celery_app worker -Q workflow_tasks -l info
     env_file:
       - .env
     depends_on:
@@ -124,7 +125,7 @@ services:
 
   worker-io:
     build: ./backend
-    command: celery -A app.workers.celery_app worker -Q io_tasks -l info
+    command: celery -A tender_backend.workers.celery_app worker -Q io_tasks -l info
     env_file:
       - .env
     depends_on:
@@ -135,7 +136,7 @@ services:
 
   worker-gpu:
     build: ./backend
-    command: celery -A app.workers.celery_app worker -Q gpu_tasks -l info
+    command: celery -A tender_backend.workers.celery_app worker -Q gpu_tasks -l info
     env_file:
       - .env
     depends_on:
@@ -210,104 +211,48 @@ volumes:
 
 ---
 
-# 四、后端代码结构（工程版）
+# 四、代码结构（以仓库为准）
 
 ```text
 backend/
-  app/
+  tender_backend/
     api/
-      project.py
-      document.py
-      workflow.py
-      section.py
-      review.py
-      export.py
     core/
-      config.py
-      logging.py
-      db.py
-      opensearch.py
-      redis.py
-      storage.py
-      security.py
-    ai/
-      gateway.py
-      providers/
-        qwen.py
-        deepseek.py
-        glm.py
-      prompts/
-        extract_project_facts.jinja2
-        extract_requirements.jinja2
-        generate_outline.jinja2
-        generate_section.jinja2
-        review_section.jinja2
-    workflows/
-      base.py
-      registry.py
-      states.py
-      tender_ingestion.py
-      standard_ingestion.py
-      generate_section.py
-      review_section.py
-      export_bid.py
-    tools/
-      base.py
-      registry.py
-      parse_document.py
-      extract_outline.py
-      extract_project_facts.py
-      extract_requirements.py
-      search_sections.py
-      search_clauses.py
-      search_company_docs.py
-      assemble_evidence_pack.py
-      check_fact_consistency.py
-      check_requirement_coverage.py
-      check_clause_usage.py
-      render_docx.py
-      convert_pdf.py
+    db/
+      alembic/
+      repositories/
     services/
-      parse_service.py
-      extract_service.py
-      search_service.py
-      write_service.py
-      review_service.py
-      export_service.py
-      workflow_service.py
-    repositories/
-      project_repo.py
-      file_repo.py
-      document_repo.py
-      requirement_repo.py
-      fact_repo.py
-      draft_repo.py
-      review_repo.py
-      workflow_repo.py
-      trace_repo.py
-    models/
-      project.py
-      document.py
-      requirement.py
-      fact.py
-      draft.py
-      workflow_run.py
-      task_trace.py
-    schemas/
-      project.py
-      document.py
-      tool.py
-      workflow.py
-      review.py
+    tools/
+    workflows/
     workers/
-      celery_app.py
-      tasks_parse.py
-      tasks_workflow.py
-      tasks_export.py
   tests/
-    unit/
+    smoke/
     integration/
     evals/
+
+ai_gateway/
+  tender_ai_gateway/
+    api/
+    core/
+    providers/
+    fallback.py
+    task_profiles.py
+    token_tracker.py
+  tests/
+
+frontend/
+  src/
+    pages/
+
+infra/
+  docker-compose.yml
+  opensearch/
+    synonyms.txt
+
+docs/
+  plans/
+  tracking/
+  samples/
 ```
 
 ---
@@ -771,6 +716,8 @@ CREATE TABLE skill_definition (
 
 # 七、OpenSearch 索引 mapping（一期生产建议）
 
+> 说明：生产建议启用中文分词插件（如 `analysis-ik`），并使用 `ik_max_word` tokenizer（避免 `standard` 的字符级切分）。
+
 ## 7.1 section_index
 
 ```json
@@ -785,7 +732,7 @@ CREATE TABLE skill_definition (
       },
       "analyzer": {
         "cn_with_synonym": {
-          "tokenizer": "standard",
+          "tokenizer": "ik_max_word",
           "filter": ["lowercase", "construction_synonym"]
         }
       }
@@ -831,7 +778,7 @@ CREATE TABLE skill_definition (
       },
       "analyzer": {
         "cn_with_synonym": {
-          "tokenizer": "standard",
+          "tokenizer": "ik_max_word",
           "filter": ["lowercase", "construction_synonym"]
         }
       }

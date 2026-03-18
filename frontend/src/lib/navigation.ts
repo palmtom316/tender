@@ -80,6 +80,7 @@ export const MODULE_CONFIG: ModuleConfig[] = [
     icon: "settings",
     tabs: [
       { id: "ai", label: "AI模型配置" },
+      { id: "users", label: "用户管理" },
       { id: "system", label: "系统设置" },
     ],
   },

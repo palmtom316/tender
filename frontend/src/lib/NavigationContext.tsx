@@ -4,6 +4,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 import { type ModuleId, MODULE_CONFIG } from "./navigation";
@@ -27,17 +28,22 @@ interface NavigationContextValue extends NavigationState {
 
 const NavigationContext = createContext<NavigationContextValue | null>(null);
 
+/** Type guard: validate a string is a known ModuleId. */
+function isModuleId(value: string): value is ModuleId {
+  return MODULE_CONFIG.some((m) => m.id === value);
+}
+
 /** Parse current URL into navigation state. */
 function parseUrl(): Partial<NavigationState> {
   const params = new URLSearchParams(window.location.search);
-  const module = params.get("m") as ModuleId | null;
+  const rawModule = params.get("m");
   const tab = params.get("t");
   const projectId = params.get("p");
   const documentId = params.get("d");
 
-  // Validate module
+  // Validate module with type guard (no unsafe `as` cast)
   const validModule =
-    module && MODULE_CONFIG.some((m) => m.id === module) ? module : "projects";
+    rawModule && isModuleId(rawModule) ? rawModule : "projects";
 
   // Validate tab against module
   const cfg = MODULE_CONFIG.find((m) => m.id === validModule);
@@ -52,8 +58,8 @@ function parseUrl(): Partial<NavigationState> {
   };
 }
 
-/** Build URL search string from state. */
-function buildUrl(state: NavigationState): string {
+/** Build URL search string from state (excludes transient UI state like sidebarCollapsed). */
+function buildUrl(state: Omit<NavigationState, "sidebarCollapsed">): string {
   const params = new URLSearchParams();
   params.set("m", state.module);
   params.set("t", state.tab);
@@ -69,21 +75,19 @@ export function NavigationProvider({ children }: { children: ReactNode }) {
   const [projectId, setProjectId] = useState<string | null>(initial.projectId ?? null);
   const [documentId, setDocumentId] = useState<string | null>(initial.documentId ?? null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const pushTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Sync state → URL
+  // Sync state → URL (debounced 150ms, excludes sidebarCollapsed)
   useEffect(() => {
-    const state: NavigationState = {
-      module,
-      tab,
-      projectId,
-      documentId,
-      sidebarCollapsed,
-    };
-    const url = buildUrl(state);
-    if (window.location.search !== url) {
-      window.history.pushState(null, "", url);
-    }
-  }, [module, tab, projectId, documentId, sidebarCollapsed]);
+    clearTimeout(pushTimeoutRef.current);
+    pushTimeoutRef.current = setTimeout(() => {
+      const url = buildUrl({ module, tab, projectId, documentId });
+      if (window.location.search !== url) {
+        window.history.pushState(null, "", url);
+      }
+    }, 150);
+    return () => clearTimeout(pushTimeoutRef.current);
+  }, [module, tab, projectId, documentId]);
 
   // Listen for browser back/forward
   useEffect(() => {

@@ -21,7 +21,10 @@ export function ExportGateContent() {
 
   const { data: gatesData, isLoading } = useQuery({
     queryKey: ["export-gates", projectId],
-    queryFn: () => fetchExportGates(projectId!),
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchExportGates(projectId, { signal });
+    },
     enabled: !!projectId,
   });
 
