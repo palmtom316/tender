@@ -7,5 +7,9 @@ TASK_PROFILES = {
         "primary_model": "deepseek-chat",
         "fallback_model": "qwen-max",
     },
+    "tag_clauses": {
+        "primary_model": "deepseek-chat",
+        "fallback_model": "qwen-plus",
+    },
 }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json as _json
 from uuid import UUID, uuid4
 
 from psycopg import Connection
@@ -9,6 +10,122 @@ from psycopg.rows import dict_row
 
 
 class StandardRepository:
+    # ── Read helpers ──
+
+    def get_standard(self, conn: Connection, standard_id: UUID) -> dict | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                "SELECT * FROM standard WHERE id = %s", (standard_id,)
+            ).fetchone()
+
+    def get_clause_count(self, conn: Connection, standard_id: UUID) -> int:
+        with conn.cursor() as cur:
+            row = cur.execute(
+                "SELECT count(*) FROM standard_clause WHERE standard_id = %s",
+                (standard_id,),
+            ).fetchone()
+            return row[0] if row else 0
+
+    def get_clause_tree(self, conn: Connection, standard_id: UUID) -> list[dict]:
+        """Fetch clauses and rebuild nested children tree in Python."""
+        flat = self.list_clauses(conn, standard_id=standard_id)
+        if not flat:
+            return []
+
+        # Index by id
+        by_id: dict[str, dict] = {}
+        for c in flat:
+            node = {
+                "id": str(c["id"]),
+                "clause_no": c.get("clause_no"),
+                "clause_title": c.get("clause_title"),
+                "clause_text": c.get("clause_text"),
+                "summary": c.get("summary"),
+                "tags": c.get("tags", []),
+                "clause_type": c.get("clause_type", "normative"),
+                "page_start": c.get("page_start"),
+                "page_end": c.get("page_end"),
+                "sort_order": c.get("sort_order"),
+                "parent_id": str(c["parent_id"]) if c.get("parent_id") else None,
+                "children": [],
+            }
+            by_id[str(c["id"])] = node
+
+        roots: list[dict] = []
+        for node in by_id.values():
+            pid = node["parent_id"]
+            if pid and pid in by_id:
+                by_id[pid]["children"].append(node)
+            else:
+                roots.append(node)
+
+        return roots
+
+    # ── Write helpers ──
+
+    def update_processing_status(
+        self,
+        conn: Connection,
+        standard_id: UUID,
+        status: str,
+        error_message: str | None = None,
+    ) -> None:
+        ts_col = (
+            "processing_started_at" if status == "processing"
+            else "processing_finished_at" if status in ("completed", "failed")
+            else None
+        )
+        if ts_col:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE standard SET processing_status = %s, error_message = %s, {ts_col} = now() WHERE id = %s",
+                    (status, error_message, standard_id),
+                )
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE standard SET processing_status = %s, error_message = %s WHERE id = %s",
+                    (status, error_message, standard_id),
+                )
+        conn.commit()
+
+    def bulk_create_clauses(self, conn: Connection, clauses: list[dict]) -> int:
+        """Bulk insert clause dicts. Returns count inserted."""
+        if not clauses:
+            return 0
+        with conn.cursor() as cur:
+            cur.executemany(
+                """INSERT INTO standard_clause
+                       (id, standard_id, parent_id, clause_no, clause_title,
+                        clause_text, summary, tags, page_start, page_end,
+                        sort_order, clause_type, commentary_clause_id)
+                   VALUES (%(id)s, %(standard_id)s, %(parent_id)s, %(clause_no)s,
+                           %(clause_title)s, %(clause_text)s, %(summary)s,
+                           %(tags)s, %(page_start)s, %(page_end)s,
+                           %(sort_order)s, %(clause_type)s, %(commentary_clause_id)s)""",
+                [
+                    {
+                        **c,
+                        "tags": _json.dumps(c.get("tags") or []),
+                        "commentary_clause_id": c.get("commentary_clause_id"),
+                    }
+                    for c in clauses
+                ],
+            )
+        conn.commit()
+        return len(clauses)
+
+    def delete_clauses(self, conn: Connection, standard_id: UUID) -> int:
+        """Delete all clauses for a standard (supports re-processing)."""
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM standard_clause WHERE standard_id = %s", (standard_id,)
+            )
+            count = cur.rowcount
+        conn.commit()
+        return count
+
+    # ── Original methods ──
     def create_standard(
         self,
         conn: Connection,

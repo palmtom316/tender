@@ -102,6 +102,33 @@ const icons: Record<string, () => ReactNode> = {
       <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
     </>
   ),
+  "chevron-right": () => <polyline points="9 18 15 12 9 6" />,
+  "chevron-down": () => <polyline points="6 9 12 15 18 9" />,
+  "upload-cloud": () => (
+    <>
+      <polyline points="16 16 12 12 8 16" />
+      <line x1="12" y1="12" x2="12" y2="21" />
+      <path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3" />
+    </>
+  ),
+  book: () => (
+    <>
+      <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
+    </>
+  ),
+  refresh: () => (
+    <>
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+    </>
+  ),
+  "arrow-left": () => (
+    <>
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </>
+  ),
 };
 
 export function Icon({ name, size = 20, className }: IconProps) {

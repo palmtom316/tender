@@ -435,3 +435,112 @@ export function updateUser(userId: string, data: UserUpdateData): Promise<System
 export function deleteUser(userId: string): Promise<void> {
   return request<void>(`/users/${userId}`, { method: "DELETE" });
 }
+
+// ── Standards ──
+
+export interface Standard {
+  id: string;
+  standard_code: string;
+  standard_name: string;
+  version_year: string | null;
+  specialty: string | null;
+  status: string | null;
+  processing_status: string;
+  clause_count: number;
+  created_at: string | null;
+}
+
+export interface StandardDetail extends Standard {
+  error_message: string | null;
+  processing_started_at: string | null;
+  processing_finished_at: string | null;
+  clause_tree: StandardClauseNode[];
+}
+
+export interface StandardClause {
+  id: string;
+  clause_no: string | null;
+  clause_title: string | null;
+  clause_text: string | null;
+  summary: string | null;
+  tags: string[];
+  clause_type: string;
+  page_start: number | null;
+  page_end: number | null;
+  sort_order: number | null;
+  parent_id: string | null;
+}
+
+export interface StandardClauseNode extends StandardClause {
+  children: StandardClauseNode[];
+}
+
+export interface StandardProcessingStatus {
+  standard_id: string;
+  processing_status: string;
+  error_message: string | null;
+  clause_count: number;
+  processing_started_at: string | null;
+  processing_finished_at: string | null;
+}
+
+export function uploadStandard(
+  file: File,
+  data: {
+    standard_code: string;
+    standard_name: string;
+    version_year?: string;
+    specialty?: string;
+  },
+): Promise<{ id: string; standard_code: string; standard_name: string; document_id: string; processing_status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("standard_code", data.standard_code);
+  form.append("standard_name", data.standard_name);
+  if (data.version_year) form.append("version_year", data.version_year);
+  if (data.specialty) form.append("specialty", data.specialty);
+  return request("/standards/upload", { method: "POST", body: form });
+}
+
+export function listStandards(options?: {
+  signal?: AbortSignal;
+}): Promise<Standard[]> {
+  return request<Standard[]>("/standards", { signal: options?.signal });
+}
+
+export function fetchStandardDetail(
+  standardId: string,
+  options?: { signal?: AbortSignal },
+): Promise<StandardDetail> {
+  return request<StandardDetail>(`/standards/${standardId}`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchStandardClauses(
+  standardId: string,
+  clauseType?: string,
+  options?: { signal?: AbortSignal },
+): Promise<StandardClause[]> {
+  const params = clauseType ? `?clause_type=${clauseType}` : "";
+  return request<StandardClause[]>(
+    `/standards/${standardId}/clauses${params}`,
+    { signal: options?.signal },
+  );
+}
+
+export function triggerStandardProcessing(
+  standardId: string,
+): Promise<{ standard_id: string; celery_task_id: string; processing_status: string }> {
+  return request(`/standards/${standardId}/process`, { method: "POST" });
+}
+
+export function fetchStandardStatus(
+  standardId: string,
+  options?: { signal?: AbortSignal },
+): Promise<StandardProcessingStatus> {
+  return request<StandardProcessingStatus>(
+    `/standards/${standardId}/status`,
+    { signal: options?.signal },
+  );
+}

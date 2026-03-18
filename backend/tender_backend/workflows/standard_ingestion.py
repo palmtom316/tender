@@ -5,8 +5,18 @@ Steps: parse_standard_pdf → build_clause_tree → tag_clauses → index_to_ope
 
 from __future__ import annotations
 
-import structlog
+from uuid import UUID
 
+import structlog
+from psycopg.rows import dict_row
+
+from tender_backend.db.pool import get_pool
+from tender_backend.core.config import get_settings
+from tender_backend.db.repositories.standard_repo import StandardRepository
+from tender_backend.services.norm_service.layout_compressor import compress_sections
+from tender_backend.services.norm_service.prompt_builder import build_prompt
+from tender_backend.services.norm_service.scope_splitter import split_into_scopes
+from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.workflows.base import (
     BaseWorkflow,
     StepResult,
@@ -18,43 +28,143 @@ from tender_backend.workflows.states import StepState
 
 logger = structlog.stdlib.get_logger(__name__)
 
+_std_repo = StandardRepository()
+
+
+def _get_conn():
+    settings = get_settings()
+    pool = get_pool(database_url=settings.database_url)
+    return pool.connection()
+
 
 class ParseStandardPdf(WorkflowStep):
     name = "parse_standard_pdf"
 
     async def execute(self, ctx: WorkflowContext) -> StepResult:
-        """Parse the standard PDF using MinerU (reuse existing parse service)."""
-        # Expects ctx.data["document_id"] to be set
+        """Check that document sections are available after MinerU parsing."""
         document_id = ctx.data.get("document_id")
         if not document_id:
             return StepResult(state=StepState.FAILED, message="No document_id in context")
-        # Parsing is handled by tender_ingestion workflow or direct call
-        # This step checks that sections are available
-        return StepResult(state=StepState.COMPLETED, message=f"Standard PDF parsed for doc {document_id}")
+
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                row = cur.execute(
+                    "SELECT count(*) FROM document_section WHERE document_id = %s",
+                    (document_id,),
+                ).fetchone()
+                count = row[0] if row else 0
+
+        if count == 0:
+            return StepResult(
+                state=StepState.FAILED,
+                message=f"No sections found for document {document_id}. Run MinerU parse first.",
+            )
+
+        ctx.data["section_count"] = count
+        return StepResult(
+            state=StepState.COMPLETED,
+            message=f"Standard PDF parsed: {count} sections for doc {document_id}",
+        )
 
 
 class BuildClauseTree(WorkflowStep):
     name = "build_clause_tree"
 
     async def execute(self, ctx: WorkflowContext) -> StepResult:
-        """Build the clause tree from parsed sections and persist to standard_clause."""
-        # In production, reads from document_section and creates standard_clause entries
+        """Compress sections → split scopes → store in context for AI processing."""
         standard_id = ctx.data.get("standard_id")
+        document_id = ctx.data.get("document_id")
         if not standard_id:
             return StepResult(state=StepState.FAILED, message="No standard_id in context")
-        clauses = ctx.data.get("parsed_sections", [])
-        ctx.data["clause_count"] = len(clauses)
-        return StepResult(state=StepState.COMPLETED, message=f"Built clause tree with {len(clauses)} clauses")
+
+        with _get_conn() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                sections = cur.execute(
+                    """SELECT id, section_code, title, level, body AS text,
+                              page_start, page_end
+                       FROM document_section
+                       WHERE document_id = %s
+                       ORDER BY page_start, level, section_code""",
+                    (document_id,),
+                ).fetchall()
+
+        windows = compress_sections(sections)
+        scopes = split_into_scopes(windows)
+
+        ctx.data["scopes"] = [
+            {
+                "scope_type": s.scope_type,
+                "chapter_label": s.chapter_label,
+                "text": s.text,
+                "page_start": s.page_start,
+                "page_end": s.page_end,
+            }
+            for s in scopes
+        ]
+        ctx.data["clause_count"] = 0  # Will be updated after AI processing
+
+        return StepResult(
+            state=StepState.COMPLETED,
+            message=f"Built {len(scopes)} scopes from {len(sections)} sections",
+        )
 
 
 class TagClauses(WorkflowStep):
     name = "tag_clauses"
 
     async def execute(self, ctx: WorkflowContext) -> StepResult:
-        """Tag clauses with specialty and topic tags using AI."""
-        clause_count = ctx.data.get("clause_count", 0)
-        # In production, calls AI Gateway to auto-tag each clause
-        return StepResult(state=StepState.COMPLETED, message=f"Tagged {clause_count} clauses")
+        """Process each scope through AI Gateway to extract and tag clauses."""
+        import json
+        import time
+
+        from tender_backend.services.norm_service.norm_processor import _call_ai_gateway, _parse_llm_json
+        from tender_backend.services.norm_service.scope_splitter import ProcessingScope
+
+        standard_id = ctx.data.get("standard_id")
+        scopes_data = ctx.data.get("scopes", [])
+        if not scopes_data:
+            return StepResult(state=StepState.COMPLETED, message="No scopes to process")
+
+        all_entries: list[dict] = []
+        with _get_conn() as conn:
+            for i, sd in enumerate(scopes_data):
+                scope = ProcessingScope(
+                    scope_type=sd["scope_type"],
+                    chapter_label=sd["chapter_label"],
+                    text=sd["text"],
+                    page_start=sd["page_start"],
+                    page_end=sd["page_end"],
+                )
+                prompt = build_prompt(scope)
+                raw = _call_ai_gateway(conn, prompt, scope.chapter_label)
+                entries = _parse_llm_json(raw)
+
+                for entry in entries:
+                    entry["clause_type"] = scope.scope_type
+                    if entry.get("page_start") is None:
+                        entry["page_start"] = scope.page_start
+
+                all_entries.extend(entries)
+                if i < len(scopes_data) - 1:
+                    time.sleep(2)
+
+        # Build tree and persist
+        clauses = build_tree(all_entries, UUID(standard_id))
+        clauses = link_commentary(clauses)
+        validate_tree(clauses)
+
+        with _get_conn() as conn:
+            _std_repo.delete_clauses(conn, UUID(standard_id))
+            inserted = _std_repo.bulk_create_clauses(conn, clauses)
+            _std_repo.update_processing_status(conn, UUID(standard_id), "completed")
+
+        ctx.data["clause_count"] = inserted
+        ctx.data["clauses_to_index"] = clauses
+
+        return StepResult(
+            state=StepState.COMPLETED,
+            message=f"Extracted and tagged {inserted} clauses from {len(scopes_data)} scopes",
+        )
 
 
 class IndexToOpenSearch(WorkflowStep):
