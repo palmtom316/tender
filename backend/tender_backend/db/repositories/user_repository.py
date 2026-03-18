@@ -62,14 +62,14 @@ class UserRepository:
     def list_all(self, conn: Connection) -> list[SystemUser]:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(
-                f"SELECT {_USER_COLUMNS} FROM system_user ORDER BY created_at"
+                f"SELECT {_USER_COLUMNS} FROM app_user ORDER BY created_at"
             ).fetchall()
         return [_row_to_user(r) for r in rows]
 
     def get_by_id(self, conn: Connection, user_id: UUID) -> SystemUser | None:
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
-                f"SELECT {_USER_COLUMNS} FROM system_user WHERE id = %s",
+                f"SELECT {_USER_COLUMNS} FROM app_user WHERE id = %s",
                 (user_id,),
             ).fetchone()
         return _row_to_user(row) if row else None
@@ -78,7 +78,7 @@ class UserRepository:
         """Return (user, password_hash) for login validation."""
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
-                f"SELECT {_USER_COLUMNS}, password_hash FROM system_user WHERE username = %s",
+                f"SELECT {_USER_COLUMNS}, password_hash FROM app_user WHERE username = %s",
                 (username,),
             ).fetchone()
         if not row:
@@ -90,7 +90,7 @@ class UserRepository:
         pw_hash = hash_password(password)
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
-                f"INSERT INTO system_user (id, username, password_hash, display_name, role) "
+                f"INSERT INTO app_user (id, username, password_hash, display_name, role) "
                 f"VALUES (%s, %s, %s, %s, %s) RETURNING {_USER_COLUMNS}",
                 (user_id, username, pw_hash, display_name, role),
             ).fetchone()
@@ -121,7 +121,7 @@ class UserRepository:
 
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
-                f"UPDATE system_user SET {', '.join(sets)} WHERE id = %s RETURNING {_USER_COLUMNS}",
+                f"UPDATE app_user SET {', '.join(sets)} WHERE id = %s RETURNING {_USER_COLUMNS}",
                 values,
             ).fetchone()
         conn.commit()
@@ -129,7 +129,7 @@ class UserRepository:
 
     def delete(self, conn: Connection, user_id: UUID) -> bool:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM system_user WHERE id = %s", (user_id,))
+            cur.execute("DELETE FROM app_user WHERE id = %s", (user_id,))
             deleted = cur.rowcount > 0
         conn.commit()
         return deleted
@@ -154,7 +154,7 @@ class SessionRepository:
             row = cur.execute(
                 "SELECT u.id, u.username, u.display_name, u.role, u.enabled, "
                 "u.created_at, u.updated_at "
-                "FROM user_session s JOIN system_user u ON s.user_id = u.id "
+                "FROM user_session s JOIN app_user u ON s.user_id = u.id "
                 "WHERE s.token = %s AND s.expires_at > now() AND u.enabled = TRUE",
                 (token,),
             ).fetchone()

@@ -27,7 +27,7 @@ def _hash_password(password: str) -> str:
 
 def upgrade() -> None:
     op.execute("""
-    CREATE TABLE IF NOT EXISTS system_user (
+    CREATE TABLE IF NOT EXISTS app_user (
       id UUID PRIMARY KEY,
       username VARCHAR(50) NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
@@ -42,7 +42,7 @@ def upgrade() -> None:
     op.execute("""
     CREATE TABLE IF NOT EXISTS user_session (
       token VARCHAR(64) PRIMARY KEY,
-      user_id UUID NOT NULL REFERENCES system_user(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '7 days'
     );
@@ -55,7 +55,7 @@ def upgrade() -> None:
 
     op.execute(
         f"""
-    INSERT INTO system_user (id, username, password_hash, display_name, role)
+    INSERT INTO app_user (id, username, password_hash, display_name, role)
     VALUES
       (gen_random_uuid(), 'admin',    '{admin_hash}',    '管理员',  'admin'),
       (gen_random_uuid(), 'editor',   '{editor_hash}',   '编辑员',  'editor'),
@@ -67,4 +67,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS user_session;")
-    op.execute("DROP TABLE IF EXISTS system_user;")
+    op.execute("DROP TABLE IF EXISTS app_user;")
