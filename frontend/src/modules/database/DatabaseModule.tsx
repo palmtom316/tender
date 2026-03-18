@@ -403,6 +403,8 @@ function StandardsContent() {
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [processError, setProcessError] = useState("");
+  const [processingId, setProcessingId] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStandards = useCallback(() => {
@@ -439,9 +441,6 @@ function StandardsContent() {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [standards, loadStandards, processingId]);
-
-  const [processError, setProcessError] = useState("");
-  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const handleProcess = async (id: string) => {
     setProcessError("");

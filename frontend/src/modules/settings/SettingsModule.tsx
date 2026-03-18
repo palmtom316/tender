@@ -7,6 +7,7 @@ import { Icon } from "../../components/ui/Icon";
 import {
   fetchAgentConfigs,
   updateAgentConfig,
+  testAgentConnection,
   fetchUsers,
   createUser,
   updateUser,
@@ -261,7 +262,7 @@ function UserForm({ user, onSaved, onCancel }: UserFormProps) {
 }
 
 // ══════════════════════════════════════════════
-// AI Agent Settings
+// AI Agent Settings — compact, single-page layout
 // ══════════════════════════════════════════════
 
 function AISettings() {
@@ -299,16 +300,14 @@ function AISettings() {
   return (
     <div>
       <h1 className="section-heading">AI Agent 配置</h1>
-      {loading && (
-        <p style={{ color: "var(--color-text-muted)" }}>加载中...</p>
-      )}
+      {loading && <p style={{ color: "var(--color-text-muted)" }}>加载中...</p>}
       {error && (
         <Card>
           <p style={{ color: "var(--color-danger)" }}>加载失败: {error}</p>
           <ClayButton onClick={() => loadConfigs()}>重试</ClayButton>
         </Card>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
+      <div className="agent-config-grid">
         {configs.map((config) => (
           <AgentConfigCard
             key={config.agent_key}
@@ -334,6 +333,7 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
   const [fallbackApiKey, setFallbackApiKey] = useState("");
   const [fallbackModel, setFallbackModel] = useState(config.fallback_model);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   useEffect(() => {
@@ -376,74 +376,108 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
     }
   };
 
+  const handleTest = async () => {
+    setTesting(true);
+    setFeedback(null);
+    try {
+      const result = await testAgentConnection(config.agent_key);
+      setFeedback({
+        type: result.success ? "success" : "error",
+        msg: result.message,
+      });
+    } catch (e) {
+      setFeedback({ type: "error", msg: (e as Error).message });
+    } finally {
+      setTesting(false);
+      setTimeout(() => setFeedback(null), 5000);
+    }
+  };
+
   const isOcr = config.agent_type === "ocr";
 
   return (
-    <Card style={{ maxWidth: 680 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-4)" }}>
-        <strong style={{ fontSize: "var(--text-lg)" }}>{config.display_name}</strong>
+    <Card>
+      {/* Header */}
+      <div className="flex items-center gap-2" style={{ marginBottom: "var(--space-3)" }}>
+        <strong>{config.display_name}</strong>
         <Badge variant={isOcr ? "warning" : "info"}>
           {isOcr ? "OCR" : "LLM"}
         </Badge>
       </div>
       {config.description && (
-        <p style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)", marginBottom: "var(--space-4)" }}>
+        <p style={{ color: "var(--color-text-muted)", fontSize: "var(--text-xs)", marginBottom: "var(--space-3)", lineHeight: 1.3 }}>
           {config.description}
         </p>
       )}
 
-      <div className="form-group">
-        <label className="form-label">Base URL</label>
-        <input className="clay-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
-      </div>
-      <div className="form-group">
-        <label className="form-label">API Key</label>
-        <input className="clay-input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={config.api_key_display || "sk-..."} />
-      </div>
-
-      {!isOcr && (
-        <>
-          <div className="form-group">
+      {/* Primary config — 2 column layout */}
+      <div className="agent-form-grid">
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Base URL</label>
+          <input className="clay-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" style={{ fontSize: "var(--text-sm)" }} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">API Key</label>
+          <input className="clay-input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={config.api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
+        </div>
+        {!isOcr && (
+          <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">主模型</label>
-            <select className="clay-input" value={primaryModel} onChange={(e) => setPrimaryModel(e.target.value)}>
-              <option value="">-- 选择模型 --</option>
+            <select className="clay-input" value={primaryModel} onChange={(e) => setPrimaryModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
+              <option value="">-- 选择 --</option>
               {MODEL_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
+        )}
+      </div>
 
-          <div style={{ borderTop: "1px solid var(--color-border)", marginTop: "var(--space-4)", paddingTop: "var(--space-4)" }}>
-            <p style={{ fontWeight: 600, fontSize: "var(--text-sm)", marginBottom: "var(--space-3)", color: "var(--color-text-muted)" }}>
-              备选模型 (Fallback)
-            </p>
-            <div className="form-group">
-              <label className="form-label">Fallback Base URL</label>
-              <input className="clay-input" value={fallbackBaseUrl} onChange={(e) => setFallbackBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
+      {/* Fallback config — collapsible for LLM agents */}
+      {!isOcr && (
+        <details style={{ marginTop: "var(--space-2)" }}>
+          <summary style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", cursor: "pointer", userSelect: "none" }}>
+            备选模型 (Fallback)
+          </summary>
+          <div className="agent-form-grid" style={{ marginTop: "var(--space-2)" }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Fallback URL</label>
+              <input className="clay-input" value={fallbackBaseUrl} onChange={(e) => setFallbackBaseUrl(e.target.value)} placeholder="https://..." style={{ fontSize: "var(--text-sm)" }} />
             </div>
-            <div className="form-group">
-              <label className="form-label">Fallback API Key</label>
-              <input className="clay-input" type="password" value={fallbackApiKey} onChange={(e) => setFallbackApiKey(e.target.value)} placeholder={config.fallback_api_key_display || "sk-..."} />
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Fallback Key</label>
+              <input className="clay-input" type="password" value={fallbackApiKey} onChange={(e) => setFallbackApiKey(e.target.value)} placeholder={config.fallback_api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
             </div>
-            <div className="form-group">
+            <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">备选模型</label>
-              <select className="clay-input" value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)}>
-                <option value="">-- 选择模型 --</option>
+              <select className="clay-input" value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
+                <option value="">-- 选择 --</option>
                 {MODEL_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
             </div>
           </div>
-        </>
+        </details>
       )}
 
-      <div className="flex items-center gap-3" style={{ marginTop: "var(--space-4)" }}>
-        <ClayButton onClick={handleSave} disabled={saving}>
-          {saving ? "保存中..." : "保存配置"}
+      {/* Actions + feedback */}
+      <div className="flex items-center gap-2" style={{ marginTop: "var(--space-3)" }}>
+        <ClayButton onClick={handleSave} disabled={saving} size="sm">
+          {saving ? "..." : "保存"}
+        </ClayButton>
+        <ClayButton onClick={handleTest} disabled={testing} size="sm" variant="secondary">
+          {testing ? "测试中..." : "测试连接"}
         </ClayButton>
         {feedback && (
-          <span style={{ color: feedback.type === "success" ? "var(--color-success)" : "var(--color-danger)", fontSize: "var(--text-sm)" }}>
+          <span style={{
+            color: feedback.type === "success" ? "var(--color-success)" : "var(--color-danger)",
+            fontSize: "var(--text-xs)",
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}>
             {feedback.msg}
           </span>
         )}

@@ -341,6 +341,12 @@ export function updateAgentConfig(
   });
 }
 
+export function testAgentConnection(
+  agentKey: string,
+): Promise<{ success: boolean; message: string }> {
+  return request(`/settings/agents/${agentKey}/test`, { method: "POST" });
+}
+
 // ── Auth ──
 
 export interface LoginResponse {
