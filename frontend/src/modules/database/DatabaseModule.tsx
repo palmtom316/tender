@@ -200,6 +200,14 @@ function StandardCard({
         {std.specialty && <span>{std.specialty}</span>}
         <span>{std.clause_count} 条款</span>
       </div>
+      {(std.processing_status === "processing" || std.processing_status === "parsing") && (
+        <div className="flex items-center gap-2" style={{ marginTop: "var(--space-3)" }}>
+          <div className="spinner spinner--sm" />
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
+            AI处理中...
+          </span>
+        </div>
+      )}
       {std.processing_status === "pending" && (
         <div style={{ marginTop: "var(--space-3)" }}>
           <ClayButton
@@ -412,21 +420,39 @@ function StandardsContent() {
   useEffect(() => {
     const hasProcessing = standards.some(
       (s) => s.processing_status === "processing" || s.processing_status === "parsing",
-    );
+    ) || processingId !== null;
     if (hasProcessing) {
-      pollingRef.current = setInterval(loadStandards, 5000);
+      pollingRef.current = setInterval(() => {
+        listStandards().then((data) => {
+          setStandards(data);
+          // Stop tracking processingId once it's no longer processing
+          if (processingId) {
+            const target = data.find((s) => s.id === processingId);
+            if (target && target.processing_status !== "processing" && target.processing_status !== "parsing") {
+              setProcessingId(null);
+            }
+          }
+        }).catch(() => {});
+      }, 5000);
     }
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [standards, loadStandards]);
+  }, [standards, loadStandards, processingId]);
+
+  const [processError, setProcessError] = useState("");
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const handleProcess = async (id: string) => {
+    setProcessError("");
+    setProcessingId(id);
     try {
       await triggerStandardProcessing(id);
+      // Immediately refresh to show "processing" status and start polling
       loadStandards();
-    } catch {
-      // Error handled silently; user sees status badge change
+    } catch (err: unknown) {
+      setProcessError(err instanceof Error ? err.message : "处理请求失败");
+      setProcessingId(null);
     }
   };
 
@@ -449,6 +475,12 @@ function StandardsContent() {
       <h2 className="section-heading" style={{ marginTop: "var(--space-6)" }}>
         <Icon name="book" size={20} /> 规范列表
       </h2>
+
+      {processError && (
+        <div className="warning-banner" style={{ marginTop: "var(--space-3)" }}>
+          {processError}
+        </div>
+      )}
 
       {loading ? (
         <div className="empty-state">

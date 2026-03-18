@@ -171,7 +171,17 @@ def trigger_processing(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
 ) -> dict:
-    """Trigger AI processing for a standard (enqueues Celery task)."""
+    """Trigger AI processing for a standard.
+
+    Tries Celery first; falls back to in-process background thread
+    when the broker is unreachable (e.g. no Celery worker running).
+    """
+    import threading
+
+    import structlog
+
+    logger = structlog.stdlib.get_logger(__name__)
+
     std = _repo.get_standard(conn, standard_id)
     if not std:
         raise HTTPException(status_code=404, detail="Standard not found")
@@ -182,20 +192,43 @@ def trigger_processing(
     if not std.get("document_id"):
         raise HTTPException(status_code=400, detail="No document linked to standard")
 
-    # Reset status to pending before queueing
-    _repo.update_processing_status(conn, standard_id, "pending")
+    # Mark as processing immediately so the frontend sees the change
+    _repo.update_processing_status(conn, standard_id, "processing")
 
-    from tender_backend.workers.tasks_parse import run_standard_processing
+    document_id = str(std["document_id"])
+    sid = str(standard_id)
 
-    task = run_standard_processing.delay(
-        standard_id=str(standard_id),
-        document_id=str(std["document_id"]),
-    )
+    def _run_in_thread() -> None:
+        from tender_backend.core.config import get_settings
+        from tender_backend.db.pool import get_pool
+        from tender_backend.services.norm_service.norm_processor import process_standard
+
+        try:
+            settings = get_settings()
+            pool = get_pool(database_url=settings.database_url)
+            with pool.connection() as bg_conn:
+                process_standard(bg_conn, UUID(sid), document_id)
+        except Exception:
+            logger.exception("background_processing_failed", standard_id=sid)
+            # Ensure status is set to failed even if process_standard didn't
+            try:
+                settings = get_settings()
+                pool = get_pool(database_url=settings.database_url)
+                with pool.connection() as bg_conn:
+                    _repo.update_processing_status(
+                        bg_conn, UUID(sid), "failed",
+                        error_message="Background processing crashed",
+                    )
+            except Exception:
+                logger.exception("failed_to_set_error_status", standard_id=sid)
+
+    thread = threading.Thread(target=_run_in_thread, daemon=True)
+    thread.start()
+    logger.info("processing_thread_started", standard_id=sid, document_id=document_id)
 
     return {
-        "standard_id": str(standard_id),
-        "celery_task_id": task.id,
-        "processing_status": "pending",
+        "standard_id": sid,
+        "processing_status": "processing",
     }
 
 
