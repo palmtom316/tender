@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -21,6 +22,9 @@ _docs = DocumentRepository()
 # Sentinel project ID for standard uploads
 _STANDARD_PROJECT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
+# Local directory for standard PDF storage (inside container volume)
+_UPLOAD_DIR = os.environ.get("STANDARD_UPLOAD_DIR", "/workspace/data/standards")
+
 
 @router.post("/standards/upload")
 async def upload_standard(
@@ -32,14 +36,21 @@ async def upload_standard(
     conn: Connection = Depends(get_db_conn),
 ) -> dict:
     """Upload a standard PDF and create standard + file + document records."""
-    # Save file metadata
-    file.file.seek(0, 2)
-    size_bytes = int(file.file.tell())
-    file.file.seek(0)
+    # Read file content
+    content = await file.read()
+    size_bytes = len(content)
 
     file_id = uuid4()
-    storage_key = f"tender-raw/standards/{file_id}/{file.filename or 'unnamed'}"
+    filename = file.filename or "unnamed.pdf"
     content_type = file.content_type or "application/pdf"
+
+    # Persist PDF to local filesystem
+    os.makedirs(_UPLOAD_DIR, exist_ok=True)
+    local_path = os.path.join(_UPLOAD_DIR, f"{file_id}.pdf")
+    with open(local_path, "wb") as f:
+        f.write(content)
+
+    storage_key = local_path
 
     try:
         file_rec = _files.create(

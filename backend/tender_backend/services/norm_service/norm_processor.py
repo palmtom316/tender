@@ -1,4 +1,4 @@
-"""Orchestrator: compress → split → per-scope AI → merge → validate → persist + index.
+"""Orchestrator: MinerU parse → compress → split → per-scope AI → merge → validate → persist + index.
 
 This is the core processing pipeline for standard PDFs.
 """
@@ -31,6 +31,180 @@ AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "http://localhost:8001")
 _std_repo = StandardRepository()
 _agent_repo = AgentConfigRepository()
 
+
+# ── MinerU OCR integration ──
+
+def _get_pdf_path(conn: Connection, document_id: str) -> str | None:
+    """Look up the local file path for a document's source PDF."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """SELECT pf.storage_key
+               FROM document d
+               JOIN project_file pf ON pf.id = d.project_file_id
+               WHERE d.id = %s""",
+            (document_id,),
+        ).fetchone()
+    return row["storage_key"] if row else None
+
+
+def _parse_via_mineru(conn: Connection, document_id: str) -> int:
+    """Submit PDF to MinerU OCR, poll for result, persist sections.
+
+    Returns the number of sections persisted.
+    """
+    from tender_backend.services.parse_service.parser import persist_sections
+
+    config = _agent_repo.get_by_key(conn, "parse")
+    if not config or not config.enabled or not config.api_key:
+        raise RuntimeError("MinerU (parse) agent not configured or disabled. "
+                           "Please configure OCR credentials in Settings.")
+
+    pdf_path = _get_pdf_path(conn, document_id)
+    if not pdf_path or not os.path.isfile(pdf_path):
+        raise FileNotFoundError(
+            f"PDF file not found at {pdf_path}. Please re-upload the standard."
+        )
+
+    base_url = (config.base_url or "").rstrip("/")
+    headers = {"Authorization": f"Bearer {config.api_key}"}
+
+    # Step 1: Submit PDF to MinerU
+    logger.info("mineru_submitting", document_id=document_id, url=base_url)
+
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    import base64
+    payload = {
+        "file": base64.b64encode(pdf_bytes).decode(),
+        "filename": os.path.basename(pdf_path),
+        "is_ocr": True,
+        "enable_table": True,
+        "language": "ch",
+    }
+    resp = httpx.post(base_url, json=payload, headers=headers, timeout=60.0)
+    resp.raise_for_status()
+    task_data = resp.json()
+
+    # Extract task ID from response
+    task_id = (
+        task_data.get("data", {}).get("task_id")
+        or task_data.get("task_id")
+        or task_data.get("id")
+    )
+    if not task_id:
+        # Some MinerU APIs return the task ID directly
+        logger.warning("mineru_response_format", data=task_data)
+        raise RuntimeError(f"MinerU did not return a task_id: {task_data}")
+
+    logger.info("mineru_task_submitted", task_id=task_id)
+
+    # Step 2: Poll for completion (up to 10 minutes)
+    result_url = f"{base_url}/{task_id}"
+    max_wait = 600
+    poll_interval = 5
+    elapsed = 0
+
+    while elapsed < max_wait:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+
+        resp = httpx.get(result_url, headers=headers, timeout=30.0)
+        if resp.status_code == 404:
+            continue  # Not ready yet
+        resp.raise_for_status()
+        result = resp.json()
+
+        status = (
+            result.get("data", {}).get("state")
+            or result.get("status")
+            or result.get("state")
+            or ""
+        )
+        logger.info("mineru_poll", task_id=task_id, status=status, elapsed=elapsed)
+
+        if status in ("done", "completed", "success"):
+            # Extract sections from result
+            data = result.get("data", result)
+            raw_content = data.get("content") or data.get("md_content") or ""
+            pages = data.get("pages", [])
+
+            # Convert MinerU output to sections
+            sections = _mineru_to_sections(raw_content, pages)
+            count = persist_sections(conn, document_id=UUID(document_id), sections=sections)
+            logger.info("mineru_sections_persisted", document_id=document_id, count=count)
+            return count
+
+        if status in ("failed", "error"):
+            error_msg = (
+                result.get("data", {}).get("error")
+                or result.get("error")
+                or "Unknown MinerU error"
+            )
+            raise RuntimeError(f"MinerU parsing failed: {error_msg}")
+
+    raise TimeoutError(f"MinerU parsing timed out after {max_wait}s for task {task_id}")
+
+
+def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
+    """Convert MinerU markdown content to section dicts for persist_sections."""
+    import re
+
+    if not content:
+        return []
+
+    sections: list[dict] = []
+    # Split by heading patterns: # Title, ## Title, ### Title, etc.
+    # or numeric headings like "1 总则", "3.2 构件"
+    heading_pattern = re.compile(
+        r"^(#{1,6})\s+(.+)$|^(\d+(?:\.\d+)*)\s+(\S.*)$",
+        re.MULTILINE,
+    )
+    matches = list(heading_pattern.finditer(content))
+
+    if not matches:
+        # No headings found — treat entire content as one section
+        sections.append({
+            "section_code": None,
+            "title": "全文",
+            "level": 1,
+            "page_start": 1,
+            "page_end": None,
+            "text": content.strip(),
+        })
+        return sections
+
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        chunk = content[start:end].strip()
+
+        if m.group(1):  # Markdown heading
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            code = None
+        else:  # Numeric heading
+            code = m.group(3)
+            title = m.group(4).strip()
+            level = len(code.split("."))
+
+        # Text is everything after the heading line
+        lines = chunk.split("\n", 1)
+        text = lines[1].strip() if len(lines) > 1 else ""
+
+        sections.append({
+            "section_code": code,
+            "title": title,
+            "level": level,
+            "page_start": None,
+            "page_end": None,
+            "text": text,
+        })
+
+    return sections
+
+
+# ── Section fetching ──
 
 def _fetch_sections(conn: Connection, document_id: str) -> list[dict]:
     """Fetch all document_section rows for a document."""
@@ -147,14 +321,24 @@ def process_standard(
     """
     started_at = time.time()
 
-    # 1. Update status to processing
-    _std_repo.update_processing_status(conn, standard_id, "processing")
+    # 1. Update status to parsing
+    _std_repo.update_processing_status(conn, standard_id, "parsing")
 
     try:
-        # 2. Fetch parsed sections
+        # 2. Fetch parsed sections (or parse via MinerU if none exist)
         sections = _fetch_sections(conn, document_id)
         if not sections:
-            raise ValueError(f"No document sections found for document {document_id}")
+            logger.info("no_sections_found_triggering_mineru", document_id=document_id)
+            count = _parse_via_mineru(conn, document_id)
+            logger.info("mineru_parsing_complete", section_count=count)
+            sections = _fetch_sections(conn, document_id)
+            if not sections:
+                raise ValueError(
+                    f"MinerU returned 0 parseable sections for document {document_id}"
+                )
+
+        # Update status to processing (AI extraction phase)
+        _std_repo.update_processing_status(conn, standard_id, "processing")
 
         logger.info("processing_started", standard_id=str(standard_id), section_count=len(sections))
 
