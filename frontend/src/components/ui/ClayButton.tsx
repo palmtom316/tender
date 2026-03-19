@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
-type Variant = "primary" | "ghost" | "outline" | "danger";
+type Variant = "primary" | "ghost" | "outline" | "danger" | "secondary";
 type Size = "sm" | "md" | "lg";
 
 interface ClayButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -16,9 +16,10 @@ export function ClayButton({
   children,
   ...rest
 }: ClayButtonProps) {
+  const normalizedVariant = variant === "secondary" ? "outline" : variant;
   const cls = [
     "clay-btn",
-    `clay-btn--${variant}`,
+    `clay-btn--${normalizedVariant}`,
     size !== "md" ? `clay-btn--${size}` : "",
     className,
   ]
