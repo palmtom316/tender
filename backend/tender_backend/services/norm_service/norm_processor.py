@@ -9,7 +9,9 @@ import asyncio
 import json
 import os
 import time
+from io import BytesIO
 from uuid import UUID
+from zipfile import ZipFile
 
 import httpx
 import structlog
@@ -47,6 +49,40 @@ def _get_pdf_path(conn: Connection, document_id: str) -> str | None:
     return row["storage_key"] if row else None
 
 
+def _mineru_api_root(base_url: str) -> str:
+    """Normalize MinerU OCR endpoint into the v4 API root."""
+    normalized = base_url.rstrip("/")
+    for suffix in ("/extract/task", "/extract/task/", "/parse", "/parse/"):
+        if normalized.endswith(suffix.rstrip("/")):
+            return normalized[: -len(suffix.rstrip("/"))]
+    return normalized
+
+
+def _extract_markdown_from_zip(content: bytes) -> str:
+    """Read the primary markdown file from a MinerU result zip."""
+    with ZipFile(BytesIO(content)) as zf:
+        names = zf.namelist()
+        for candidate in ("full.md", "result/full.md", "output/full.md"):
+            if candidate in names:
+                return zf.read(candidate).decode("utf-8")
+
+        for name in names:
+            if name.endswith(".md"):
+                return zf.read(name).decode("utf-8")
+
+    raise RuntimeError("MinerU result zip does not contain a markdown file")
+
+
+def _raise_mineru_http_error(exc: httpx.HTTPStatusError) -> None:
+    """Translate upstream MinerU HTTP errors into actionable messages."""
+    if exc.response.status_code == 413:
+        raise RuntimeError(
+            "MinerU 拒绝了当前解析请求。当前服务端已改为 batch 上传模式；"
+            "如果仍看到这个错误，请检查 MinerU 侧文件大小限制或上传接口配置。"
+        ) from exc
+    raise RuntimeError(f"MinerU request failed: HTTP {exc.response.status_code}") from exc
+
+
 def _parse_via_mineru(conn: Connection, document_id: str) -> int:
     """Submit PDF to MinerU OCR, poll for result, persist sections.
 
@@ -66,41 +102,59 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
         )
 
     base_url = (config.base_url or "").rstrip("/")
+    api_root = _mineru_api_root(base_url)
     headers = {"Authorization": f"Bearer {config.api_key}"}
 
-    # Step 1: Submit PDF to MinerU
-    logger.info("mineru_submitting", document_id=document_id, url=base_url)
+    # Step 1: Ask MinerU for a batch upload URL.
+    logger.info("mineru_requesting_upload_url", document_id=document_id, url=api_root)
 
     with open(pdf_path, "rb") as f:
         pdf_bytes = f.read()
 
-    import base64
-    payload = {
-        "file": base64.b64encode(pdf_bytes).decode(),
-        "filename": os.path.basename(pdf_path),
+    request_payload = {
+        "files": [{
+            "name": os.path.basename(pdf_path),
+            "data_id": document_id,
+        }],
+        "model_version": "vlm",
         "is_ocr": True,
         "enable_table": True,
         "language": "ch",
     }
-    resp = httpx.post(base_url, json=payload, headers=headers, timeout=60.0)
-    resp.raise_for_status()
-    task_data = resp.json()
+    try:
+        resp = httpx.post(
+            f"{api_root}/file-urls/batch",
+            json=request_payload,
+            headers=headers,
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        _raise_mineru_http_error(exc)
+    batch_data = resp.json()
 
-    # Extract task ID from response
-    task_id = (
-        task_data.get("data", {}).get("task_id")
-        or task_data.get("task_id")
-        or task_data.get("id")
-    )
-    if not task_id:
-        # Some MinerU APIs return the task ID directly
-        logger.warning("mineru_response_format", data=task_data)
-        raise RuntimeError(f"MinerU did not return a task_id: {task_data}")
+    data = batch_data.get("data", {})
+    batch_id = data.get("batch_id")
+    upload_urls = data.get("file_urls") or data.get("upload_urls") or []
+    if not batch_id or not upload_urls:
+        logger.warning("mineru_upload_url_response_format", data=batch_data)
+        raise RuntimeError(f"MinerU did not return batch upload URLs: {batch_data}")
 
-    logger.info("mineru_task_submitted", task_id=task_id)
+    upload_url = upload_urls[0]
+    logger.info("mineru_uploading_file", batch_id=batch_id, upload_url=upload_url)
+    try:
+        upload_resp = httpx.put(
+            upload_url,
+            data=pdf_bytes,
+            headers={"Content-Type": "application/pdf"},
+            timeout=120.0,
+        )
+        upload_resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        _raise_mineru_http_error(exc)
 
-    # Step 2: Poll for completion (up to 10 minutes)
-    result_url = f"{base_url}/{task_id}"
+    # Step 2: Poll batch result until completion.
+    result_url = f"{api_root}/extract-results/batch/{batch_id}"
     max_wait = 600
     poll_interval = 5
     elapsed = 0
@@ -112,38 +166,47 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
         resp = httpx.get(result_url, headers=headers, timeout=30.0)
         if resp.status_code == 404:
             continue  # Not ready yet
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            _raise_mineru_http_error(exc)
         result = resp.json()
 
-        status = (
-            result.get("data", {}).get("state")
-            or result.get("status")
-            or result.get("state")
-            or ""
-        )
-        logger.info("mineru_poll", task_id=task_id, status=status, elapsed=elapsed)
+        result_items = result.get("data", {}).get("extract_result") or result.get("extract_result") or []
+        if not result_items:
+            logger.info("mineru_poll_waiting", batch_id=batch_id, elapsed=elapsed)
+            continue
+
+        item = result_items[0]
+        status = item.get("state") or item.get("status") or ""
+        logger.info("mineru_poll", batch_id=batch_id, status=status, elapsed=elapsed)
 
         if status in ("done", "completed", "success"):
-            # Extract sections from result
-            data = result.get("data", result)
-            raw_content = data.get("content") or data.get("md_content") or ""
-            pages = data.get("pages", [])
+            full_zip_url = (
+                item.get("full_zip_url")
+                or item.get("result_zip_url")
+                or item.get("zip_url")
+            )
+            if not full_zip_url:
+                raise RuntimeError(f"MinerU did not return a result zip URL: {item}")
 
-            # Convert MinerU output to sections
-            sections = _mineru_to_sections(raw_content, pages)
+            zip_resp = httpx.get(full_zip_url, timeout=60.0)
+            try:
+                zip_resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                _raise_mineru_http_error(exc)
+            raw_content = _extract_markdown_from_zip(zip_resp.content)
+
+            sections = _mineru_to_sections(raw_content, [])
             count = persist_sections(conn, document_id=UUID(document_id), sections=sections)
             logger.info("mineru_sections_persisted", document_id=document_id, count=count)
             return count
 
         if status in ("failed", "error"):
-            error_msg = (
-                result.get("data", {}).get("error")
-                or result.get("error")
-                or "Unknown MinerU error"
-            )
+            error_msg = item.get("err_msg") or item.get("error") or "Unknown MinerU error"
             raise RuntimeError(f"MinerU parsing failed: {error_msg}")
 
-    raise TimeoutError(f"MinerU parsing timed out after {max_wait}s for task {task_id}")
+    raise TimeoutError(f"MinerU parsing timed out after {max_wait}s for batch {batch_id}")
 
 
 def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
