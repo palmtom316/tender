@@ -408,6 +408,111 @@
   grid-column: 1 / -1;
 }
 
+.standard-upload-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.standard-upload-subtitle {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.standard-upload-picker {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.standard-upload-picker input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.standard-upload-table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.standard-upload-table__header,
+.standard-upload-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1.3fr 0.8fr 0.9fr auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.standard-upload-table__header {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  padding: 0 var(--space-2);
+}
+
+.standard-upload-row {
+  padding: var(--space-2);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.standard-upload-file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.standard-upload-file strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.standard-upload-file span {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.standard-upload-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  margin-bottom: var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+}
+
+.standard-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.standard-upload-tip {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 /* Standard card grid */
 .standard-grid {
   display: grid;
@@ -439,6 +544,12 @@
   gap: var(--space-3);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.standard-stage-hint {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
 }
 
 /* Agent config grid — compact cards */

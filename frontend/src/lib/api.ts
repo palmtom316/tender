@@ -452,6 +452,10 @@ export interface Standard {
   specialty: string | null;
   status: string | null;
   processing_status: string;
+  ocr_status: string | null;
+  ai_status: string | null;
+  error_message?: string | null;
+  queue_position?: number | null;
   clause_count: number;
   created_at: string | null;
 }
@@ -484,27 +488,46 @@ export interface StandardClauseNode extends StandardClause {
 export interface StandardProcessingStatus {
   standard_id: string;
   processing_status: string;
+  ocr_status: string | null;
+  ai_status: string | null;
   error_message: string | null;
   clause_count: number;
   processing_started_at: string | null;
   processing_finished_at: string | null;
 }
 
-export function uploadStandard(
-  file: File,
-  data: {
-    standard_code: string;
-    standard_name: string;
-    version_year?: string;
-    specialty?: string;
-  },
-): Promise<{ id: string; standard_code: string; standard_name: string; document_id: string; processing_status: string }> {
+export interface BatchStandardUploadItem {
+  file: File;
+  standard_code: string;
+  standard_name: string;
+  version_year?: string;
+  specialty?: string;
+}
+
+export type BatchStandardUploadResponse = Array<{
+  id: string;
+  standard_code: string;
+  standard_name: string;
+  document_id: string;
+  processing_status: string;
+  ocr_status: string | null;
+  ai_status: string | null;
+}>;
+
+export function uploadStandards(
+  items: BatchStandardUploadItem[],
+): Promise<BatchStandardUploadResponse> {
   const form = new FormData();
-  form.append("file", file);
-  form.append("standard_code", data.standard_code);
-  form.append("standard_name", data.standard_name);
-  if (data.version_year) form.append("version_year", data.version_year);
-  if (data.specialty) form.append("specialty", data.specialty);
+  for (const item of items) {
+    form.append("files", item.file);
+  }
+  form.append("items_json", JSON.stringify(items.map((item) => ({
+    filename: item.file.name,
+    standard_code: item.standard_code,
+    standard_name: item.standard_name,
+    version_year: item.version_year,
+    specialty: item.specialty,
+  }))));
   return request("/standards/upload", { method: "POST", body: form });
 }
 
@@ -537,7 +560,7 @@ export function fetchStandardClauses(
 
 export function triggerStandardProcessing(
   standardId: string,
-): Promise<{ standard_id: string; celery_task_id: string; processing_status: string }> {
+): Promise<{ standard_id: string; processing_status: string; ocr_status: string | null; ai_status: string | null }> {
   return request(`/standards/${standardId}/process`, { method: "POST" });
 }
 
