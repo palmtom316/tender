@@ -15,7 +15,13 @@ class StandardRepository:
     def get_standard(self, conn: Connection, standard_id: UUID) -> dict | None:
         with conn.cursor(row_factory=dict_row) as cur:
             return cur.execute(
-                "SELECT * FROM standard WHERE id = %s", (standard_id,)
+                """
+                SELECT s.*, j.ocr_status, j.ai_status
+                FROM standard s
+                LEFT JOIN standard_processing_job j ON j.standard_id = s.id
+                WHERE s.id = %s
+                """,
+                (standard_id,),
             ).fetchone()
 
     def get_clause_count(self, conn: Connection, standard_id: UUID) -> int:
@@ -186,7 +192,12 @@ class StandardRepository:
     def list_standards(self, conn: Connection) -> list[dict]:
         with conn.cursor(row_factory=dict_row) as cur:
             return cur.execute(
-                "SELECT * FROM standard ORDER BY standard_code"
+                """
+                SELECT s.*, j.ocr_status, j.ai_status
+                FROM standard s
+                LEFT JOIN standard_processing_job j ON j.standard_id = s.id
+                ORDER BY s.standard_code
+                """
             ).fetchall()
 
     def list_clauses(
