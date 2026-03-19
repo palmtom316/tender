@@ -19,6 +19,9 @@ from tender_backend.api.users import router as users_router
 from tender_backend.core.config import get_settings
 from tender_backend.core.logging import setup_logging
 from tender_backend.core.middleware import RequestContextMiddleware
+from tender_backend.services.norm_service.standard_processing_scheduler import (
+    ensure_standard_processing_scheduler_started,
+)
 
 
 def create_app() -> FastAPI:
@@ -45,6 +48,12 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(users_router, prefix=settings.api_prefix)
     app.include_router(standards_router, prefix=settings.api_prefix)
+
+    @app.on_event("startup")
+    def _start_standard_processing_scheduler() -> None:
+        if settings.database_url:
+            ensure_standard_processing_scheduler_started()
+
     return app
 
 

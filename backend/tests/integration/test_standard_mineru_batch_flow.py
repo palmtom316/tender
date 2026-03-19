@@ -3,7 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import UUID
+from uuid import UUID, uuid4
 from zipfile import ZipFile
 
 import httpx
@@ -464,6 +464,86 @@ def test_normalize_sections_for_processing_drops_toc_and_front_matter() -> None:
         "2 术语",
         "条文说明",
     ]
+
+
+def test_ensure_standard_ocr_reuses_existing_sections(monkeypatch) -> None:
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1},
+    ])
+    monkeypatch.setattr(
+        norm_processor,
+        "_parse_via_mineru",
+        lambda conn, document_id: pytest.fail("should not call mineru when sections already exist"),
+    )
+
+    count = norm_processor.ensure_standard_ocr(
+        object(),
+        document_id="11111111-1111-1111-1111-111111111111",
+    )
+
+    assert count == 1
+
+
+def test_process_standard_ai_uses_existing_ocr_sections(monkeypatch) -> None:
+    standard_id = UUID("11111111-1111-1111-1111-111111111111")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
+    monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1.0.1 正文",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [
+        {
+            "id": uuid4(),
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "1.0.1",
+            "clause_title": "总则条款",
+            "clause_text": "正文",
+            "summary": "摘要",
+            "tags": [],
+            "page_start": 1,
+            "page_end": 1,
+            "sort_order": 1,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+        }
+    ])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: entries)
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, clauses: len(clauses))
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: captured.setdefault("indexed", len(clauses)))
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="22222222-2222-2222-2222-222222222222",
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["total_clauses"] == 1
+    assert summary["scopes_processed"] == 1
+    assert captured["indexed"] == 1
 
 
 def test_rebalance_scopes_splits_oversized_scope_by_paragraphs() -> None:

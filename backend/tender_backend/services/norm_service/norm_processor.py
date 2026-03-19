@@ -470,62 +470,53 @@ def _process_scope_with_retries(
     return all_entries
 
 
-def process_standard(
+def ensure_standard_ocr(
     conn: Connection,
+    *,
+    document_id: str,
+) -> int:
+    """Ensure OCR sections exist for a standard document."""
+    sections = _fetch_sections(conn, document_id)
+    if sections:
+        return len(sections)
+
+    logger.info("no_sections_found_triggering_mineru", document_id=document_id)
+    count = _parse_via_mineru(conn, document_id)
+    logger.info("mineru_parsing_complete", section_count=count)
+
+    sections = _fetch_sections(conn, document_id)
+    if not sections:
+        raise ValueError(
+            f"MinerU returned 0 parseable sections for document {document_id}"
+        )
+    return len(sections)
+
+
+def process_standard_ai(
+    conn: Connection,
+    *,
     standard_id: UUID,
     document_id: str,
 ) -> dict:
-    """Full processing pipeline for a standard document.
-
-    Steps:
-      1. Update status → parsing
-      2. Fetch document sections
-      3. Compress into page windows
-      4. Split into processing scopes
-      5. For each scope, call AI Gateway
-      6. Merge results, build tree, link commentary
-      7. Persist clauses to DB
-      8. Index to OpenSearch
-      9. Update status → completed
-
-    Returns a summary dict.
-    """
+    """Run the AI extraction phase using existing OCR sections."""
     started_at = time.time()
 
-    # 1. Update status to parsing
-    _std_repo.update_processing_status(conn, standard_id, "parsing")
-
     try:
-        # 2. Fetch parsed sections (or parse via MinerU if none exist)
         sections = _fetch_sections(conn, document_id)
         if not sections:
-            logger.info("no_sections_found_triggering_mineru", document_id=document_id)
-            count = _parse_via_mineru(conn, document_id)
-            logger.info("mineru_parsing_complete", section_count=count)
-            sections = _fetch_sections(conn, document_id)
-            if not sections:
-                raise ValueError(
-                    f"MinerU returned 0 parseable sections for document {document_id}"
-                )
+            raise ValueError(f"No OCR sections available for document {document_id}")
         sections = _normalize_sections_for_processing(sections)
         if not sections:
             raise ValueError("No normalized sections available for processing")
 
-        # Update status to processing (AI extraction phase)
-        _std_repo.update_processing_status(conn, standard_id, "processing")
-
         logger.info("processing_started", standard_id=str(standard_id), section_count=len(sections))
 
-        # 3. Compress into page windows
         windows = compress_sections(sections)
-
-        # 4. Split into scopes
         scopes = split_into_scopes(windows)
         scopes = rebalance_scopes(scopes)
         if not scopes:
             raise ValueError("No processing scopes generated")
 
-        # 5. Process each scope through AI Gateway (serial to respect rate limits)
         all_entries: list[dict] = []
         for i, scope in enumerate(scopes):
             logger.info(
@@ -545,24 +536,18 @@ def process_standard(
 
         logger.info("all_scopes_processed", total_entries=len(all_entries))
 
-        # 6. Build tree, link commentary, validate
         clauses = build_tree(all_entries, standard_id)
         clauses = link_commentary(clauses)
         warnings = validate_tree(clauses)
 
-        # 7. Delete old clauses and bulk insert new ones
         _std_repo.delete_clauses(conn, standard_id)
         inserted = _std_repo.bulk_create_clauses(conn, clauses)
 
-        # 8. Index to OpenSearch
         standard = _std_repo.get_standard(conn, standard_id)
         _index_clauses(standard, clauses)
 
-        # 9. Update status to completed
-        _std_repo.update_processing_status(conn, standard_id, "completed")
-
         elapsed = time.time() - started_at
-        summary = {
+        return {
             "standard_id": str(standard_id),
             "status": "completed",
             "total_clauses": inserted,
@@ -572,9 +557,26 @@ def process_standard(
             "warnings": warnings[:5],
             "elapsed_seconds": round(elapsed, 1),
         }
+
+    except Exception as exc:
+        logger.exception("processing_failed", standard_id=str(standard_id), error=str(exc))
+        raise
+
+
+def process_standard(
+    conn: Connection,
+    standard_id: UUID,
+    document_id: str,
+) -> dict:
+    """Backward-compatible wrapper for the full OCR + AI pipeline."""
+    _std_repo.update_processing_status(conn, standard_id, "parsing")
+    try:
+        ensure_standard_ocr(conn, document_id=document_id)
+        _std_repo.update_processing_status(conn, standard_id, "processing")
+        summary = process_standard_ai(conn, standard_id=standard_id, document_id=document_id)
+        _std_repo.update_processing_status(conn, standard_id, "completed")
         logger.info("processing_completed", **summary)
         return summary
-
     except Exception as exc:
         logger.exception("processing_failed", standard_id=str(standard_id), error=str(exc))
         _std_repo.update_processing_status(conn, standard_id, "failed", error_message=str(exc))
