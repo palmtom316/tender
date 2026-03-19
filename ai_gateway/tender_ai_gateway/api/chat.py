@@ -41,9 +41,13 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
     settings = get_settings()
+    has_override_keys = (
+        (request.primary_override and request.primary_override.api_key)
+        or (request.fallback_override and request.fallback_override.api_key)
+    )
 
     # Check if any API key is configured
-    if not settings.deepseek_api_key and not settings.qwen_api_key:
+    if not has_override_keys and not settings.deepseek_api_key and not settings.qwen_api_key:
         # Return stub response when no keys configured (dev mode)
         return ChatResponse(
             task_type=request.task_type,

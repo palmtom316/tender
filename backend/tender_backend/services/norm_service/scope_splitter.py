@@ -24,11 +24,14 @@ _COMMENTARY_BOUNDARIES = [
     re.compile(r"引用标准名录"),
 ]
 
-# Chapter heading patterns (e.g., "1 总则", "3.2 材料")
-_CHAPTER_PATTERN = re.compile(
-    r"^(\d+(?:\.\d+)*)\s+\S",
-    re.MULTILINE,
-)
+# Candidate numeric headings. We further filter them to avoid treating
+# full clause sentences as chapter boundaries.
+_CHAPTER_PATTERN = re.compile(r"^\d+\s+.+$", re.MULTILINE)
+_CLAUSE_HEADING_PATTERN = re.compile(r"^\d+(?:\.\d+){2,}\s+\S")
+_CLAUSE_PUNCTUATION = ("，", "。", "；", "：", ":", "!", "?", "！", "？")
+_MAX_HEADING_LENGTH = 60
+_DEFAULT_SCOPE_MAX_CHARS = 3000
+_DEFAULT_SCOPE_MAX_CLAUSE_BLOCKS = 4
 
 
 @dataclass
@@ -52,10 +55,36 @@ def _detect_commentary_start(text: str) -> int | None:
     return None
 
 
+def _is_top_level_heading(line: str) -> bool:
+    stripped = line.strip()
+    if len(stripped) > _MAX_HEADING_LENGTH:
+        return False
+    if any(mark in stripped for mark in _CLAUSE_PUNCTUATION):
+        return False
+    return True
+
+
 def _split_by_chapters(text: str, page_start: int, page_end: int,
                        section_ids: list[str], scope_type: str) -> list[ProcessingScope]:
     """Split a text block by top-level chapter headings."""
-    matches = list(_CHAPTER_PATTERN.finditer(text))
+    matches = []
+    expected_chapter_no: int | None = None
+    for match in _CHAPTER_PATTERN.finditer(text):
+        line = match.group(0).strip()
+        if not _is_top_level_heading(line):
+            continue
+
+        chapter_no = int(line.split(None, 1)[0])
+        if expected_chapter_no is None:
+            matches.append(match)
+            expected_chapter_no = chapter_no + 1
+            continue
+
+        if chapter_no != expected_chapter_no:
+            continue
+
+        matches.append(match)
+        expected_chapter_no += 1
     if not matches:
         return [ProcessingScope(
             scope_type=scope_type,
@@ -144,3 +173,125 @@ def split_into_scopes(windows: list[PageWindow]) -> list[ProcessingScope]:
         commentary=[s.chapter_label for s in scopes if s.scope_type == "commentary"],
     )
     return scopes
+
+
+def _split_block_by_paragraphs(text: str, max_chars: int) -> list[str]:
+    """Split a text block into paragraph-based parts within the character budget."""
+    parts: list[str] = []
+    current = ""
+    for paragraph in [p.strip() for p in text.split("\n\n") if p.strip()]:
+        candidate = paragraph if not current else f"{current}\n\n{paragraph}"
+        if current and len(candidate) > max_chars:
+            parts.append(current)
+            current = paragraph
+        else:
+            current = candidate
+
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _split_into_clause_blocks(text: str) -> list[tuple[str, int]]:
+    """Group paragraphs by clause heading so one chunk doesn't span too many clauses."""
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if not paragraphs:
+        return []
+
+    blocks: list[tuple[str, int]] = []
+    preamble: list[str] = []
+    current: list[str] = []
+    clause_index = 0
+
+    for paragraph in paragraphs:
+        if _CLAUSE_HEADING_PATTERN.match(paragraph):
+            if current:
+                blocks.append(("\n\n".join(current), clause_index))
+            clause_index += 1
+            current = [*preamble, paragraph] if clause_index == 1 and preamble else [paragraph]
+            preamble = []
+            continue
+
+        if clause_index == 0:
+            preamble.append(paragraph)
+        else:
+            current.append(paragraph)
+
+    if current:
+        blocks.append(("\n\n".join(current), clause_index))
+    elif preamble:
+        blocks.append(("\n\n".join(preamble), 0))
+
+    return blocks
+
+
+def rebalance_scopes(
+    scopes: list[ProcessingScope],
+    *,
+    max_chars: int = _DEFAULT_SCOPE_MAX_CHARS,
+    max_clause_blocks: int = _DEFAULT_SCOPE_MAX_CLAUSE_BLOCKS,
+) -> list[ProcessingScope]:
+    """Split oversized scopes by paragraph blocks to avoid long LLM timeouts."""
+    if not scopes:
+        return []
+
+    rebalanced: list[ProcessingScope] = []
+    for scope in scopes:
+        clause_blocks = _split_into_clause_blocks(scope.text)
+        clause_block_count = max((block_id for _, block_id in clause_blocks), default=0)
+
+        if len(scope.text) <= max_chars and clause_block_count <= max_clause_blocks:
+            rebalanced.append(scope)
+            continue
+
+        units = clause_blocks or [(scope.text.strip(), 0)]
+        expanded_units: list[tuple[str, int]] = []
+        for text, block_id in units:
+            if len(text) <= max_chars:
+                expanded_units.append((text, block_id))
+                continue
+            for part in _split_block_by_paragraphs(text, max_chars):
+                expanded_units.append((part, block_id))
+
+        parts: list[tuple[str, set[int]]] = []
+        current = ""
+        current_clause_blocks: set[int] = set()
+        for text, block_id in expanded_units:
+            candidate = text if not current else f"{current}\n\n{text}"
+            candidate_clause_blocks = set(current_clause_blocks)
+            if block_id > 0:
+                candidate_clause_blocks.add(block_id)
+
+            if (
+                current
+                and (
+                    len(candidate) > max_chars
+                    or len(candidate_clause_blocks) > max_clause_blocks
+                )
+            ):
+                parts.append((current, current_clause_blocks))
+                current = text
+                current_clause_blocks = {block_id} if block_id > 0 else set()
+            else:
+                current = candidate
+                current_clause_blocks = candidate_clause_blocks
+
+        if current:
+            parts.append((current, current_clause_blocks))
+
+        if len(parts) <= 1:
+            rebalanced.append(scope)
+            continue
+
+        total_parts = len(parts)
+        for idx, (part, _) in enumerate(parts, start=1):
+            rebalanced.append(ProcessingScope(
+                scope_type=scope.scope_type,
+                chapter_label=f"{scope.chapter_label} ({idx}/{total_parts})",
+                text=part,
+                page_start=scope.page_start,
+                page_end=scope.page_end,
+                section_ids=scope.section_ids,
+            ))
+
+    return rebalanced

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from io import BytesIO
 from uuid import UUID
@@ -22,7 +23,7 @@ from tender_backend.db.repositories.agent_config_repo import AgentConfigReposito
 from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.layout_compressor import compress_sections
 from tender_backend.services.norm_service.prompt_builder import build_prompt
-from tender_backend.services.norm_service.scope_splitter import ProcessingScope, split_into_scopes
+from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.services.search_service.index_manager import IndexManager
 
@@ -58,6 +59,21 @@ def _mineru_api_root(base_url: str) -> str:
     return normalized
 
 
+def _ai_gateway_chat_url(base_url: str) -> str:
+    """Build the AI Gateway chat endpoint with a single /api prefix."""
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/api"):
+        return f"{normalized}/ai/chat"
+    return f"{normalized}/api/ai/chat"
+
+
+def _ai_gateway_timeout_seconds(model_name: str | None) -> float:
+    """Use a longer timeout for reasoning models, which stream much slower."""
+    if model_name and "reasoner" in model_name.lower():
+        return 300.0
+    return 180.0
+
+
 def _extract_markdown_from_zip(content: bytes) -> str:
     """Read the primary markdown file from a MinerU result zip."""
     with ZipFile(BytesIO(content)) as zf:
@@ -79,6 +95,11 @@ def _raise_mineru_http_error(exc: httpx.HTTPStatusError) -> None:
         raise RuntimeError(
             "MinerU 拒绝了当前解析请求。当前服务端已改为 batch 上传模式；"
             "如果仍看到这个错误，请检查 MinerU 侧文件大小限制或上传接口配置。"
+        ) from exc
+    if exc.response.status_code == 403:
+        raise RuntimeError(
+            "MinerU request failed: HTTP 403。请检查 MinerU API Key 是否有效，"
+            "以及预签名上传请求是否未附带额外请求头。"
         ) from exc
     raise RuntimeError(f"MinerU request failed: HTTP {exc.response.status_code}") from exc
 
@@ -146,7 +167,6 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
         upload_resp = httpx.put(
             upload_url,
             data=pdf_bytes,
-            headers={"Content-Type": "application/pdf"},
             timeout=120.0,
         )
         upload_resp.raise_for_status()
@@ -277,9 +297,56 @@ def _fetch_sections(conn: Connection, document_id: str) -> list[dict]:
                       page_start, page_end
                FROM document_section
                WHERE document_id = %s
-               ORDER BY page_start, level, section_code""",
+               ORDER BY
+                   CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
+                   page_start,
+                   ctid""",
             (document_id,),
         ).fetchall()
+
+
+_ACTUAL_CHAPTER_TITLE = re.compile(r"^\d+\s+\S")
+_TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
+_TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
+
+
+def _is_toc_heading(section: dict) -> bool:
+    title = (section.get("title") or "").strip()
+    text = (section.get("text") or "").strip()
+    if text:
+        return False
+    if _TOC_PAGE_REF.search(title):
+        return True
+    if _TOC_DOT_LEADERS.search(title):
+        return True
+    return False
+
+
+def _normalize_sections_for_processing(sections: list[dict]) -> list[dict]:
+    """Trim front matter and drop empty TOC headings before clause extraction."""
+    if not sections:
+        return []
+
+    start_idx = 0
+    for idx, section in enumerate(sections):
+        title = (section.get("title") or "").strip()
+        if _ACTUAL_CHAPTER_TITLE.match(title) and not _is_toc_heading(section):
+            start_idx = idx
+            break
+
+    normalized = [
+        section
+        for section in sections[start_idx:]
+        if not _is_toc_heading(section)
+    ]
+
+    logger.info(
+        "sections_normalized",
+        original_count=len(sections),
+        normalized_count=len(normalized),
+        first_title=(normalized[0].get("title") if normalized else None),
+    )
+    return normalized
 
 
 def _call_ai_gateway(
@@ -316,8 +383,9 @@ def _call_ai_gateway(
             "model": config.fallback_model or "qwen-plus",
         }
 
-    url = f"{AI_GATEWAY_URL}/ai/chat"
-    resp = httpx.post(url, json=payload, timeout=120.0)
+    url = _ai_gateway_chat_url(AI_GATEWAY_URL)
+    timeout = _ai_gateway_timeout_seconds(config.primary_model)
+    resp = httpx.post(url, json=payload, timeout=timeout)
     resp.raise_for_status()
 
     data = resp.json()
@@ -362,6 +430,46 @@ def _parse_llm_json(raw: str) -> list[dict]:
     return []
 
 
+def _process_scope_with_retries(
+    conn: Connection,
+    scope: ProcessingScope,
+) -> list[dict]:
+    """Process one scope and split it into smaller chunks when the provider times out."""
+    pending_scopes = [scope]
+    all_entries: list[dict] = []
+
+    while pending_scopes:
+        current_scope = pending_scopes.pop(0)
+        prompt = build_prompt(current_scope)
+        try:
+            raw_response = _call_ai_gateway(conn, prompt, current_scope.chapter_label)
+        except httpx.TimeoutException:
+            retry_scopes = rebalance_scopes(
+                [current_scope],
+                max_chars=max(500, len(current_scope.text) // 2),
+                max_clause_blocks=2,
+            )
+            if len(retry_scopes) <= 1:
+                raise
+
+            logger.warning(
+                "scope_timeout_rebalanced",
+                scope=current_scope.chapter_label,
+                retry_scopes=[s.chapter_label for s in retry_scopes],
+            )
+            pending_scopes = retry_scopes + pending_scopes
+            continue
+
+        entries = _parse_llm_json(raw_response)
+        for entry in entries:
+            entry["clause_type"] = current_scope.scope_type
+            if entry.get("page_start") is None:
+                entry["page_start"] = current_scope.page_start
+        all_entries.extend(entries)
+
+    return all_entries
+
+
 def process_standard(
     conn: Connection,
     standard_id: UUID,
@@ -399,6 +507,9 @@ def process_standard(
                 raise ValueError(
                     f"MinerU returned 0 parseable sections for document {document_id}"
                 )
+        sections = _normalize_sections_for_processing(sections)
+        if not sections:
+            raise ValueError("No normalized sections available for processing")
 
         # Update status to processing (AI extraction phase)
         _std_repo.update_processing_status(conn, standard_id, "processing")
@@ -410,6 +521,7 @@ def process_standard(
 
         # 4. Split into scopes
         scopes = split_into_scopes(windows)
+        scopes = rebalance_scopes(scopes)
         if not scopes:
             raise ValueError("No processing scopes generated")
 
@@ -424,16 +536,7 @@ def process_standard(
                 chapter=scope.chapter_label,
             )
 
-            prompt = build_prompt(scope)
-            raw_response = _call_ai_gateway(conn, prompt, scope.chapter_label)
-            entries = _parse_llm_json(raw_response)
-
-            # Annotate entries with scope metadata
-            for entry in entries:
-                entry["clause_type"] = scope.scope_type
-                if entry.get("page_start") is None:
-                    entry["page_start"] = scope.page_start
-
+            entries = _process_scope_with_retries(conn, scope)
             all_entries.extend(entries)
 
             # Rate limit: 2-second delay between scopes

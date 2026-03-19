@@ -46,32 +46,44 @@ def compress_sections(sections: list[dict]) -> list[PageWindow]:
     if not sections:
         return []
 
-    # Sort by page then level then section_code
-    sorted_secs = sorted(
-        sections,
-        key=lambda s: (
-            s.get("page_start") or 0,
-            s.get("level") or 0,
-            s.get("section_code") or "",
-        ),
-    )
+    # MinerU batch markdown currently persists legacy rows without page anchors.
+    # In that case the fetch order is the best proxy for document order and must
+    # be preserved; re-sorting by section code scrambles the standard.
+    if all(s.get("page_start") is None for s in sections):
+        sorted_secs = list(sections)
+    else:
+        sorted_secs = sorted(
+            sections,
+            key=lambda s: (
+                s.get("page_start") or 0,
+                s.get("level") or 0,
+                s.get("section_code") or "",
+            ),
+        )
 
     windows: list[PageWindow] = []
     current: PageWindow | None = None
 
     for sec in sorted_secs:
-        text = (sec.get("text") or sec.get("body") or "").strip()
-        if not text or _is_noise(text):
-            continue
-
         title = (sec.get("title") or "").strip()
         code = (sec.get("section_code") or "").strip()
+        text = (sec.get("text") or sec.get("body") or "").strip()
+        header = f"{code} {title}".strip()
+
+        if text:
+            if _is_noise(text):
+                continue
+            block = f"{header}\n{text}" if header else text
+        else:
+            level = sec.get("level") or 0
+            if not header:
+                continue
+            if _is_noise(header) and level > 2:
+                continue
+            block = header
+
         page_s = sec.get("page_start") or 0
         page_e = sec.get("page_end") or page_s
-
-        # Build section text block
-        header = f"{code} {title}".strip()
-        block = f"{header}\n{text}" if header else text
 
         sid = str(sec.get("id", ""))
 

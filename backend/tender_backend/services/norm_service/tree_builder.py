@@ -166,11 +166,12 @@ def validate_tree(clauses: list[dict]) -> list[str]:
     """Validate the clause tree and return a list of warnings."""
     warnings: list[str] = []
     clause_ids = {c["id"] for c in clauses}
+    parent_ids = {c["parent_id"] for c in clauses if c.get("parent_id")}
 
     for c in clauses:
         if c["parent_id"] and c["parent_id"] not in clause_ids:
             warnings.append(f"Clause {c['clause_no']}: parent_id references non-existent clause")
-        if not c["clause_text"]:
+        if not c["clause_text"] and c["id"] not in parent_ids:
             warnings.append(f"Clause {c['clause_no']}: empty clause_text")
 
     if warnings:
