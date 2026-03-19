@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from uuid import UUID, uuid4
 
@@ -11,11 +12,18 @@ from psycopg import Connection, errors
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.document_repository import DocumentRepository
 from tender_backend.db.repositories.file_repository import FileRepository
+from tender_backend.db.repositories.standard_processing_job_repository import (
+    StandardProcessingJobRepository,
+)
 from tender_backend.db.repositories.standard_repo import StandardRepository
+from tender_backend.services.norm_service.standard_processing_scheduler import (
+    ensure_standard_processing_scheduler_started,
+)
 
 router = APIRouter(tags=["standards"])
 
 _repo = StandardRepository()
+_jobs = StandardProcessingJobRepository()
 _files = FileRepository()
 _docs = DocumentRepository()
 
@@ -26,68 +34,130 @@ _STANDARD_PROJECT_ID = UUID("00000000-0000-0000-0000-000000000001")
 _UPLOAD_DIR = os.environ.get("STANDARD_UPLOAD_DIR", "/workspace/data/standards")
 
 
-@router.post("/standards/upload")
-async def upload_standard(
-    file: UploadFile = File(...),
-    standard_code: str = Form(...),
-    standard_name: str = Form(...),
-    version_year: str | None = Form(None),
-    specialty: str | None = Form(None),
-    conn: Connection = Depends(get_db_conn),
-) -> dict:
-    """Upload a standard PDF and create standard + file + document records."""
-    # Read file content
-    content = await file.read()
-    size_bytes = len(content)
-
-    file_id = uuid4()
-    filename = file.filename or "unnamed.pdf"
-    content_type = file.content_type or "application/pdf"
-
-    # Persist PDF to local filesystem
-    os.makedirs(_UPLOAD_DIR, exist_ok=True)
-    local_path = os.path.join(_UPLOAD_DIR, f"{file_id}.pdf")
-    with open(local_path, "wb") as f:
-        f.write(content)
-
-    storage_key = local_path
-
-    try:
-        file_rec = _files.create(
-            conn,
-            file_id=file_id,
-            project_id=_STANDARD_PROJECT_ID,
-            filename=file.filename or "unnamed",
-            content_type=content_type,
-            size_bytes=size_bytes,
-            storage_key=storage_key,
-        )
-    except errors.ForeignKeyViolation:
-        raise HTTPException(
-            status_code=500,
-            detail="Sentinel project not found. Run migration 0006.",
-        )
-
-    # Create document record
-    doc = _docs.create(conn, project_file_id=file_rec.id)
-
-    # Create standard record linked to document
-    std = _repo.create_standard(
-        conn,
-        standard_code=standard_code.strip(),
-        standard_name=standard_name.strip(),
-        version_year=version_year.strip() if version_year else None,
-        specialty=specialty.strip() if specialty else None,
-        document_id=doc.id,
-    )
-
-    return {
+def _serialize_standard(std: dict, *, clause_count: int | None = None) -> dict:
+    payload = {
         "id": str(std["id"]),
         "standard_code": std["standard_code"],
         "standard_name": std["standard_name"],
-        "document_id": str(doc.id),
+        "version_year": std.get("version_year"),
+        "specialty": std.get("specialty"),
+        "status": std.get("status"),
         "processing_status": std.get("processing_status", "pending"),
+        "error_message": std.get("error_message"),
+        "ocr_status": std.get("ocr_status"),
+        "ai_status": std.get("ai_status"),
+        "created_at": std["created_at"].isoformat() if std.get("created_at") else None,
     }
+    if std.get("document_id"):
+        payload["document_id"] = str(std["document_id"])
+    if std.get("processing_started_at") is not None:
+        payload["processing_started_at"] = std["processing_started_at"].isoformat()
+    if std.get("processing_finished_at") is not None:
+        payload["processing_finished_at"] = std["processing_finished_at"].isoformat()
+    if clause_count is not None:
+        payload["clause_count"] = clause_count
+    return payload
+
+
+def _load_batch_items(raw: str) -> list[dict]:
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="items_json must be valid JSON") from exc
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items_json must be a JSON array")
+    return items
+
+
+def _build_upload_items(files: list[UploadFile], items: list[dict]) -> list[tuple[UploadFile, dict]]:
+    if len(files) != len(items):
+        raise HTTPException(status_code=400, detail="File count does not match metadata count")
+
+    if len({file.filename for file in files}) != len(files):
+        raise HTTPException(status_code=400, detail="Duplicate filenames are not supported in one batch")
+
+    file_by_name = {file.filename: file for file in files}
+    resolved: list[tuple[UploadFile, dict]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="Each upload item must be an object")
+        filename = str(item.get("filename") or "").strip()
+        standard_code = str(item.get("standard_code") or "").strip()
+        standard_name = str(item.get("standard_name") or "").strip()
+        if not filename:
+            raise HTTPException(status_code=400, detail="Each upload item requires filename")
+        if not standard_code:
+            raise HTTPException(status_code=400, detail="Each upload item requires standard_code")
+        if not standard_name:
+            raise HTTPException(status_code=400, detail="Each upload item requires standard_name")
+        matched_file = file_by_name.get(filename)
+        if matched_file is None:
+            raise HTTPException(status_code=400, detail=f"No uploaded file matches filename: {filename}")
+        resolved.append((matched_file, item))
+    return resolved
+
+
+@router.post("/standards/upload")
+async def upload_standard(
+    files: list[UploadFile] = File(...),
+    items_json: str = Form(...),
+    conn: Connection = Depends(get_db_conn),
+) -> list[dict]:
+    """Upload multiple standard PDFs and enqueue them for OCR."""
+    items = _load_batch_items(items_json)
+    uploads = _build_upload_items(files, items)
+    created: list[dict] = []
+
+    os.makedirs(_UPLOAD_DIR, exist_ok=True)
+
+    for file, item in uploads:
+        content = await file.read()
+        size_bytes = len(content)
+        file_id = uuid4()
+        content_type = file.content_type or "application/pdf"
+
+        local_path = os.path.join(_UPLOAD_DIR, f"{file_id}.pdf")
+        with open(local_path, "wb") as f:
+            f.write(content)
+
+        try:
+            file_rec = _files.create(
+                conn,
+                file_id=file_id,
+                project_id=_STANDARD_PROJECT_ID,
+                filename=file.filename or "unnamed",
+                content_type=content_type,
+                size_bytes=size_bytes,
+                storage_key=local_path,
+            )
+        except errors.ForeignKeyViolation:
+            raise HTTPException(
+                status_code=500,
+                detail="Sentinel project not found. Run migration 0006.",
+            )
+
+        doc = _docs.create(conn, project_file_id=file_rec.id)
+        std = _repo.create_standard(
+            conn,
+            standard_code=str(item["standard_code"]).strip(),
+            standard_name=str(item["standard_name"]).strip(),
+            version_year=str(item.get("version_year") or "").strip() or None,
+            specialty=str(item.get("specialty") or "").strip() or None,
+            document_id=doc.id,
+        )
+        _jobs.create(conn, standard_id=std["id"], document_id=doc.id)
+        _repo.update_processing_status(conn, std["id"], "queued_ocr")
+        created.append(_serialize_standard({
+            **std,
+            "document_id": doc.id,
+            "processing_status": "queued_ocr",
+            "ocr_status": "queued",
+            "ai_status": "blocked",
+        }))
+
+    scheduler = ensure_standard_processing_scheduler_started()
+    scheduler.wake()
+    return created
 
 
 @router.get("/standards")
@@ -99,17 +169,7 @@ def list_standards(
     result = []
     for s in standards:
         clause_count = _repo.get_clause_count(conn, s["id"])
-        result.append({
-            "id": str(s["id"]),
-            "standard_code": s["standard_code"],
-            "standard_name": s["standard_name"],
-            "version_year": s.get("version_year"),
-            "specialty": s.get("specialty"),
-            "status": s.get("status"),
-            "processing_status": s.get("processing_status", "pending"),
-            "clause_count": clause_count,
-            "created_at": s["created_at"].isoformat() if s.get("created_at") else None,
-        })
+        result.append(_serialize_standard(s, clause_count=clause_count))
     return result
 
 
@@ -127,19 +187,8 @@ def get_standard_detail(
     clause_count = _repo.get_clause_count(conn, standard_id)
 
     return {
-        "id": str(std["id"]),
-        "standard_code": std["standard_code"],
-        "standard_name": std["standard_name"],
-        "version_year": std.get("version_year"),
-        "specialty": std.get("specialty"),
-        "status": std.get("status"),
-        "processing_status": std.get("processing_status", "pending"),
-        "error_message": std.get("error_message"),
-        "processing_started_at": std["processing_started_at"].isoformat() if std.get("processing_started_at") else None,
-        "processing_finished_at": std["processing_finished_at"].isoformat() if std.get("processing_finished_at") else None,
-        "clause_count": clause_count,
+        **_serialize_standard(std, clause_count=clause_count),
         "clause_tree": tree,
-        "created_at": std["created_at"].isoformat() if std.get("created_at") else None,
     }
 
 
@@ -182,64 +231,27 @@ def trigger_processing(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
 ) -> dict:
-    """Trigger AI processing for a standard.
-
-    Tries Celery first; falls back to in-process background thread
-    when the broker is unreachable (e.g. no Celery worker running).
-    """
-    import threading
-
-    import structlog
-
-    logger = structlog.stdlib.get_logger(__name__)
+    """Retry a failed standard processing job by re-queuing the failed stage."""
 
     std = _repo.get_standard(conn, standard_id)
     if not std:
         raise HTTPException(status_code=404, detail="Standard not found")
 
-    if std.get("processing_status") == "processing":
-        raise HTTPException(status_code=409, detail="Already processing")
+    try:
+        job = _jobs.retry(conn, standard_id=standard_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    if not std.get("document_id"):
-        raise HTTPException(status_code=400, detail="No document linked to standard")
-
-    # Mark as processing immediately so the frontend sees the change
-    _repo.update_processing_status(conn, standard_id, "processing")
-
-    document_id = str(std["document_id"])
-    sid = str(standard_id)
-
-    def _run_in_thread() -> None:
-        from tender_backend.core.config import get_settings
-        from tender_backend.db.pool import get_pool
-        from tender_backend.services.norm_service.norm_processor import process_standard
-
-        try:
-            settings = get_settings()
-            pool = get_pool(database_url=settings.database_url)
-            with pool.connection() as bg_conn:
-                process_standard(bg_conn, UUID(sid), document_id)
-        except Exception:
-            logger.exception("background_processing_failed", standard_id=sid)
-            # Ensure status is set to failed even if process_standard didn't
-            try:
-                settings = get_settings()
-                pool = get_pool(database_url=settings.database_url)
-                with pool.connection() as bg_conn:
-                    _repo.update_processing_status(
-                        bg_conn, UUID(sid), "failed",
-                        error_message="Background processing crashed",
-                    )
-            except Exception:
-                logger.exception("failed_to_set_error_status", standard_id=sid)
-
-    thread = threading.Thread(target=_run_in_thread, daemon=True)
-    thread.start()
-    logger.info("processing_thread_started", standard_id=sid, document_id=document_id)
+    next_status = "queued_ai" if job.ai_status == "queued" else "queued_ocr"
+    _repo.update_processing_status(conn, standard_id, next_status)
+    scheduler = ensure_standard_processing_scheduler_started()
+    scheduler.wake()
 
     return {
-        "standard_id": sid,
-        "processing_status": "processing",
+        "standard_id": str(standard_id),
+        "processing_status": next_status,
+        "ocr_status": job.ocr_status,
+        "ai_status": job.ai_status,
     }
 
 
@@ -259,6 +271,8 @@ def get_processing_status(
         "standard_id": str(standard_id),
         "processing_status": std.get("processing_status", "pending"),
         "error_message": std.get("error_message"),
+        "ocr_status": std.get("ocr_status"),
+        "ai_status": std.get("ai_status"),
         "clause_count": clause_count,
         "processing_started_at": std["processing_started_at"].isoformat() if std.get("processing_started_at") else None,
         "processing_finished_at": std["processing_finished_at"].isoformat() if std.get("processing_finished_at") else None,
