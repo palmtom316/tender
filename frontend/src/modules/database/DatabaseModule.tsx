@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Icon } from "../../components/ui/Icon";
@@ -8,15 +7,19 @@ import { useNavigation } from "../../lib/NavigationContext";
 import type {
   BatchStandardUploadItem,
   Standard,
-  StandardClauseNode,
-  StandardDetail,
+  StandardSearchHit,
+  StandardViewerData,
 } from "../../lib/api";
 import {
-  fetchStandardDetail,
+  deleteStandard,
+  fetchStandardViewer,
   listStandards,
   triggerStandardProcessing,
   uploadStandards,
 } from "../../lib/api";
+import { StandardSearchCard } from "./components/StandardSearchCard";
+import { StandardsTableCard } from "./components/StandardsTableCard";
+import { StandardViewerModal } from "./components/StandardViewerModal";
 
 const TAB_DESCRIPTIONS: Record<string, string> = {
   history: "管理历史投标文件，支持按项目类型和时间筛选",
@@ -34,68 +37,8 @@ type UploadRow = {
   specialty: string;
 };
 
-function statusVariant(
-  status: string,
-): "default" | "primary" | "success" | "warning" | "danger" {
-  switch (status) {
-    case "completed":
-      return "success";
-    case "parsing":
-    case "processing":
-      return "primary";
-    case "queued_ocr":
-    case "queued_ai":
-    case "pending":
-      return "warning";
-    case "failed":
-      return "danger";
-    default:
-      return "default";
-  }
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "queued_ocr":
-      return "OCR排队中";
-    case "parsing":
-      return "OCR处理中";
-    case "queued_ai":
-      return "AI排队中";
-    case "processing":
-      return "AI处理中";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "失败";
-    case "pending":
-      return "待处理";
-    default:
-      return status;
-  }
-}
-
 function isActiveStatus(status: string): boolean {
   return ["queued_ocr", "parsing", "queued_ai", "processing"].includes(status);
-}
-
-function stageHint(std: Pick<Standard, "processing_status" | "ocr_status" | "ai_status">): string | null {
-  switch (std.processing_status) {
-    case "queued_ocr":
-      return "等待 OCR 队列";
-    case "parsing":
-      return "正在执行 OCR";
-    case "queued_ai":
-      return "OCR 完成，等待 AI 解析";
-    case "processing":
-      return "正在执行 AI 条款解析";
-    case "failed":
-      if (std.ai_status === "failed") return "AI 解析失败，可重新入队";
-      if (std.ocr_status === "failed") return "OCR 失败，可重新入队";
-      return "处理失败，可重新入队";
-    default:
-      return null;
-  }
 }
 
 function buildUploadRows(files: FileList | null, existingRows: UploadRow[]): { rows: UploadRow[]; error: string } {
@@ -266,229 +209,23 @@ function UploadForm({ onUploaded }: { onUploaded: () => void }) {
   );
 }
 
-function StandardCard({
-  std,
-  onClick,
-  onRetry,
-}: {
-  std: Standard;
-  onClick: () => void;
-  onRetry: () => void;
-}) {
-  const hint = stageHint(std);
-  const active = isActiveStatus(std.processing_status);
-
-  return (
-    <Card style={{ cursor: "pointer" }} onClick={onClick}>
-      <div className="standard-card-header">
-        <span className="standard-card-code">{std.standard_code}</span>
-        <Badge variant={statusVariant(std.processing_status)}>
-          {statusLabel(std.processing_status)}
-        </Badge>
-      </div>
-      <div className="standard-card-name">{std.standard_name}</div>
-      <div className="standard-card-meta">
-        {std.version_year && <span>{std.version_year}</span>}
-        {std.specialty && <span>{std.specialty}</span>}
-        <span>{std.clause_count} 条款</span>
-      </div>
-      {hint && <div className="standard-stage-hint">{hint}</div>}
-      {active && (
-        <div className="flex items-center gap-2" style={{ marginTop: "var(--space-3)" }}>
-          <div className="spinner spinner--sm" />
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
-            队列正在推进...
-          </span>
-        </div>
-      )}
-      {std.processing_status === "failed" && (
-        <div style={{ marginTop: "var(--space-3)" }}>
-          <ClayButton
-            size="sm"
-            variant="secondary"
-            onClick={(event) => {
-              event.stopPropagation();
-              onRetry();
-            }}
-          >
-            <Icon name="refresh" size={14} /> 重新入队
-          </ClayButton>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function ClauseTreeNode({
-  node,
-  depth,
-}: {
-  node: StandardClauseNode;
-  depth: number;
-}) {
-  const [expanded, setExpanded] = useState(depth < 2);
-  const hasChildren = node.children && node.children.length > 0;
-  const isCommentary = node.clause_type === "commentary";
-
-  return (
-    <div className={`clause-node ${depth === 0 ? "clause-node--root" : ""} ${isCommentary ? "clause-commentary" : ""}`}>
-      <div className="clause-node-header" onClick={() => setExpanded(!expanded)}>
-        {hasChildren ? (
-          <Icon name={expanded ? "chevron-down" : "chevron-right"} size={16} />
-        ) : (
-          <span style={{ width: 16, display: "inline-block" }} />
-        )}
-        {node.clause_no && <span className="clause-node-no">{node.clause_no}</span>}
-        <span className="clause-node-title">
-          {node.clause_title || (node.clause_text?.slice(0, 60) ?? "")}
-          {isCommentary && <span style={{ fontSize: "var(--text-xs)", marginLeft: "var(--space-1)", color: "var(--color-info)" }}>[说明]</span>}
-        </span>
-        {node.page_start != null && (
-          <Badge variant="default" className="clause-node-page">
-            P{node.page_start}
-          </Badge>
-        )}
-      </div>
-
-      {expanded && (
-        <>
-          <div className="clause-detail">
-            {node.clause_text && <div className="clause-detail-text">{node.clause_text}</div>}
-            {node.summary && <div className="clause-detail-summary">{node.summary}</div>}
-            {node.tags && node.tags.length > 0 && (
-              <div className="clause-tags">
-                {node.tags.map((tag, index) => (
-                  <Badge key={index} variant="info">{tag}</Badge>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {hasChildren && node.children.map((child) => (
-            <ClauseTreeNode key={child.id} node={child} depth={depth + 1} />
-          ))}
-        </>
-      )}
-    </div>
-  );
-}
-
-function StandardDetailView({
-  standardId,
-  onBack,
-}: {
-  standardId: string;
-  onBack: () => void;
-}) {
-  const [detail, setDetail] = useState<StandardDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  const loadDetail = useCallback(() => {
-    setLoading(true);
-    fetchStandardDetail(standardId)
-      .then((data) => {
-        setDetail(data);
-        setError("");
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "加载失败"))
-      .finally(() => setLoading(false));
-  }, [standardId]);
-
-  useEffect(() => {
-    loadDetail();
-  }, [loadDetail]);
-
-  useEffect(() => {
-    if (!detail || !isActiveStatus(detail.processing_status)) return undefined;
-    const interval = window.setInterval(loadDetail, 5000);
-    return () => window.clearInterval(interval);
-  }, [detail, loadDetail]);
-
-  if (loading && !detail) {
-    return (
-      <div className="empty-state">
-        <div className="spinner" />
-        <p>加载中...</p>
-      </div>
-    );
-  }
-
-  if (error || !detail) {
-    return (
-      <div>
-        <ClayButton variant="secondary" size="sm" onClick={onBack}>
-          <Icon name="arrow-left" size={16} /> 返回列表
-        </ClayButton>
-        <p className="text-error" style={{ marginTop: "var(--space-3)" }}>
-          {error || "未找到规范"}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="flex items-center gap-3" style={{ marginBottom: "var(--space-4)" }}>
-        <ClayButton variant="secondary" size="sm" onClick={onBack}>
-          <Icon name="arrow-left" size={16} /> 返回
-        </ClayButton>
-        <div style={{ flex: 1 }}>
-          <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 600 }}>
-            {detail.standard_code} {detail.standard_name}
-          </h2>
-          <div className="flex gap-3" style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
-            {detail.version_year && <span>{detail.version_year}版</span>}
-            {detail.specialty && <span>{detail.specialty}</span>}
-            <span>{detail.clause_count} 条款</span>
-          </div>
-        </div>
-        <Badge variant={statusVariant(detail.processing_status)}>
-          {statusLabel(detail.processing_status)}
-        </Badge>
-      </div>
-
-      {detail.error_message && (
-        <div className="warning-banner" style={{ marginBottom: "var(--space-4)" }}>
-          {detail.error_message}
-        </div>
-      )}
-
-      {detail.clause_tree && detail.clause_tree.length > 0 ? (
-        <Card>
-          <div className="clause-tree">
-            {detail.clause_tree.map((node) => (
-              <ClauseTreeNode key={node.id} node={node} depth={0} />
-            ))}
-          </div>
-        </Card>
-      ) : (
-        <Card>
-          <div className="empty-state">
-            <Icon name="book" size={32} />
-            <p style={{ marginTop: "var(--space-2)" }}>
-              {detail.processing_status === "completed"
-                ? "未提取到条款"
-                : "当前文件正在排队或处理中，完成后会在这里显示条款。"}
-            </p>
-          </div>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-function StandardsContent() {
+function StandardsWorkbench() {
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [processError, setProcessError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerMode, setViewerMode] = useState<"browse" | "search-hit">("browse");
+  const [viewerData, setViewerData] = useState<StandardViewerData | null>(null);
+  const [initialClauseId, setInitialClauseId] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
 
   const loadStandards = useCallback(() => {
     listStandards()
-      .then(setStandards)
-      .catch(() => undefined)
+      .then((data) => {
+        setStandards(data);
+        setActionError("");
+      })
+      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : "加载规范失败"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -512,64 +249,77 @@ function StandardsContent() {
     };
   }, [standards]);
 
+  const openViewer = async (
+    standardId: string,
+    mode: "browse" | "search-hit",
+    clauseId: string | null = null,
+  ) => {
+    try {
+      const data = await fetchStandardViewer(standardId);
+      setViewerData(data);
+      setViewerMode(mode);
+      setInitialClauseId(clauseId);
+      setViewerOpen(true);
+      setActionError("");
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "加载查阅数据失败");
+    }
+  };
+
   const handleRetry = async (id: string) => {
-    setProcessError("");
     try {
       await triggerStandardProcessing(id);
       loadStandards();
     } catch (err: unknown) {
-      setProcessError(err instanceof Error ? err.message : "重新入队失败");
+      setActionError(err instanceof Error ? err.message : "重新入队失败");
     }
   };
 
-  if (selectedId) {
-    return (
-      <StandardDetailView
-        standardId={selectedId}
-        onBack={() => {
-          setSelectedId(null);
-          loadStandards();
-        }}
-      />
-    );
-  }
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("删除后将移除整份规范、解析结果与源 PDF，是否继续？")) {
+      return;
+    }
+
+    try {
+      await deleteStandard(id);
+      if (viewerOpen && viewerData?.id === id) {
+        setViewerOpen(false);
+        setViewerData(null);
+      }
+      loadStandards();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "删除规范失败");
+    }
+  };
+
+  const handleOpenSearchHit = (hit: StandardSearchHit) => {
+    void openViewer(hit.standard_id, "search-hit", hit.clause_id);
+  };
 
   return (
-    <div>
+    <div className="standards-workbench">
       <UploadForm onUploaded={loadStandards} />
 
-      <h2 className="section-heading" style={{ marginTop: "var(--space-6)" }}>
-        <Icon name="book" size={20} /> 规范列表
-      </h2>
+      <div className="standards-workbench__cards">
+        <StandardsTableCard
+          standards={standards}
+          loading={loading}
+          error={actionError}
+          onRetry={(id) => void handleRetry(id)}
+          onDelete={(id) => void handleDelete(id)}
+          onOpenViewer={(id) => void openViewer(id, "browse")}
+        />
 
-      {processError && (
-        <div className="warning-banner" style={{ marginTop: "var(--space-3)" }}>
-          {processError}
-        </div>
-      )}
+        <StandardSearchCard onOpenHit={handleOpenSearchHit} />
+      </div>
 
-      {loading ? (
-        <div className="empty-state">
-          <div className="spinner" />
-        </div>
-      ) : standards.length === 0 ? (
-        <Card>
-          <div className="empty-state">
-            <p>暂无规范，请先批量上传规范 PDF 文件</p>
-          </div>
-        </Card>
-      ) : (
-        <div className="standard-grid">
-          {standards.map((std) => (
-            <StandardCard
-              key={std.id}
-              std={std}
-              onClick={() => setSelectedId(std.id)}
-              onRetry={() => handleRetry(std.id)}
-            />
-          ))}
-        </div>
-      )}
+      <StandardViewerModal
+        open={viewerOpen}
+        mode={viewerMode}
+        viewerData={viewerData}
+        initialClauseId={initialClauseId}
+        onClose={() => setViewerOpen(false)}
+      />
     </div>
   );
 }
@@ -581,7 +331,7 @@ export function DatabaseModule() {
     return (
       <div>
         <h1 className="section-heading">规范规程库</h1>
-        <StandardsContent />
+        <StandardsWorkbench />
       </div>
     );
   }

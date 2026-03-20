@@ -17,12 +17,18 @@ _repo = StandardRepository()
 
 
 def build_clause_index_docs(standard: dict, clauses: list[dict]) -> list[tuple[str, dict]]:
+    """Build clause_index documents.
+
+    The search API still backfills viewer fields from PostgreSQL when older
+    OpenSearch documents haven't been reindexed with the richer payload yet.
+    """
     docs: list[tuple[str, dict]] = []
     for clause in clauses:
         doc_id = str(clause["id"])
         docs.append((doc_id, {
             "standard_id": str(standard["id"]),
             "standard_code": standard.get("standard_code"),
+            "standard_name": standard.get("standard_name"),
             "clause_id": doc_id,
             "clause_no": clause.get("clause_no"),
             "clause_title": clause.get("clause_title"),
@@ -30,6 +36,8 @@ def build_clause_index_docs(standard: dict, clauses: list[dict]) -> list[tuple[s
             "summary": clause.get("summary"),
             "tags": clause.get("tags", []),
             "specialty": standard.get("specialty"),
+            "page_start": clause.get("page_start"),
+            "page_end": clause.get("page_end"),
         }))
     return docs
 

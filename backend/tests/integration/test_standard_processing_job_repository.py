@@ -7,9 +7,13 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
+from tender_backend.db.migrations import load_initial_schema_sql
 from tender_backend.db.repositories.standard_processing_job_repository import (
     StandardProcessingJobRepository,
 )
+
+
+_STANDARD_PROJECT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _db_url() -> str | None:
@@ -17,14 +21,17 @@ def _db_url() -> str | None:
 
 
 def _ensure_schema(conn: psycopg.Connection) -> None:
+    conn.execute(load_initial_schema_sql())
     conn.execute("""
-    CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-    CREATE TABLE IF NOT EXISTS document (
-      id UUID PRIMARY KEY,
-      project_file_id UUID,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
+    ALTER TABLE project
+      ADD COLUMN IF NOT EXISTS owner_name TEXT,
+      ADD COLUMN IF NOT EXISTS tender_no TEXT,
+      ADD COLUMN IF NOT EXISTS project_type VARCHAR(64),
+      ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'draft',
+      ADD COLUMN IF NOT EXISTS tender_deadline TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS created_by VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS priority VARCHAR(16) NOT NULL DEFAULT 'normal',
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
     CREATE TABLE IF NOT EXISTS standard (
       id UUID PRIMARY KEY,
@@ -59,6 +66,14 @@ def _ensure_schema(conn: psycopg.Connection) -> None:
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     """)
+    conn.execute(
+        """
+        INSERT INTO project (id, name)
+        VALUES (%s, '规范规程资料库')
+        ON CONFLICT DO NOTHING;
+        """,
+        (_STANDARD_PROJECT_ID,),
+    )
     conn.commit()
 
 
@@ -73,6 +88,8 @@ def conn() -> psycopg.Connection:
     conn.execute("DELETE FROM standard_processing_job;")
     conn.execute("DELETE FROM standard;")
     conn.execute("DELETE FROM document;")
+    conn.execute("DELETE FROM project_file;")
+    conn.execute("DELETE FROM project WHERE id <> %s;", (_STANDARD_PROJECT_ID,))
     conn.commit()
     try:
         yield conn
@@ -81,11 +98,19 @@ def conn() -> psycopg.Connection:
 
 
 def _create_standard(conn: psycopg.Connection, *, code: str) -> tuple[UUID, UUID]:
+    project_file_id = uuid4()
     document_id = uuid4()
     standard_id = uuid4()
     conn.execute(
-        "INSERT INTO document (id, project_file_id) VALUES (%s, NULL)",
-        (document_id,),
+        """
+        INSERT INTO project_file (id, project_id, filename, content_type, size_bytes, storage_key)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (project_file_id, _STANDARD_PROJECT_ID, f"{code}.pdf", "application/pdf", 7, f"standards/{code}.pdf"),
+    )
+    conn.execute(
+        "INSERT INTO document (id, project_file_id) VALUES (%s, %s)",
+        (document_id, project_file_id),
     )
     conn.execute(
         """

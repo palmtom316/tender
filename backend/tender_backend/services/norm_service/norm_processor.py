@@ -26,6 +26,7 @@ from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.services.search_service.index_manager import IndexManager
+from tender_backend.tools.reindex_standard_clauses import build_clause_index_docs
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -594,20 +595,7 @@ def _index_clauses(standard: dict | None, clauses: list[dict]) -> None:
 
     try:
         manager = IndexManager()
-        docs = []
-        for c in clauses:
-            doc_id = str(c["id"])
-            docs.append((doc_id, {
-                "standard_id": str(standard["id"]),
-                "standard_code": standard.get("standard_code"),
-                "clause_id": doc_id,
-                "clause_no": c.get("clause_no"),
-                "clause_title": c.get("clause_title"),
-                "clause_text": c.get("clause_text"),
-                "summary": c.get("summary"),
-                "tags": c.get("tags", []),
-                "specialty": standard.get("specialty"),
-            }))
+        docs = build_clause_index_docs(standard, clauses)
 
         asyncio.get_event_loop().run_until_complete(
             manager.bulk_index("clause_index", docs)

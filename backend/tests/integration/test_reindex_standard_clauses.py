@@ -11,6 +11,7 @@ def test_build_clause_index_docs_maps_standard_and_clause_fields() -> None:
     standard = {
         "id": UUID("11111111-1111-1111-1111-111111111111"),
         "standard_code": "GB 123",
+        "standard_name": "安装工程施工规范",
         "specialty": "安装",
     }
     clauses = [{
@@ -20,6 +21,8 @@ def test_build_clause_index_docs_maps_standard_and_clause_fields() -> None:
         "clause_text": "条文内容",
         "summary": "摘要",
         "tags": ["强制性条文"],
+        "page_start": 8,
+        "page_end": 9,
     }]
 
     docs = reindex_standard_clauses.build_clause_index_docs(standard, clauses)
@@ -29,6 +32,7 @@ def test_build_clause_index_docs_maps_standard_and_clause_fields() -> None:
         {
             "standard_id": "11111111-1111-1111-1111-111111111111",
             "standard_code": "GB 123",
+            "standard_name": "安装工程施工规范",
             "clause_id": "22222222-2222-2222-2222-222222222222",
             "clause_no": "3.1.1",
             "clause_title": "一般规定",
@@ -36,6 +40,8 @@ def test_build_clause_index_docs_maps_standard_and_clause_fields() -> None:
             "summary": "摘要",
             "tags": ["强制性条文"],
             "specialty": "安装",
+            "page_start": 8,
+            "page_end": 9,
         },
     )]
 
@@ -44,6 +50,7 @@ def test_reindex_standard_clauses_calls_bulk_index(monkeypatch) -> None:
     standard = {
         "id": UUID("11111111-1111-1111-1111-111111111111"),
         "standard_code": "GB 123",
+        "standard_name": "安装工程施工规范",
         "specialty": "安装",
     }
     clauses = [{
@@ -53,6 +60,8 @@ def test_reindex_standard_clauses_calls_bulk_index(monkeypatch) -> None:
         "clause_text": "条文内容",
         "summary": "摘要",
         "tags": ["强制性条文"],
+        "page_start": 8,
+        "page_end": 9,
     }]
     captured: dict[str, object] = {}
 
