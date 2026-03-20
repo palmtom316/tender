@@ -467,6 +467,11 @@ export interface StandardDetail extends Standard {
   clause_tree: StandardClauseNode[];
 }
 
+export interface StandardViewerData extends StandardDetail {
+  document_id: string;
+  pdf_url: string;
+}
+
 export interface StandardClause {
   id: string;
   clause_no: string | null;
@@ -483,6 +488,18 @@ export interface StandardClause {
 
 export interface StandardClauseNode extends StandardClause {
   children: StandardClauseNode[];
+}
+
+export interface StandardSearchHit {
+  standard_id: string;
+  standard_name: string;
+  specialty: string | null;
+  clause_id: string;
+  clause_no: string | null;
+  tags: string[];
+  summary: string | null;
+  page_start: number | null;
+  page_end: number | null;
 }
 
 export interface StandardProcessingStatus {
@@ -558,10 +575,37 @@ export function fetchStandardClauses(
   );
 }
 
+export function fetchStandardViewer(
+  standardId: string,
+  options?: { signal?: AbortSignal },
+): Promise<StandardViewerData> {
+  return request<StandardViewerData>(`/standards/${standardId}/viewer`, {
+    signal: options?.signal,
+  });
+}
+
 export function triggerStandardProcessing(
   standardId: string,
 ): Promise<{ standard_id: string; processing_status: string; ocr_status: string | null; ai_status: string | null }> {
   return request(`/standards/${standardId}/process`, { method: "POST" });
+}
+
+export function searchStandardClauses(
+  query: string,
+  options?: { specialty?: string; topK?: number; signal?: AbortSignal },
+): Promise<StandardSearchHit[]> {
+  const params = new URLSearchParams({ q: query });
+  if (options?.specialty) params.set("specialty", options.specialty);
+  if (options?.topK != null) params.set("top_k", String(options.topK));
+  return request<StandardSearchHit[]>(`/standards/search?${params.toString()}`, {
+    signal: options?.signal,
+  });
+}
+
+export function deleteStandard(
+  standardId: string,
+): Promise<{ standard_id: string; deleted: boolean }> {
+  return request(`/standards/${standardId}`, { method: "DELETE" });
 }
 
 export function fetchStandardStatus(

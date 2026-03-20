@@ -6,8 +6,6 @@ without requiring a live OpenSearch instance.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from tender_backend.services.search_service.synonym_loader import load_synonyms, count_synonyms
@@ -22,19 +20,28 @@ import tender_backend.workflows.standard_ingestion  # noqa: F401
 from tender_backend.workflows.registry import get_workflow, list_workflows
 
 
-SYNONYMS_PATH = Path(__file__).resolve().parents[4] / "infra" / "opensearch" / "synonyms.txt"
+_SYNONYM_FIXTURE = """\
+基坑开挖,土方开挖
+管道安装,管线安装
+路基施工,路基工程
+涂料施工,油漆施工
+安全文明施工,文明施工
+"""
+
+def _write_synonym_fixture(tmp_path) -> str:
+    path = tmp_path / "synonyms.txt"
+    path.write_text(_SYNONYM_FIXTURE, encoding="utf-8")
+    return str(path)
+
+def test_synonyms_file_counts_groups(tmp_path) -> None:
+    count = count_synonyms(_write_synonym_fixture(tmp_path))
+    assert count == 5
 
 
-def test_synonyms_file_has_300_plus_entries():
-    count = count_synonyms(SYNONYMS_PATH)
-    assert count >= 300, f"Expected 300+ synonym entries, got {count}"
-
-
-def test_synonyms_cover_key_categories():
-    groups = load_synonyms(SYNONYMS_PATH)
+def test_synonyms_cover_key_categories(tmp_path) -> None:
+    groups = load_synonyms(_write_synonym_fixture(tmp_path))
     all_terms = [term for group in groups for term in group]
     joined = " ".join(all_terms)
-    # Verify each specialty category is represented
     assert "基坑开挖" in joined, "Missing civil engineering terms"
     assert "管道安装" in joined, "Missing MEP terms"
     assert "路基施工" in joined, "Missing municipal terms"

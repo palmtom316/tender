@@ -7,6 +7,7 @@ import os
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from psycopg import Connection, errors
 
 from tender_backend.db.deps import get_db_conn
@@ -19,6 +20,7 @@ from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.standard_processing_scheduler import (
     ensure_standard_processing_scheduler_started,
 )
+from tender_backend.services.search_service.query_service import search_standard_clauses
 
 router = APIRouter(tags=["standards"])
 
@@ -97,6 +99,21 @@ def _build_upload_items(files: list[UploadFile], items: list[dict]) -> list[tupl
     return resolved
 
 
+def _serialize_search_hit(hit: dict, *, fallback: dict | None = None) -> dict:
+    source = fallback or {}
+    return {
+        "standard_id": str(hit.get("standard_id") or source.get("standard_id")),
+        "standard_name": hit.get("standard_name") or source.get("standard_name"),
+        "specialty": hit.get("specialty", source.get("specialty")),
+        "clause_id": str(hit.get("clause_id") or source.get("id")),
+        "clause_no": hit.get("clause_no") or source.get("clause_no"),
+        "tags": hit.get("tags") if hit.get("tags") is not None else (source.get("tags") or []),
+        "summary": hit.get("summary") if hit.get("summary") is not None else source.get("summary"),
+        "page_start": hit.get("page_start") if hit.get("page_start") is not None else source.get("page_start"),
+        "page_end": hit.get("page_end") if hit.get("page_end") is not None else source.get("page_end"),
+    }
+
+
 @router.post("/standards/upload")
 async def upload_standard(
     files: list[UploadFile] = File(...),
@@ -160,6 +177,32 @@ async def upload_standard(
     return created
 
 
+@router.get("/standards/search")
+async def search_standards(
+    q: str = Query(..., min_length=1),
+    specialty: str | None = Query(None),
+    top_k: int = Query(10, ge=1, le=50),
+    conn: Connection = Depends(get_db_conn),
+) -> list[dict]:
+    """Search indexed standard clauses and backfill viewer fields from PostgreSQL when needed."""
+    hits = await search_standard_clauses(q, specialty=specialty, top_k=top_k)
+    payload: list[dict] = []
+
+    for hit in hits:
+        fallback = None
+        needs_fallback = any(
+            hit.get(key) is None for key in ("standard_id", "standard_name", "page_start", "page_end")
+        )
+        if needs_fallback and hit.get("clause_id"):
+            try:
+                fallback = _repo.get_clause(conn, UUID(str(hit["clause_id"])))
+            except ValueError:
+                fallback = None
+        payload.append(_serialize_search_hit(hit, fallback=fallback))
+
+    return payload
+
+
 @router.get("/standards")
 def list_standards(
     conn: Connection = Depends(get_db_conn),
@@ -190,6 +233,54 @@ def get_standard_detail(
         **_serialize_standard(std, clause_count=clause_count),
         "clause_tree": tree,
     }
+
+
+@router.get("/standards/{standard_id}/viewer")
+def get_standard_viewer(
+    standard_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> dict:
+    """Get standard detail enriched with the source PDF URL for split-view browsing."""
+    std = _repo.get_standard(conn, standard_id)
+    if not std:
+        raise HTTPException(status_code=404, detail="Standard not found")
+
+    file_meta = _repo.get_standard_file(conn, standard_id)
+    if not file_meta:
+        raise HTTPException(status_code=404, detail="Standard source PDF not found")
+
+    clause_count = _repo.get_clause_count(conn, standard_id)
+    return {
+        **_serialize_standard(std, clause_count=clause_count),
+        "document_id": str(file_meta["document_id"]),
+        "pdf_url": f"/api/standards/{standard_id}/pdf",
+        "clause_tree": _repo.get_clause_tree(conn, standard_id),
+    }
+
+
+@router.get("/standards/{standard_id}/pdf")
+def get_standard_pdf(
+    standard_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> FileResponse:
+    """Stream the uploaded source PDF for viewer-side preview."""
+    std = _repo.get_standard(conn, standard_id)
+    if not std:
+        raise HTTPException(status_code=404, detail="Standard not found")
+
+    file_meta = _repo.get_standard_file(conn, standard_id)
+    if not file_meta or not file_meta.get("storage_key"):
+        raise HTTPException(status_code=404, detail="Standard source PDF not found")
+
+    storage_key = str(file_meta["storage_key"])
+    if not os.path.isfile(storage_key):
+        raise HTTPException(status_code=404, detail="Standard source PDF not found")
+
+    return FileResponse(
+        storage_key,
+        media_type=file_meta.get("content_type") or "application/pdf",
+        filename=file_meta.get("filename") or f"{standard_id}.pdf",
+    )
 
 
 @router.get("/standards/{standard_id}/clauses")
@@ -224,6 +315,37 @@ def list_clauses(
         }
         for c in clauses
     ]
+
+
+@router.delete("/standards/{standard_id}")
+def delete_standard(
+    standard_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> dict:
+    """Delete a standard aggregate once it is no longer actively processing."""
+    std = _repo.get_standard(conn, standard_id)
+    if not std:
+        raise HTTPException(status_code=404, detail="Standard not found")
+
+    if std.get("processing_status") in {"queued_ocr", "parsing", "queued_ai", "processing"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a standard while processing is active",
+        )
+
+    file_meta = _repo.get_standard_file(conn, standard_id)
+    deleted = _repo.delete_standard(conn, standard_id=standard_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Standard not found")
+
+    storage_key = file_meta.get("storage_key") if file_meta else None
+    if storage_key and os.path.isfile(str(storage_key)):
+        try:
+            os.remove(str(storage_key))
+        except OSError:
+            pass
+
+    return {"standard_id": str(standard_id), "deleted": True}
 
 
 @router.post("/standards/{standard_id}/process")

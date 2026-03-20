@@ -17,6 +17,7 @@ from tender_backend.services.norm_service.layout_compressor import compress_sect
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import split_into_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
+from tender_backend.tools.reindex_standard_clauses import build_clause_index_docs
 from tender_backend.workflows.base import (
     BaseWorkflow,
     StepResult,
@@ -179,20 +180,15 @@ class IndexToOpenSearch(WorkflowStep):
         if not clauses:
             return StepResult(state=StepState.COMPLETED, message="No clauses to index")
 
-        docs = []
-        for clause in clauses:
-            doc_id = str(clause.get("id", ""))
-            docs.append((doc_id, {
-                "standard_id": ctx.data.get("standard_id"),
+        docs = build_clause_index_docs(
+            {
+                "id": UUID(str(ctx.data.get("standard_id"))),
                 "standard_code": ctx.data.get("standard_code"),
-                "clause_id": doc_id,
-                "clause_no": clause.get("clause_no"),
-                "clause_title": clause.get("clause_title"),
-                "clause_text": clause.get("clause_text"),
-                "summary": clause.get("summary"),
-                "tags": clause.get("tags", []),
+                "standard_name": ctx.data.get("standard_name"),
                 "specialty": ctx.data.get("specialty"),
-            }))
+            },
+            clauses,
+        )
 
         count = await manager.bulk_index("clause_index", docs)
         return StepResult(state=StepState.COMPLETED, message=f"Indexed {count} clauses")

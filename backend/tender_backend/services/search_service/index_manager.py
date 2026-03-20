@@ -60,6 +60,7 @@ CLAUSE_INDEX_MAPPINGS = {
         "properties": {
             "standard_id": {"type": "keyword"},
             "standard_code": {"type": "keyword"},
+            "standard_name": {"type": "text", "analyzer": "cn_default"},
             "clause_id": {"type": "keyword"},
             "clause_no": {"type": "keyword"},
             "clause_title": {"type": "text", "analyzer": "cn_with_synonym"},
@@ -67,6 +68,8 @@ CLAUSE_INDEX_MAPPINGS = {
             "summary": {"type": "text", "analyzer": "cn_default"},
             "tags": {"type": "keyword"},
             "specialty": {"type": "keyword"},
+            "page_start": {"type": "integer"},
+            "page_end": {"type": "integer"},
         }
     }
 }

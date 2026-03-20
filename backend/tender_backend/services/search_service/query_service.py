@@ -54,6 +54,16 @@ async def search_clauses(
     return results
 
 
+async def search_standard_clauses(
+    query: str,
+    *,
+    specialty: str | None = None,
+    top_k: int = 5,
+) -> list[dict]:
+    """Semantic wrapper for standards workbench clause search."""
+    return await search_clauses(query, specialty=specialty, top_k=top_k)
+
+
 async def search_sections(
     query: str,
     *,

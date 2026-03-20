@@ -185,9 +185,20 @@ def test_retry_endpoint_requeues_failed_jobs_with_stage_aware_reset(client: Test
     assert db_url is not None
 
     with psycopg.connect(db_url) as conn:
+        project_file_id = uuid4()
         document_id = uuid4()
         standard_id = uuid4()
-        conn.execute("INSERT INTO document (id, project_file_id) VALUES (%s, NULL)", (document_id,))
+        conn.execute(
+            """
+            INSERT INTO project_file (id, project_id, filename, content_type, size_bytes, storage_key)
+            VALUES (%s, '00000000-0000-0000-0000-000000000001', 'retry.pdf', 'application/pdf', 7, 'standards/retry.pdf')
+            """,
+            (project_file_id,),
+        )
+        conn.execute(
+            "INSERT INTO document (id, project_file_id) VALUES (%s, %s)",
+            (document_id, project_file_id),
+        )
         conn.execute(
             """
             INSERT INTO standard (id, standard_code, standard_name, document_id, processing_status)

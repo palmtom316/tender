@@ -24,6 +24,60 @@ class StandardRepository:
                 (standard_id,),
             ).fetchone()
 
+    def get_standard_file(self, conn: Connection, standard_id: UUID) -> dict | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                """
+                SELECT
+                  s.id AS standard_id,
+                  d.id AS document_id,
+                  pf.id AS project_file_id,
+                  pf.filename,
+                  pf.content_type,
+                  pf.storage_key
+                FROM standard s
+                JOIN document d ON d.id = s.document_id
+                JOIN project_file pf ON pf.id = d.project_file_id
+                WHERE s.id = %s
+                """,
+                (standard_id,),
+            ).fetchone()
+
+    def get_clause(self, conn: Connection, clause_id: UUID) -> dict | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                """
+                SELECT
+                  sc.*,
+                  s.standard_name,
+                  s.specialty
+                FROM standard_clause sc
+                JOIN standard s ON s.id = sc.standard_id
+                WHERE sc.id = %s
+                """,
+                (clause_id,),
+            ).fetchone()
+
+    def list_neighbor_clauses(
+        self,
+        conn: Connection,
+        *,
+        standard_id: UUID,
+        sort_order: int,
+        radius: int = 2,
+    ) -> list[dict]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                """
+                SELECT *
+                FROM standard_clause
+                WHERE standard_id = %s
+                  AND sort_order BETWEEN %s AND %s
+                ORDER BY sort_order
+                """,
+                (standard_id, sort_order - radius, sort_order + radius),
+            ).fetchall()
+
     def get_clause_count(self, conn: Connection, standard_id: UUID) -> int:
         with conn.cursor() as cur:
             row = cur.execute(
@@ -130,6 +184,20 @@ class StandardRepository:
             count = cur.rowcount
         conn.commit()
         return count
+
+    def delete_standard(self, conn: Connection, *, standard_id: UUID) -> int:
+        file_meta = self.get_standard_file(conn, standard_id)
+
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM standard WHERE id = %s", (standard_id,))
+            deleted = cur.rowcount
+            if deleted and file_meta and file_meta.get("project_file_id"):
+                cur.execute(
+                    "DELETE FROM project_file WHERE id = %s",
+                    (file_meta["project_file_id"],),
+                )
+        conn.commit()
+        return deleted
 
     # ── Original methods ──
     def create_standard(
