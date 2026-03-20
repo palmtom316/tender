@@ -132,13 +132,12 @@ def call_with_fallback(
                 used_fallback=attempt > 0,
             )
         except Exception as exc:
-            logger.error(
-                "provider_call_failed",
-                extra={
-                    "provider": provider.name,
-                    "model": provider.model,
-                    "error": str(exc),
-                },
+            logger.exception(
+                "provider_call_failed provider=%s model=%s error_type=%s error=%s",
+                provider.name,
+                provider.model,
+                type(exc).__name__,
+                exc,
             )
             if attempt == 0:
                 logger.info("falling_back", extra={"to": fallback.name})
