@@ -58,6 +58,26 @@ class StandardRepository:
                 (clause_id,),
             ).fetchone()
 
+    def get_clauses_by_ids(self, conn: Connection, clause_ids: list[UUID]) -> dict[str, dict]:
+        if not clause_ids:
+            return {}
+
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """
+                SELECT
+                  sc.*,
+                  s.standard_name,
+                  s.specialty
+                FROM standard_clause sc
+                JOIN standard s ON s.id = sc.standard_id
+                WHERE sc.id = ANY(%s)
+                """,
+                (clause_ids,),
+            ).fetchall()
+
+        return {str(row["id"]): row for row in rows}
+
     def list_neighbor_clauses(
         self,
         conn: Connection,

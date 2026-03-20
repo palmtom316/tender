@@ -57,20 +57,33 @@ async def reindex_standard_clauses(*, conn, standard_id: UUID) -> int:
     return await manager.bulk_index("clause_index", docs)
 
 
+async def reindex_all_standard_clauses(*, conn) -> int:
+    total = 0
+    for standard in _repo.list_standards(conn):
+        total += await reindex_standard_clauses(conn=conn, standard_id=standard["id"])
+    return total
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     if len(argv) != 1:
-        print("Usage: python -m tender_backend.tools.reindex_standard_clauses <standard_id>")
+        print("Usage: python -m tender_backend.tools.reindex_standard_clauses <standard_id|--all>")
         return 2
 
-    standard_id = UUID(argv[0])
     settings = get_settings()
     pool = get_pool(database_url=settings.database_url)
 
     with pool.connection() as conn:
-        count = asyncio.run(reindex_standard_clauses(conn=conn, standard_id=standard_id))
+        if argv[0] == "--all":
+            count = asyncio.run(reindex_all_standard_clauses(conn=conn))
+        else:
+            standard_id = UUID(argv[0])
+            count = asyncio.run(reindex_standard_clauses(conn=conn, standard_id=standard_id))
 
-    print(f"Indexed {count} clauses for standard {standard_id}")
+    if argv[0] == "--all":
+        print(f"Indexed {count} clauses across all standards")
+    else:
+        print(f"Indexed {count} clauses for standard {argv[0]}")
     return 0
 
 

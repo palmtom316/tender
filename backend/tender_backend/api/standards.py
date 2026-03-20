@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from uuid import UUID, uuid4
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse
 from psycopg import Connection, errors
 
+from tender_backend.core.security import CurrentUser, Role, get_current_user, require_role
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.document_repository import DocumentRepository
 from tender_backend.db.repositories.file_repository import FileRepository
@@ -20,14 +22,17 @@ from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.standard_processing_scheduler import (
     ensure_standard_processing_scheduler_started,
 )
+from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.search_service.query_service import search_standard_clauses
+from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
 
-router = APIRouter(tags=["standards"])
+router = APIRouter(tags=["standards"], dependencies=[Depends(get_current_user)])
 
 _repo = StandardRepository()
 _jobs = StandardProcessingJobRepository()
 _files = FileRepository()
 _docs = DocumentRepository()
+_storage = ProjectFileStorage()
 
 # Sentinel project ID for standard uploads
 _STANDARD_PROJECT_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -101,11 +106,13 @@ def _build_upload_items(files: list[UploadFile], items: list[dict]) -> list[tupl
 
 def _serialize_search_hit(hit: dict, *, fallback: dict | None = None) -> dict:
     source = fallback or {}
+    standard_id = hit.get("standard_id") or source.get("standard_id")
+    clause_id = hit.get("clause_id") or source.get("id")
     return {
-        "standard_id": str(hit.get("standard_id") or source.get("standard_id")),
+        "standard_id": str(standard_id) if standard_id else None,
         "standard_name": hit.get("standard_name") or source.get("standard_name"),
         "specialty": hit.get("specialty", source.get("specialty")),
-        "clause_id": str(hit.get("clause_id") or source.get("id")),
+        "clause_id": str(clause_id) if clause_id else None,
         "clause_no": hit.get("clause_no") or source.get("clause_no"),
         "tags": hit.get("tags") if hit.get("tags") is not None else (source.get("tags") or []),
         "summary": hit.get("summary") if hit.get("summary") is not None else source.get("summary"),
@@ -114,11 +121,21 @@ def _serialize_search_hit(hit: dict, *, fallback: dict | None = None) -> dict:
     }
 
 
+def _search_hit_is_usable(hit: dict) -> bool:
+    return bool(hit.get("standard_id") and hit.get("standard_name") and hit.get("clause_id"))
+
+
+async def delete_standard_clauses_from_index(*, standard_id: str) -> None:
+    manager = IndexManager()
+    await manager.delete_documents_by_term("clause_index", "standard_id", standard_id)
+
+
 @router.post("/standards/upload")
 async def upload_standard(
     files: list[UploadFile] = File(...),
     items_json: str = Form(...),
     conn: Connection = Depends(get_db_conn),
+    _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
 ) -> list[dict]:
     """Upload multiple standard PDFs and enqueue them for OCR."""
     items = _load_batch_items(items_json)
@@ -187,18 +204,28 @@ async def search_standards(
     """Search indexed standard clauses and backfill viewer fields from PostgreSQL when needed."""
     hits = await search_standard_clauses(q, specialty=specialty, top_k=top_k)
     payload: list[dict] = []
+    fallback_clause_ids: list[UUID] = []
 
     for hit in hits:
-        fallback = None
         needs_fallback = any(
             hit.get(key) is None for key in ("standard_id", "standard_name", "page_start", "page_end")
         )
         if needs_fallback and hit.get("clause_id"):
             try:
-                fallback = _repo.get_clause(conn, UUID(str(hit["clause_id"])))
+                fallback_clause_ids.append(UUID(str(hit["clause_id"])))
             except ValueError:
-                fallback = None
-        payload.append(_serialize_search_hit(hit, fallback=fallback))
+                continue
+
+    fallback_by_id = _repo.get_clauses_by_ids(conn, fallback_clause_ids)
+
+    for hit in hits:
+        fallback = None
+        clause_id = hit.get("clause_id")
+        if clause_id is not None:
+            fallback = fallback_by_id.get(str(clause_id))
+        serialized = _serialize_search_hit(hit, fallback=fallback)
+        if _search_hit_is_usable(serialized):
+            payload.append(serialized)
 
     return payload
 
@@ -272,12 +299,12 @@ def get_standard_pdf(
     if not file_meta or not file_meta.get("storage_key"):
         raise HTTPException(status_code=404, detail="Standard source PDF not found")
 
-    storage_key = str(file_meta["storage_key"])
-    if not os.path.isfile(storage_key):
+    file_path = _storage.resolve_local_path(str(file_meta["storage_key"]))
+    if file_path is None:
         raise HTTPException(status_code=404, detail="Standard source PDF not found")
 
     return FileResponse(
-        storage_key,
+        str(file_path),
         media_type=file_meta.get("content_type") or "application/pdf",
         filename=file_meta.get("filename") or f"{standard_id}.pdf",
     )
@@ -321,6 +348,7 @@ def list_clauses(
 def delete_standard(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
 ) -> dict:
     """Delete a standard aggregate once it is no longer actively processing."""
     std = _repo.get_standard(conn, standard_id)
@@ -333,17 +361,13 @@ def delete_standard(
             detail="Cannot delete a standard while processing is active",
         )
 
+    asyncio.run(delete_standard_clauses_from_index(standard_id=str(standard_id)))
     file_meta = _repo.get_standard_file(conn, standard_id)
     deleted = _repo.delete_standard(conn, standard_id=standard_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Standard not found")
 
-    storage_key = file_meta.get("storage_key") if file_meta else None
-    if storage_key and os.path.isfile(str(storage_key)):
-        try:
-            os.remove(str(storage_key))
-        except OSError:
-            pass
+    _storage.delete_managed_file(file_meta.get("storage_key") if file_meta else None)
 
     return {"standard_id": str(standard_id), "deleted": True}
 
@@ -352,6 +376,7 @@ def delete_standard(
 def trigger_processing(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
 ) -> dict:
     """Retry a failed standard processing job by re-queuing the failed stage."""
 

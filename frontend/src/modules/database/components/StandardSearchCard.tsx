@@ -27,6 +27,7 @@ export function StandardSearchCard({ onOpenHit }: StandardSearchCardProps) {
     try {
       setResults(await searchStandardClauses(trimmed));
     } catch (err: unknown) {
+      setResults([]);
       setError(err instanceof Error ? err.message : "查询失败");
     } finally {
       setLoading(false);

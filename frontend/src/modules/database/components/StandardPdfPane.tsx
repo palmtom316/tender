@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type PDFPageProxy } from "pdfjs-dist";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { ClayButton } from "../../../components/ui/ClayButton";
@@ -13,7 +13,7 @@ type StandardPdfPaneProps = {
 
 export function StandardPdfPane({ pdfUrl, targetPage }: StandardPdfPaneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
   const [zoom, setZoom] = useState(1.1);
@@ -27,7 +27,7 @@ export function StandardPdfPane({ pdfUrl, targetPage }: StandardPdfPaneProps) {
 
     const task = getDocument(pdfUrl);
     task.promise
-      .then((doc) => {
+      .then((doc: PDFDocumentProxy) => {
         if (disposed) return;
         setPdfDoc(doc);
         setPageCount(doc.numPages);
@@ -57,7 +57,7 @@ export function StandardPdfPane({ pdfUrl, targetPage }: StandardPdfPaneProps) {
 
     let cancelled = false;
 
-    pdfDoc.getPage(pageNumber).then((page: any) => {
+    pdfDoc.getPage(pageNumber).then((page: PDFPageProxy) => {
       if (cancelled || !canvasRef.current) return;
       const viewport = page.getViewport({ scale: zoom });
       const canvas = canvasRef.current;

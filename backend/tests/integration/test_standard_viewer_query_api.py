@@ -14,6 +14,7 @@ from tender_backend.main import app
 
 
 _STANDARD_PROJECT_ID = "00000000-0000-0000-0000-000000000001"
+_AUTH_HEADERS = {"Authorization": "Bearer dev-token"}
 
 
 def _db_url() -> str | None:
@@ -96,6 +97,38 @@ def _clear_settings_cache() -> None:
 
 @pytest.fixture()
 def client(tmp_path: Path, monkeypatch) -> TestClient:
+    db_url = _db_url()
+    if not db_url:
+        pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(load_initial_schema_sql())
+        _apply_extra_schema(conn)
+        conn.execute("DELETE FROM standard_processing_job;")
+        conn.execute("DELETE FROM standard_clause;")
+        conn.execute("DELETE FROM standard;")
+        conn.execute("DELETE FROM document;")
+        conn.execute("DELETE FROM project_file;")
+        conn.execute(
+            "DELETE FROM project WHERE id <> '00000000-0000-0000-0000-000000000001'"
+        )
+        conn.commit()
+
+    import tender_backend.api.standards as standards_api
+    import tender_backend.main as main_module
+
+    monkeypatch.setattr(standards_api, "_UPLOAD_DIR", str(tmp_path))
+    scheduler_stub = type("_SchedulerStub", (), {"wake": lambda self: None})()
+    monkeypatch.setattr(main_module, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
+    monkeypatch.setattr(standards_api, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
+
+    test_client = TestClient(app)
+    test_client.headers.update(_AUTH_HEADERS)
+    return test_client
+
+
+@pytest.fixture()
+def anon_client(tmp_path: Path, monkeypatch) -> TestClient:
     db_url = _db_url()
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
@@ -247,6 +280,24 @@ def test_get_standard_viewer_returns_pdf_url_and_clause_tree(
     assert payload["clause_tree"][0]["children"][0]["id"] == seeded["child_clause_id"]
 
 
+def test_standard_endpoints_require_authentication(
+    anon_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+    list_response = anon_client.get("/api/standards")
+    assert list_response.status_code == 401
+
+    search_response = anon_client.get("/api/standards/search", params={"q": "混凝土"})
+    assert search_response.status_code == 401
+
+    delete_response = anon_client.delete(f"/api/standards/{seeded['standard_id']}")
+    assert delete_response.status_code == 401
+
+
 def test_get_standard_pdf_streams_uploaded_pdf(client: TestClient, tmp_path: Path) -> None:
     db_url = _db_url()
     assert db_url is not None
@@ -297,18 +348,116 @@ def test_standard_search_returns_enriched_hits_with_db_fallback(
     assert payload[0]["page_end"] == 15
 
 
+def test_standard_search_drops_hits_without_resolvable_identifiers(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    import tender_backend.api.standards as standards_api
+
+    async def fake_search_clauses(query: str, *, specialty: str | None = None, top_k: int = 5) -> list[dict]:
+        assert query == "孤立条款"
+        return [
+            {
+                "summary": "缺少标识信息的脏索引命中",
+                "tags": ["脏数据"],
+            }
+        ]
+
+    monkeypatch.setattr(standards_api, "search_standard_clauses", fake_search_clauses, raising=False)
+
+    response = client.get("/api/standards/search", params={"q": "孤立条款"})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_standard_search_batches_db_fallback_for_multiple_hits(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+    import tender_backend.api.standards as standards_api
+
+    second_clause_id = str(uuid4())
+    captured: dict[str, object] = {}
+
+    async def fake_search_clauses(query: str, *, specialty: str | None = None, top_k: int = 5) -> list[dict]:
+        assert query == "结构"
+        return [
+            {"clause_id": seeded["child_clause_id"], "summary": "命中一"},
+            {"clause_id": second_clause_id, "summary": "命中二"},
+        ]
+
+    def fake_get_clauses_by_ids(conn, clause_ids):
+        captured["clause_ids"] = [str(clause_id) for clause_id in clause_ids]
+        return {
+            seeded["child_clause_id"]: {
+                "id": seeded["child_clause_id"],
+                "standard_id": seeded["standard_id"],
+                "standard_name": "混凝土结构设计规范",
+                "specialty": "结构",
+                "clause_no": "3.2.1",
+                "page_start": 15,
+                "page_end": 15,
+                "tags": ["结构", "混凝土"],
+            },
+            second_clause_id: {
+                "id": second_clause_id,
+                "standard_id": seeded["standard_id"],
+                "standard_name": "混凝土结构设计规范",
+                "specialty": "结构",
+                "clause_no": "3.2.2",
+                "page_start": 16,
+                "page_end": 16,
+                "tags": ["结构"],
+            },
+        }
+
+    def fail_get_clause(*args, **kwargs):
+        pytest.fail("search fallback should batch clause lookups")
+
+    monkeypatch.setattr(standards_api, "search_standard_clauses", fake_search_clauses, raising=False)
+    monkeypatch.setattr(standards_api._repo, "get_clauses_by_ids", fake_get_clauses_by_ids, raising=False)
+    monkeypatch.setattr(standards_api._repo, "get_clause", fail_get_clause)
+
+    response = client.get("/api/standards/search", params={"q": "结构"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 2
+    assert captured["clause_ids"] == [seeded["child_clause_id"], second_clause_id]
+    assert payload[1]["clause_no"] == "3.2.2"
+
+
 def test_delete_standard_removes_completed_standard(client: TestClient, tmp_path: Path) -> None:
     db_url = _db_url()
     assert db_url is not None
     seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
 
+    import tender_backend.api.standards as standards_api
+
+    captured: dict[str, object] = {}
+
+    async def fake_delete_from_index(*, standard_id: str) -> None:
+        captured["standard_id"] = standard_id
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(standards_api, "delete_standard_clauses_from_index", fake_delete_from_index, raising=False)
+
     response = client.delete(f"/api/standards/{seeded['standard_id']}")
 
     assert response.status_code == 200
     assert response.json()["standard_id"] == seeded["standard_id"]
+    assert captured == {"standard_id": seeded["standard_id"]}
 
     detail = client.get(f"/api/standards/{seeded['standard_id']}")
     assert detail.status_code == 404
+
+    monkeypatch.undo()
 
 
 def test_delete_standard_blocks_active_processing(client: TestClient, tmp_path: Path) -> None:

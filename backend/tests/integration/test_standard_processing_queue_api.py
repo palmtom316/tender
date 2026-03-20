@@ -14,6 +14,9 @@ from tender_backend.db.migrations import load_initial_schema_sql
 from tender_backend.main import app
 
 
+_AUTH_HEADERS = {"Authorization": "Bearer dev-token"}
+
+
 def _db_url() -> str | None:
     return os.environ.get("DATABASE_URL")
 
@@ -119,7 +122,9 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setattr(main_module, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
     monkeypatch.setattr(standards_api, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
 
-    return TestClient(app)
+    test_client = TestClient(app)
+    test_client.headers.update(_AUTH_HEADERS)
+    return test_client
 
 
 def test_batch_upload_creates_queue_jobs_and_returns_queue_state(client: TestClient) -> None:

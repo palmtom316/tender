@@ -147,6 +147,23 @@ class IndexManager:
         logger.info("bulk_indexed", index=index, count=len(docs))
         return len(docs)
 
+    async def delete_documents_by_term(self, index: str, field: str, value: str) -> int:
+        """Delete matching documents from an index by exact term."""
+        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+            resp = await client.post(
+                f"{self._url}/{index}/_delete_by_query",
+                json={"query": {"term": {field: value}}},
+            )
+            if resp.status_code == 404:
+                logger.info("delete_by_term_skipped_missing_index", index=index)
+                return 0
+            resp.raise_for_status()
+            data = resp.json()
+
+        deleted = int(data.get("deleted", 0))
+        logger.info("delete_by_term_completed", index=index, field=field, value=value, deleted=deleted)
+        return deleted
+
     async def delete_index(self, name: str) -> None:
         async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
             await client.delete(f"{self._url}/{name}")

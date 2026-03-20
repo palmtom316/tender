@@ -26,6 +26,7 @@ from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.services.search_service.index_manager import IndexManager
+from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
 from tender_backend.tools.reindex_standard_clauses import build_clause_index_docs
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -34,6 +35,7 @@ AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "http://localhost:8001")
 
 _std_repo = StandardRepository()
 _agent_repo = AgentConfigRepository()
+_storage = ProjectFileStorage()
 
 
 # ── MinerU OCR integration ──
@@ -48,7 +50,11 @@ def _get_pdf_path(conn: Connection, document_id: str) -> str | None:
                WHERE d.id = %s""",
             (document_id,),
         ).fetchone()
-    return row["storage_key"] if row else None
+    if not row:
+        return None
+
+    resolved = _storage.resolve_local_path(row["storage_key"])
+    return str(resolved) if resolved else None
 
 
 def _mineru_api_root(base_url: str) -> str:

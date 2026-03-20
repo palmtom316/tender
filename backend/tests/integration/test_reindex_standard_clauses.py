@@ -96,3 +96,27 @@ def test_reindex_standard_clauses_calls_bulk_index(monkeypatch) -> None:
     assert captured["create_index"] == "clause_index"
     assert captured["index"] == "clause_index"
     assert captured["docs"] == reindex_standard_clauses.build_clause_index_docs(standard, clauses)
+
+
+def test_reindex_all_standard_clauses_indexes_every_standard(monkeypatch) -> None:
+    standards = [
+        {"id": UUID("11111111-1111-1111-1111-111111111111")},
+        {"id": UUID("22222222-2222-2222-2222-222222222222")},
+    ]
+    captured: list[UUID] = []
+
+    class _FakeRepo:
+        def list_standards(self, conn):
+            return standards
+
+    async def fake_reindex_standard_clauses(*, conn, standard_id: UUID) -> int:
+        captured.append(standard_id)
+        return 2
+
+    monkeypatch.setattr(reindex_standard_clauses, "_repo", _FakeRepo())
+    monkeypatch.setattr(reindex_standard_clauses, "reindex_standard_clauses", fake_reindex_standard_clauses)
+
+    count = asyncio.run(reindex_standard_clauses.reindex_all_standard_clauses(conn=object()))
+
+    assert count == 4
+    assert captured == [standard["id"] for standard in standards]

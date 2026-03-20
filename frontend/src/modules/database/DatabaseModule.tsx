@@ -218,6 +218,8 @@ function StandardsWorkbench() {
   const [viewerData, setViewerData] = useState<StandardViewerData | null>(null);
   const [initialClauseId, setInitialClauseId] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
+  const viewerRequestRef = useRef(0);
+  const viewerAbortRef = useRef<AbortController | null>(null);
 
   const loadStandards = useCallback(() => {
     listStandards()
@@ -249,20 +251,37 @@ function StandardsWorkbench() {
     };
   }, [standards]);
 
+  useEffect(() => () => {
+    viewerAbortRef.current?.abort();
+  }, []);
+
   const openViewer = async (
     standardId: string,
     mode: "browse" | "search-hit",
     clauseId: string | null = null,
   ) => {
+    const requestId = viewerRequestRef.current + 1;
+    viewerRequestRef.current = requestId;
+    viewerAbortRef.current?.abort();
+    const controller = new AbortController();
+    viewerAbortRef.current = controller;
+
     try {
-      const data = await fetchStandardViewer(standardId);
+      const data = await fetchStandardViewer(standardId, { signal: controller.signal });
+      if (viewerRequestRef.current !== requestId) return;
       setViewerData(data);
       setViewerMode(mode);
       setInitialClauseId(clauseId);
       setViewerOpen(true);
       setActionError("");
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
+      if (viewerRequestRef.current !== requestId) return;
       setActionError(err instanceof Error ? err.message : "加载查阅数据失败");
+    } finally {
+      if (viewerAbortRef.current === controller) {
+        viewerAbortRef.current = null;
+      }
     }
   };
 
