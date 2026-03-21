@@ -39,7 +39,7 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest) -> ChatResponse:
     settings = get_settings()
     has_override_keys = (
         (request.primary_override and request.primary_override.api_key)

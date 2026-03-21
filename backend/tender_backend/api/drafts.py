@@ -16,7 +16,7 @@ router = APIRouter(tags=["drafts"])
 
 
 @router.get("/projects/{project_id}/drafts")
-def list_drafts(
+async def list_drafts(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),
@@ -30,7 +30,7 @@ def list_drafts(
 
 
 @router.get("/drafts/{draft_id}")
-def get_draft(
+async def get_draft(
     draft_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),
@@ -50,7 +50,7 @@ class UpdateDraftBody(BaseModel):
 
 
 @router.put("/drafts/{draft_id}")
-def update_draft(
+async def update_draft(
     draft_id: UUID,
     body: UpdateDraftBody,
     conn: Connection = Depends(get_db_conn),

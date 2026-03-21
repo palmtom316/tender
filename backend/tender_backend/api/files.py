@@ -62,7 +62,7 @@ async def upload_file(
 
 
 @router.get("/projects/{project_id}/files")
-def list_files(project_id: UUID, conn: Connection = Depends(get_db_conn)) -> list[dict]:
+async def list_files(project_id: UUID, conn: Connection = Depends(get_db_conn)) -> list[dict]:
     rows = _repo.list(conn, project_id=project_id)
     return [
         {

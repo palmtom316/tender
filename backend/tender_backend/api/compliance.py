@@ -15,7 +15,7 @@ router = APIRouter(tags=["compliance"])
 
 
 @router.get("/projects/{project_id}/compliance-matrix")
-def get_compliance_matrix(
+async def get_compliance_matrix(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),

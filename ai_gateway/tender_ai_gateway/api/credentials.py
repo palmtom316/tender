@@ -20,7 +20,7 @@ class CredentialCreateResponse(BaseModel):
 
 
 @router.post("", response_model=CredentialCreateResponse)
-def create_credential(request: CredentialCreateRequest) -> CredentialCreateResponse:
+async def create_credential(request: CredentialCreateRequest) -> CredentialCreateResponse:
     # Phase 1 stub: credentials are not persisted yet. This endpoint defines the
     # server-proxy BYOK contract so the frontend never talks to providers directly.
     return CredentialCreateResponse(
@@ -28,4 +28,3 @@ def create_credential(request: CredentialCreateRequest) -> CredentialCreateRespo
         provider=request.provider,
         display_name=request.display_name,
     )
-

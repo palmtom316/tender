@@ -51,13 +51,13 @@ def _to_out(user) -> UserOut:
 
 
 @router.get("/users", response_model=list[UserOut])
-def list_users(conn: Connection = Depends(get_db_conn)) -> list[UserOut]:
+async def list_users(conn: Connection = Depends(get_db_conn)) -> list[UserOut]:
     users = _repo.list_all(conn)
     return [_to_out(u) for u in users]
 
 
 @router.post("/users", response_model=UserOut, status_code=201)
-def create_user(payload: UserCreate, conn: Connection = Depends(get_db_conn)) -> UserOut:
+async def create_user(payload: UserCreate, conn: Connection = Depends(get_db_conn)) -> UserOut:
     valid_roles = {"editor", "reviewer", "admin"}
     if payload.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {valid_roles}")
@@ -78,7 +78,7 @@ def create_user(payload: UserCreate, conn: Connection = Depends(get_db_conn)) ->
 
 
 @router.put("/users/{user_id}", response_model=UserOut)
-def update_user(
+async def update_user(
     user_id: str,
     payload: UserUpdate,
     conn: Connection = Depends(get_db_conn),
@@ -95,7 +95,7 @@ def update_user(
 
 
 @router.delete("/users/{user_id}")
-def delete_user(user_id: str, conn: Connection = Depends(get_db_conn)) -> dict[str, str]:
+async def delete_user(user_id: str, conn: Connection = Depends(get_db_conn)) -> dict[str, str]:
     uid = UUID(user_id)
     deleted = _repo.delete(conn, uid)
     if not deleted:

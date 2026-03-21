@@ -36,7 +36,7 @@ class MeResponse(BaseModel):
 
 
 @router.post("/auth/login", response_model=LoginResponse)
-def login(payload: LoginRequest, conn: Connection = Depends(get_db_conn)) -> LoginResponse:
+async def login(payload: LoginRequest, conn: Connection = Depends(get_db_conn)) -> LoginResponse:
     result = _users.get_by_username(conn, payload.username)
     if result is None:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
@@ -58,7 +58,7 @@ def login(payload: LoginRequest, conn: Connection = Depends(get_db_conn)) -> Log
 
 
 @router.get("/auth/me", response_model=MeResponse)
-def auth_me(request: Request, conn: Connection = Depends(get_db_conn)) -> MeResponse:
+async def auth_me(request: Request, conn: Connection = Depends(get_db_conn)) -> MeResponse:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -77,7 +77,7 @@ def auth_me(request: Request, conn: Connection = Depends(get_db_conn)) -> MeResp
 
 
 @router.post("/auth/logout")
-def auth_logout(request: Request, conn: Connection = Depends(get_db_conn)) -> dict[str, str]:
+async def auth_logout(request: Request, conn: Connection = Depends(get_db_conn)) -> dict[str, str]:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]

@@ -13,7 +13,7 @@ AI-assisted tender document authoring system for technical bids.
 ## Quick Start
 
 1. Create the shared Python virtualenv and install editable backend/gateway deps:
-   - `python3 -m venv .venv`
+   - `python3.12 -m venv .venv`
    - `.venv/bin/pip install -e 'backend[dev]' -e 'ai_gateway[dev]'`
 2. Copy `infra/.env.example` to `infra/.env` and adjust secrets if needed.
    - `tag_clauses` defaults to SiliconFlow primary (`deepseek-ai/DeepSeek-V3.2`) and Qwen fallback in code/migrations.
@@ -29,9 +29,11 @@ AI-assisted tender document authoring system for technical bids.
 
 ## Verification
 
-- Backend tests: `cd backend && ../.venv/bin/pytest`
-- Backend integration tests (example): `cd backend && DATABASE_URL=postgresql://tender:change-me@localhost:5432/tender ../.venv/bin/pytest tests/integration/test_standard_viewer_query_api.py -q`
-- Reindex all standard clauses: `cd backend && ../.venv/bin/python -m tender_backend.tools.reindex_standard_clauses --all`
-- AI gateway tests: `cd ai_gateway && ../.venv/bin/pytest`
-- Frontend build: `cd frontend && npm run build`
-- Compose config: `docker compose --env-file infra/.env -f infra/docker-compose.yml config`
+Use the root-level scripts below so verification does not depend on whichever Python environment your shell happens to have active.
+
+- Backend tests: `npm run test:backend`
+- Backend integration tests: `npm run test:backend:integration`
+- Reindex all standard clauses: `npm run reindex:standards`
+- AI gateway tests: `npm run test:ai-gateway`
+- Frontend build: `npm run build:frontend`
+- Compose config: `npm run verify:compose`

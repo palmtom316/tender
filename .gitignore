@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 .venv/
+.venv312
+.venv-py313-backup-*
 __pycache__/
 .pytest_cache/
 .mypy_cache/
@@ -11,6 +13,7 @@ htmlcov/
 *.egg-info/
 node_modules/
 dist/
+frontend/dist.stale-*/
 *.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts

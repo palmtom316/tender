@@ -232,7 +232,7 @@ async def search_standards(
 
 
 @router.get("/standards")
-def list_standards(
+async def list_standards(
     conn: Connection = Depends(get_db_conn),
 ) -> list[dict]:
     """List all standards with processing status and clause count."""
@@ -245,7 +245,7 @@ def list_standards(
 
 
 @router.get("/standards/{standard_id}")
-def get_standard_detail(
+async def get_standard_detail(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
 ) -> dict:
@@ -264,7 +264,7 @@ def get_standard_detail(
 
 
 @router.get("/standards/{standard_id}/viewer")
-def get_standard_viewer(
+async def get_standard_viewer(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
 ) -> dict:
@@ -287,7 +287,7 @@ def get_standard_viewer(
 
 
 @router.get("/standards/{standard_id}/pdf")
-def get_standard_pdf(
+async def get_standard_pdf(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
 ) -> FileResponse:
@@ -312,7 +312,7 @@ def get_standard_pdf(
 
 
 @router.get("/standards/{standard_id}/clauses")
-def list_clauses(
+async def list_clauses(
     standard_id: UUID,
     clause_type: str | None = Query(None),
     conn: Connection = Depends(get_db_conn),
@@ -346,7 +346,7 @@ def list_clauses(
 
 
 @router.delete("/standards/{standard_id}")
-def delete_standard(
+async def delete_standard(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
@@ -374,7 +374,7 @@ def delete_standard(
 
 
 @router.post("/standards/{standard_id}/process")
-def trigger_processing(
+async def trigger_processing(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
@@ -404,7 +404,7 @@ def trigger_processing(
 
 
 @router.get("/standards/{standard_id}/status")
-def get_processing_status(
+async def get_processing_status(
     standard_id: UUID,
     conn: Connection = Depends(get_db_conn),
 ) -> dict:

@@ -21,7 +21,7 @@ class ConfirmBody(BaseModel):
 
 
 @router.get("/projects/{project_id}/requirements")
-def list_requirements(
+async def list_requirements(
     project_id: UUID,
     category: str | None = None,
     conn: Connection = Depends(get_db_conn),
@@ -31,7 +31,7 @@ def list_requirements(
 
 
 @router.post("/requirements/{requirement_id}/confirm")
-def confirm_requirement(
+async def confirm_requirement(
     requirement_id: UUID,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),
@@ -43,7 +43,7 @@ def confirm_requirement(
 
 
 @router.get("/projects/{project_id}/export-readiness")
-def check_export_readiness(
+async def check_export_readiness(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),

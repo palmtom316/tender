@@ -1,1 +1,11 @@
-{}
+{
+  "private": true,
+  "scripts": {
+    "test:backend": "cd backend && ../.venv/bin/pytest",
+    "test:backend:integration": "cd backend && ../.venv/bin/pytest tests/integration -q",
+    "test:ai-gateway": "cd ai_gateway && ../.venv/bin/pytest",
+    "build:frontend": "npm --prefix frontend run build",
+    "verify:compose": "docker compose --env-file infra/.env -f infra/docker-compose.yml config",
+    "reindex:standards": "cd backend && ../.venv/bin/python -m tender_backend.tools.reindex_standard_clauses --all"
+  }
+}

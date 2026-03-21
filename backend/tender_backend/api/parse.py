@@ -16,7 +16,7 @@ _jobs = ParseJobRepository()
 
 
 @router.post("/documents/{document_id}/parse-jobs")
-def create_parse_job(document_id: UUID, payload: dict, conn: Connection = Depends(get_db_conn)) -> dict:
+async def create_parse_job(document_id: UUID, payload: dict, conn: Connection = Depends(get_db_conn)) -> dict:
     force_reparse = bool(payload.get("force_reparse", False))
     if not force_reparse:
         active = _jobs.find_active_for_document(conn, document_id=document_id)
@@ -28,7 +28,7 @@ def create_parse_job(document_id: UUID, payload: dict, conn: Connection = Depend
 
 
 @router.get("/parse-jobs/{parse_job_id}")
-def get_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
+async def get_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
     job = _jobs.get(conn, parse_job_id=parse_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="parse job not found")
@@ -43,7 +43,7 @@ def get_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn)) -
 
 
 @router.get("/documents/{document_id}/parse-result")
-def get_parse_result_summary(document_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
+async def get_parse_result_summary(document_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
     latest = _jobs.latest_for_document(conn, document_id=document_id)
     with conn.cursor(row_factory=dict_row) as cur:
         section_count = cur.execute(
@@ -65,7 +65,7 @@ def get_parse_result_summary(document_id: UUID, conn: Connection = Depends(get_d
 
 
 @router.post("/parse-jobs/{parse_job_id}/retry")
-def retry_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
+async def retry_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
     job = _jobs.get(conn, parse_job_id=parse_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="parse job not found")
@@ -74,4 +74,3 @@ def retry_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn))
 
     new_job = _jobs.create(conn, document_id=job.document_id, provider=job.provider, status="queued")
     return {"parse_job_id": str(new_job.id), "document_id": str(new_job.document_id), "status": new_job.status}
-

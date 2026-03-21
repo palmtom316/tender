@@ -64,13 +64,13 @@ def _to_out(row: AgentConfigRow) -> AgentConfigOut:
 
 
 @router.get("/settings/agents", response_model=list[AgentConfigOut])
-def list_agent_configs(conn: Connection = Depends(get_db_conn)) -> list[AgentConfigOut]:
+async def list_agent_configs(conn: Connection = Depends(get_db_conn)) -> list[AgentConfigOut]:
     rows = _repo.list_all(conn)
     return [_to_out(r) for r in rows]
 
 
 @router.put("/settings/agents/{agent_key}", response_model=AgentConfigOut)
-def update_agent_config(
+async def update_agent_config(
     agent_key: str,
     payload: AgentConfigUpdate,
     conn: Connection = Depends(get_db_conn),
@@ -84,7 +84,7 @@ def update_agent_config(
 
 
 @router.post("/settings/agents/{agent_key}/test")
-def test_agent_connection(
+async def test_agent_connection(
     agent_key: str,
     conn: Connection = Depends(get_db_conn),
 ) -> dict:

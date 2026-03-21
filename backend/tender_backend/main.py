@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from tender_backend.core.threadpool_compat import apply_threadpool_compat
 from tender_backend.api.files import router as files_router
 from tender_backend.api.health import router as health_router
 from tender_backend.api.parse import router as parse_router
@@ -22,6 +23,8 @@ from tender_backend.core.middleware import RequestContextMiddleware
 from tender_backend.services.norm_service.standard_processing_scheduler import (
     ensure_standard_processing_scheduler_started,
 )
+
+apply_threadpool_compat()
 
 
 def create_app() -> FastAPI:

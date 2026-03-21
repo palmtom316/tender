@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 
+from tender_ai_gateway.core.threadpool_compat import apply_threadpool_compat
 from tender_ai_gateway.api.chat import router as chat_router
 from tender_ai_gateway.api.credentials import router as credentials_router
 from tender_ai_gateway.api.health import router as health_router
 from tender_ai_gateway.core.config import get_settings
+
+apply_threadpool_compat()
 
 
 def create_app() -> FastAPI:

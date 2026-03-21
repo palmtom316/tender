@@ -6,11 +6,11 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.migrations import load_initial_schema_sql
 from tender_backend.main import app
+from tender_backend.test_support.asgi_client import SyncASGIClient
 
 
 _STANDARD_PROJECT_ID = "00000000-0000-0000-0000-000000000001"
@@ -119,7 +119,7 @@ def _clear_settings_cache() -> None:
 
 
 @pytest.fixture()
-def client(tmp_path: Path, monkeypatch) -> TestClient:
+def client(tmp_path: Path, monkeypatch) -> SyncASGIClient:
     db_url = _db_url()
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
@@ -137,7 +137,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setattr(main_module, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
     monkeypatch.setattr(standards_api, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
 
-    test_client = TestClient(app)
+    test_client = SyncASGIClient(app)
     test_client.headers.update(_AUTH_HEADERS)
     try:
         yield test_client
@@ -148,7 +148,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
 
 
 @pytest.fixture()
-def anon_client(tmp_path: Path, monkeypatch) -> TestClient:
+def anon_client(tmp_path: Path, monkeypatch) -> SyncASGIClient:
     db_url = _db_url()
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
@@ -166,7 +166,7 @@ def anon_client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setattr(main_module, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
     monkeypatch.setattr(standards_api, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
 
-    test_client = TestClient(app)
+    test_client = SyncASGIClient(app)
     try:
         yield test_client
     finally:

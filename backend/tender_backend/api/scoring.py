@@ -16,7 +16,7 @@ _repo = ScoringRepository()
 
 
 @router.get("/projects/{project_id}/scoring-criteria")
-def list_scoring_criteria(
+async def list_scoring_criteria(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),
@@ -25,7 +25,7 @@ def list_scoring_criteria(
 
 
 @router.post("/scoring-criteria/{criteria_id}/confirm")
-def confirm_scoring_criteria(
+async def confirm_scoring_criteria(
     criteria_id: UUID,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),

@@ -1,10 +1,9 @@
-from fastapi.testclient import TestClient
-
 from tender_ai_gateway.main import app
+from tender_ai_gateway.test_support.asgi_client import SyncASGIClient
 
 
 def test_gateway_health() -> None:
-    client = TestClient(app)
+    client = SyncASGIClient(app)
     response = client.get("/api/health")
 
     assert response.status_code == 200
@@ -12,7 +11,7 @@ def test_gateway_health() -> None:
 
 
 def test_create_credential_contract() -> None:
-    client = TestClient(app)
+    client = SyncASGIClient(app)
     response = client.post(
         "/api/credentials",
         json={
@@ -29,7 +28,7 @@ def test_create_credential_contract() -> None:
 
 
 def test_chat_uses_override_even_without_env_keys(monkeypatch) -> None:
-    client = TestClient(app)
+    client = SyncASGIClient(app)
 
     monkeypatch.setattr(
         "tender_ai_gateway.api.chat.call_with_fallback",

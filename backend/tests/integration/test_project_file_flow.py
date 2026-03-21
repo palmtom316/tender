@@ -3,11 +3,11 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.migrations import load_initial_schema_sql
 from tender_backend.main import app
+from tender_backend.test_support.asgi_client import SyncASGIClient
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def test_project_and_file_flow() -> None:
         conn.execute("DELETE FROM project;")
         conn.commit()
 
-    client = TestClient(app)
+    client = SyncASGIClient(app)
 
     res = client.post("/api/projects", json={"name": "demo"})
     assert res.status_code == 200

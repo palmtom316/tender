@@ -1,10 +1,9 @@
-from fastapi.testclient import TestClient
-
 from tender_backend.main import app
+from tender_backend.test_support.asgi_client import SyncASGIClient
 
 
 def test_health() -> None:
-    client = TestClient(app)
+    client = SyncASGIClient(app)
     response = client.get("/api/health")
 
     assert response.status_code == 200

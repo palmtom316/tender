@@ -15,7 +15,7 @@ router = APIRouter(tags=["review"])
 
 
 @router.get("/projects/{project_id}/review-issues")
-def list_review_issues(
+async def list_review_issues(
     project_id: UUID,
     severity: str | None = None,
     resolved: bool | None = None,
@@ -36,7 +36,7 @@ def list_review_issues(
 
 
 @router.post("/review-issues/{issue_id}/resolve")
-def resolve_issue(
+async def resolve_issue(
     issue_id: UUID,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),

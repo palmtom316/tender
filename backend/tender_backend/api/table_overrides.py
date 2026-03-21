@@ -20,7 +20,7 @@ class TableOverrideBody(BaseModel):
 
 
 @router.get("/tables/{table_id}")
-def get_table(
+async def get_table(
     table_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),
@@ -43,7 +43,7 @@ def get_table(
 
 
 @router.post("/tables/{table_id}/override")
-def create_override(
+async def create_override(
     table_id: UUID,
     body: TableOverrideBody,
     conn: Connection = Depends(get_db_conn),

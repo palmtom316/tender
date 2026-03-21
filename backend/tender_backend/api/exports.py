@@ -15,7 +15,7 @@ router = APIRouter(tags=["exports"])
 
 
 @router.get("/projects/{project_id}/exports")
-def list_exports(
+async def list_exports(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),
@@ -29,7 +29,7 @@ def list_exports(
 
 
 @router.get("/projects/{project_id}/export-gates")
-def check_export_gates(
+async def check_export_gates(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
     _user: CurrentUser = Depends(get_current_user),

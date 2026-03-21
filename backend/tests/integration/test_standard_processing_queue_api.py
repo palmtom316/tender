@@ -7,11 +7,11 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
-from fastapi.testclient import TestClient
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.migrations import load_initial_schema_sql
 from tender_backend.main import app
+from tender_backend.test_support.asgi_client import SyncASGIClient
 
 
 _AUTH_HEADERS = {"Authorization": "Bearer dev-token"}
@@ -119,7 +119,7 @@ def _clear_settings_cache() -> None:
 
 
 @pytest.fixture()
-def client(tmp_path: Path, monkeypatch) -> TestClient:
+def client(tmp_path: Path, monkeypatch) -> SyncASGIClient:
     db_url = _db_url()
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
@@ -137,7 +137,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setattr(main_module, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
     monkeypatch.setattr(standards_api, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
 
-    test_client = TestClient(app)
+    test_client = SyncASGIClient(app)
     test_client.headers.update(_AUTH_HEADERS)
     try:
         yield test_client
@@ -147,7 +147,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
             _reset_standard_tables(conn)
 
 
-def test_batch_upload_creates_queue_jobs_and_returns_queue_state(client: TestClient) -> None:
+def test_batch_upload_creates_queue_jobs_and_returns_queue_state(client: SyncASGIClient) -> None:
     response = client.post(
         "/api/standards/upload",
         files=[
@@ -174,7 +174,7 @@ def test_batch_upload_creates_queue_jobs_and_returns_queue_state(client: TestCli
     assert listed.json()[0]["ocr_status"] in {"queued", "running", "completed", "failed"}
 
 
-def test_batch_upload_rejects_mismatched_file_and_metadata_count(client: TestClient) -> None:
+def test_batch_upload_rejects_mismatched_file_and_metadata_count(client: SyncASGIClient) -> None:
     response = client.post(
         "/api/standards/upload",
         files=[("files", ("a.pdf", b"%PDF-a", "application/pdf"))],
@@ -190,7 +190,7 @@ def test_batch_upload_rejects_mismatched_file_and_metadata_count(client: TestCli
     assert "count" in response.json()["detail"].lower()
 
 
-def test_batch_upload_rejects_missing_required_metadata(client: TestClient) -> None:
+def test_batch_upload_rejects_missing_required_metadata(client: SyncASGIClient) -> None:
     response = client.post(
         "/api/standards/upload",
         files=[("files", ("a.pdf", b"%PDF-a", "application/pdf"))],
@@ -205,7 +205,7 @@ def test_batch_upload_rejects_missing_required_metadata(client: TestClient) -> N
     assert "standard_code" in response.json()["detail"]
 
 
-def test_retry_endpoint_requeues_failed_jobs_with_stage_aware_reset(client: TestClient) -> None:
+def test_retry_endpoint_requeues_failed_jobs_with_stage_aware_reset(client: SyncASGIClient) -> None:
     db_url = _db_url()
     assert db_url is not None
 
