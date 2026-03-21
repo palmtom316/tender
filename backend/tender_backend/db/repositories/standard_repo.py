@@ -3,10 +3,205 @@
 from __future__ import annotations
 
 import json as _json
+import re
+from collections import defaultdict
 from uuid import UUID, uuid4
 
 from psycopg import Connection
 from psycopg.rows import dict_row
+
+
+def _order_clauses_for_insert(clauses: list[dict]) -> list[dict]:
+    """Insert self-referential clauses in dependency order.
+
+    `standard_clause` has self-references on both `parent_id` and
+    `commentary_clause_id`, so a child or commentary row may need another row
+    from the same batch to exist first.
+    """
+    if len(clauses) < 2:
+        return clauses
+
+    clauses_by_id = {clause["id"]: clause for clause in clauses}
+    original_index = {clause["id"]: index for index, clause in enumerate(clauses)}
+    pending_deps: dict[UUID, set[UUID]] = {}
+    dependents: dict[UUID, list[UUID]] = defaultdict(list)
+
+    for clause in clauses:
+        clause_id = clause["id"]
+        deps: set[UUID] = set()
+        for field in ("parent_id", "commentary_clause_id"):
+            dep_id = clause.get(field)
+            if dep_id and dep_id in clauses_by_id and dep_id != clause_id:
+                deps.add(dep_id)
+                dependents[dep_id].append(clause_id)
+        pending_deps[clause_id] = deps
+
+    ordered_ids: list[UUID] = []
+    ready = [
+        clause["id"]
+        for clause in clauses
+        if not pending_deps[clause["id"]]
+    ]
+
+    while ready:
+        ready.sort(key=original_index.__getitem__)
+        current_id = ready.pop(0)
+        ordered_ids.append(current_id)
+        for dependent_id in dependents.get(current_id, []):
+            deps = pending_deps[dependent_id]
+            deps.discard(current_id)
+            if not deps and dependent_id not in ordered_ids and dependent_id not in ready:
+                ready.append(dependent_id)
+
+    if len(ordered_ids) != len(clauses):
+        return clauses
+
+    return [clauses_by_id[clause_id] for clause_id in ordered_ids]
+
+
+_TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
+_TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
+
+
+def _build_clause_node(clause: dict) -> dict:
+    return {
+        "id": str(clause["id"]),
+        "clause_no": clause.get("clause_no"),
+        "clause_title": clause.get("clause_title"),
+        "clause_text": clause.get("clause_text"),
+        "summary": clause.get("summary"),
+        "tags": clause.get("tags", []),
+        "clause_type": clause.get("clause_type") or "normative",
+        "node_type": clause.get("node_type") or "clause",
+        "node_key": clause.get("node_key"),
+        "node_label": clause.get("node_label"),
+        "page_start": clause.get("page_start"),
+        "page_end": clause.get("page_end"),
+        "sort_order": clause.get("sort_order"),
+        "parent_id": str(clause["parent_id"]) if clause.get("parent_id") else None,
+        "commentary_clause_id": (
+            str(clause["commentary_clause_id"])
+            if clause.get("commentary_clause_id")
+            else None
+        ),
+        "children": [],
+    }
+
+
+def _is_toc_section(section: dict) -> bool:
+    title = (section.get("title") or "").strip()
+    text = (section.get("text") or "").strip()
+    if not title:
+        return True
+    if text:
+        return False
+    if _TOC_PAGE_REF.search(title):
+        return True
+    if _TOC_DOT_LEADERS.search(title):
+        return True
+    return False
+
+
+def _find_outline_parent_by_code(outline_by_code: dict[str, dict], section_code: str | None) -> dict | None:
+    if not section_code or "." not in section_code:
+        return None
+    parts = section_code.split(".")
+    for size in range(len(parts) - 1, 0, -1):
+        parent = outline_by_code.get(".".join(parts[:size]))
+        if parent is not None:
+            return parent
+    return None
+
+
+def _build_outline_tree(sections: list[dict]) -> tuple[list[dict], dict[str, dict]]:
+    filtered = [section for section in sections if not _is_toc_section(section)]
+    if not filtered:
+        return [], {}
+
+    roots: list[dict] = []
+    outline_by_code: dict[str, dict] = {}
+    stack: list[dict] = []
+
+    for index, section in enumerate(filtered):
+        section_code = str(section.get("section_code") or "").strip() or None
+        level = int(section.get("level") or 1)
+        node = {
+            "id": f"outline:{section['id']}",
+            "clause_no": section_code,
+            "clause_title": (section.get("title") or "").strip() or None,
+            "clause_text": (section.get("text") or "").strip() or None,
+            "summary": None,
+            "tags": [],
+            "clause_type": "outline",
+            "node_type": "outline",
+            "node_key": section_code or f"outline:{section['id']}",
+            "node_label": None,
+            "page_start": section.get("page_start"),
+            "page_end": section.get("page_end") or section.get("page_start"),
+            "sort_order": index,
+            "parent_id": None,
+            "commentary_clause_id": None,
+            "children": [],
+            "_level": level,
+        }
+
+        while stack and stack[-1]["_level"] >= level:
+            stack.pop()
+
+        parent = _find_outline_parent_by_code(outline_by_code, section_code)
+        if parent is None and stack:
+            parent = stack[-1]
+
+        if parent is not None:
+            node["parent_id"] = parent["id"]
+            parent["children"].append(node)
+        else:
+            roots.append(node)
+
+        stack.append(node)
+        if section_code and section_code not in outline_by_code:
+            outline_by_code[section_code] = node
+
+    for node in outline_by_code.values():
+        node.pop("_level", None)
+    for node in roots:
+        node.pop("_level", None)
+        for child in node["children"]:
+            _clear_outline_levels(child)
+
+    return roots, outline_by_code
+
+
+def _clear_outline_levels(node: dict) -> None:
+    node.pop("_level", None)
+    for child in node["children"]:
+        _clear_outline_levels(child)
+
+
+def _find_outline_host(outline_by_code: dict[str, dict], clause_no: str | None) -> dict | None:
+    if not clause_no:
+        return None
+    return _find_outline_parent_by_code(outline_by_code, clause_no)
+
+
+def _merge_clause_into_outline_node(target: dict, clause: dict) -> None:
+    target["id"] = str(clause["id"])
+    target["summary"] = clause.get("summary")
+    target["tags"] = clause.get("tags", [])
+    target["clause_type"] = clause.get("clause_type") or "normative"
+    target["node_key"] = clause.get("node_key") or target.get("node_key")
+    target["page_start"] = clause.get("page_start") or target.get("page_start")
+    target["page_end"] = clause.get("page_end") or target.get("page_end")
+    target["sort_order"] = clause.get("sort_order")
+    target["commentary_clause_id"] = (
+        str(clause["commentary_clause_id"])
+        if clause.get("commentary_clause_id")
+        else None
+    )
+    if clause.get("clause_text"):
+        target["clause_text"] = clause["clause_text"]
+    if not target.get("clause_title") and clause.get("clause_title"):
+        target["clause_title"] = clause["clause_title"]
 
 
 class StandardRepository:
@@ -112,34 +307,101 @@ class StandardRepository:
         if not flat:
             return []
 
-        # Index by id
         by_id: dict[str, dict] = {}
         for c in flat:
-            node = {
-                "id": str(c["id"]),
-                "clause_no": c.get("clause_no"),
-                "clause_title": c.get("clause_title"),
-                "clause_text": c.get("clause_text"),
-                "summary": c.get("summary"),
-                "tags": c.get("tags", []),
-                "clause_type": c.get("clause_type", "normative"),
-                "page_start": c.get("page_start"),
-                "page_end": c.get("page_end"),
-                "sort_order": c.get("sort_order"),
-                "parent_id": str(c["parent_id"]) if c.get("parent_id") else None,
-                "children": [],
-            }
+            node = _build_clause_node(c)
             by_id[str(c["id"])] = node
 
         roots: list[dict] = []
         for node in by_id.values():
+            commentary_parent_id = node.get("commentary_clause_id")
             pid = node["parent_id"]
+            if node["clause_type"] == "commentary" and commentary_parent_id and commentary_parent_id in by_id:
+                by_id[commentary_parent_id]["children"].append(node)
+                continue
             if pid and pid in by_id:
                 by_id[pid]["children"].append(node)
-            else:
-                roots.append(node)
+                continue
+            roots.append(node)
 
         return roots
+
+    def list_document_sections(self, conn: Connection, *, document_id: UUID) -> list[dict]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                """
+                SELECT id, section_code, title, level, text, page_start, page_end
+                FROM document_section
+                WHERE document_id = %s
+                ORDER BY
+                  CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
+                  page_start,
+                  level,
+                  ctid
+                """,
+                (document_id,),
+            ).fetchall()
+
+    def get_viewer_tree(self, conn: Connection, standard_id: UUID) -> list[dict]:
+        file_meta = self.get_standard_file(conn, standard_id)
+        document_id = file_meta.get("document_id") if file_meta else None
+        sections = (
+            self.list_document_sections(conn, document_id=document_id)
+            if document_id is not None
+            else []
+        )
+        outline_roots, outline_by_code = _build_outline_tree(sections)
+
+        flat = self.list_clauses(conn, standard_id=standard_id)
+        if not flat:
+            return outline_roots
+        if not outline_roots:
+            return self.get_clause_tree(conn, standard_id)
+
+        mounted_by_clause_id: dict[str, dict] = {}
+        detached_roots: list[dict] = []
+
+        for clause in flat:
+            clause_id = str(clause["id"])
+            node_type = clause.get("node_type") or "clause"
+            clause_no = clause.get("clause_no")
+            clause_type = clause.get("clause_type") or "normative"
+
+            exact_outline = None
+            if clause_type != "commentary" and node_type == "clause" and clause_no:
+                exact_outline = outline_by_code.get(clause_no)
+
+            if exact_outline is not None:
+                _merge_clause_into_outline_node(exact_outline, clause)
+                mounted_by_clause_id[clause_id] = exact_outline
+                continue
+
+            node = _build_clause_node(clause)
+            mounted_by_clause_id[clause_id] = node
+
+            commentary_parent_id = node.get("commentary_clause_id")
+            parent_id = node.get("parent_id")
+            outline_host = _find_outline_host(outline_by_code, clause_no)
+
+            if clause_type != "commentary" and node_type == "clause" and outline_host is not None:
+                outline_host["children"].append(node)
+                continue
+
+            if node["clause_type"] == "commentary" and commentary_parent_id and commentary_parent_id in mounted_by_clause_id:
+                mounted_by_clause_id[commentary_parent_id]["children"].append(node)
+                continue
+
+            if parent_id and parent_id in mounted_by_clause_id:
+                mounted_by_clause_id[parent_id]["children"].append(node)
+                continue
+
+            if outline_host is not None:
+                outline_host["children"].append(node)
+                continue
+
+            detached_roots.append(node)
+
+        return [*outline_roots, *detached_roots]
 
     # ── Write helpers ──
 
@@ -173,21 +435,27 @@ class StandardRepository:
         """Bulk insert clause dicts. Returns count inserted."""
         if not clauses:
             return 0
+        clauses = _order_clauses_for_insert(clauses)
         with conn.cursor() as cur:
             cur.executemany(
                 """INSERT INTO standard_clause
                        (id, standard_id, parent_id, clause_no, clause_title,
                         clause_text, summary, tags, page_start, page_end,
-                        sort_order, clause_type, commentary_clause_id)
+                        sort_order, clause_type, commentary_clause_id,
+                        node_type, node_key, node_label)
                    VALUES (%(id)s, %(standard_id)s, %(parent_id)s, %(clause_no)s,
                            %(clause_title)s, %(clause_text)s, %(summary)s,
                            %(tags)s, %(page_start)s, %(page_end)s,
-                           %(sort_order)s, %(clause_type)s, %(commentary_clause_id)s)""",
+                           %(sort_order)s, %(clause_type)s, %(commentary_clause_id)s,
+                           %(node_type)s, %(node_key)s, %(node_label)s)""",
                 [
                     {
                         **c,
                         "tags": _json.dumps(c.get("tags") or []),
                         "commentary_clause_id": c.get("commentary_clause_id"),
+                        "node_type": c.get("node_type", "clause"),
+                        "node_key": c.get("node_key"),
+                        "node_label": c.get("node_label"),
                     }
                     for c in clauses
                 ],
@@ -264,14 +532,15 @@ class StandardRepository:
                 """
                 INSERT INTO standard_clause
                     (id, standard_id, parent_id, clause_no, clause_title,
-                     clause_text, summary, tags, page_start, page_end, sort_order)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     clause_text, summary, tags, page_start, page_end, sort_order,
+                     node_type, node_key, node_label)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
                     uuid4(), standard_id, parent_id, clause_no, clause_title,
                     clause_text, summary, json.dumps(tags or []),
-                    page_start, page_end, sort_order,
+                    page_start, page_end, sort_order, "clause", clause_no, None,
                 ),
             ).fetchone()
         conn.commit()
@@ -281,9 +550,20 @@ class StandardRepository:
         with conn.cursor(row_factory=dict_row) as cur:
             return cur.execute(
                 """
-                SELECT s.*, j.ocr_status, j.ai_status
+                SELECT
+                  s.*,
+                  j.ocr_status,
+                  j.ai_status,
+                  CASE
+                    WHEN pf.storage_key LIKE '/tmp/pytest-of-%'
+                      OR pf.storage_key LIKE '%/pytest-of-%'
+                    THEN TRUE
+                    ELSE FALSE
+                  END AS is_dev_artifact
                 FROM standard s
                 LEFT JOIN standard_processing_job j ON j.standard_id = s.id
+                LEFT JOIN document d ON d.id = s.document_id
+                LEFT JOIN project_file pf ON pf.id = d.project_file_id
                 ORDER BY s.standard_code
                 """
             ).fetchall()

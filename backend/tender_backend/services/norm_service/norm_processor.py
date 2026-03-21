@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 import re
 import time
 from io import BytesIO
@@ -19,6 +20,7 @@ import structlog
 from psycopg import Connection
 from psycopg.rows import dict_row
 
+from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.layout_compressor import compress_sections
@@ -76,9 +78,20 @@ def _ai_gateway_chat_url(base_url: str) -> str:
 
 def _ai_gateway_timeout_seconds(model_name: str | None) -> float:
     """Use a longer timeout for reasoning models, which stream much slower."""
+    settings = get_settings()
+    base_timeout = settings.standard_ai_gateway_timeout_seconds
     if model_name and "reasoner" in model_name.lower():
-        return 300.0
-    return 180.0
+        return max(base_timeout, 300.0)
+    return base_timeout
+
+
+def _scope_delay_seconds() -> float:
+    settings = get_settings()
+    delay = max(0.0, settings.standard_ai_scope_delay_ms / 1000.0)
+    jitter = max(0.0, settings.standard_ai_scope_delay_jitter_ms / 1000.0)
+    if jitter:
+        delay += random.uniform(0.0, jitter)
+    return delay
 
 
 def _extract_markdown_from_zip(content: bytes) -> str:
@@ -94,6 +107,128 @@ def _extract_markdown_from_zip(content: bytes) -> str:
                 return zf.read(name).decode("utf-8")
 
     raise RuntimeError("MinerU result zip does not contain a markdown file")
+
+
+def _extract_pages_from_payload(payload: object) -> list[dict]:
+    """Best-effort extraction of page-level OCR payloads from MinerU JSON."""
+    if isinstance(payload, list):
+        if payload and all(isinstance(item, dict) for item in payload):
+            if any(_extract_page_text(item) for item in payload):
+                return payload
+        for item in payload:
+            pages = _extract_pages_from_payload(item)
+            if pages:
+                return pages
+        return []
+
+    if isinstance(payload, dict):
+        for key in ("pages", "page_infos", "page_info", "page_results", "data", "result"):
+            if key in payload:
+                pages = _extract_pages_from_payload(payload[key])
+                if pages:
+                    return pages
+        for value in payload.values():
+            pages = _extract_pages_from_payload(value)
+            if pages:
+                return pages
+
+    return []
+
+
+def _extract_pages_from_zip(content: bytes) -> list[dict]:
+    """Read page-level OCR payloads from a MinerU result zip when available."""
+    with ZipFile(BytesIO(content)) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".json"):
+                continue
+            try:
+                payload = json.loads(zf.read(name).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            pages = _extract_pages_from_payload(payload)
+            if pages:
+                return pages
+    return []
+
+
+def _normalize_match_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _extract_page_number(page: dict, index: int) -> int:
+    for key in ("page_number", "page_no", "page_num", "page"):
+        value = page.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    for key in ("page_idx", "page_index"):
+        value = page.get(key)
+        if isinstance(value, int) and value >= 0:
+            return value + 1
+    return index + 1
+
+
+def _collect_text_fragments(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        fragments: list[str] = []
+        for item in value:
+            fragments.extend(_collect_text_fragments(item))
+        return fragments
+    if isinstance(value, dict):
+        fragments: list[str] = []
+        for key in ("markdown", "md", "text", "content", "raw_text", "raw_markdown"):
+            if key in value:
+                fragments.extend(_collect_text_fragments(value[key]))
+        return fragments
+    return []
+
+
+def _extract_page_text(page: dict) -> str:
+    return "\n".join(
+        fragment.strip()
+        for fragment in _collect_text_fragments(page)
+        if fragment.strip()
+    )
+
+
+def _normalize_pages(pages: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    for index, page in enumerate(pages):
+        text = _normalize_match_text(_extract_page_text(page))
+        if not text:
+            continue
+        normalized.append({
+            "page_number": _extract_page_number(page, index),
+            "text": text,
+        })
+    return normalized
+
+
+def _find_section_page_index(
+    pages: list[dict],
+    *,
+    heading: str,
+    chunk: str,
+    start_index: int,
+) -> int | None:
+    if not pages:
+        return None
+
+    body = chunk.split("\n", 1)[1] if "\n" in chunk else chunk
+    candidates = [
+        _normalize_match_text(heading),
+        _normalize_match_text(chunk[:160]),
+        _normalize_match_text(body[:120]),
+    ]
+    candidates = [candidate for candidate in candidates if candidate]
+
+    for search_start in (start_index, 0):
+        for index in range(search_start, len(pages)):
+            page_text = pages[index]["text"]
+            if any(candidate in page_text for candidate in candidates):
+                return index
+    return None
 
 
 def _raise_mineru_http_error(exc: httpx.HTTPStatusError) -> None:
@@ -223,8 +358,12 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
             except httpx.HTTPStatusError as exc:
                 _raise_mineru_http_error(exc)
             raw_content = _extract_markdown_from_zip(zip_resp.content)
+            pages = (
+                _extract_pages_from_zip(zip_resp.content)
+                or _extract_pages_from_payload(item.get("pages") or [])
+            )
 
-            sections = _mineru_to_sections(raw_content, [])
+            sections = _mineru_to_sections(raw_content, pages)
             count = persist_sections(conn, document_id=UUID(document_id), sections=sections)
             logger.info("mineru_sections_persisted", document_id=document_id, count=count)
             return count
@@ -244,6 +383,8 @@ def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
         return []
 
     sections: list[dict] = []
+    normalized_pages = _normalize_pages(pages)
+    page_cursor = 0
     # Split by heading patterns: # Title, ## Title, ### Title, etc.
     # or numeric headings like "1 总则", "3.2 构件"
     heading_pattern = re.compile(
@@ -281,13 +422,24 @@ def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
         # Text is everything after the heading line
         lines = chunk.split("\n", 1)
         text = lines[1].strip() if len(lines) > 1 else ""
+        heading = lines[0].strip() if lines else title
+        page_index = _find_section_page_index(
+            normalized_pages,
+            heading=heading,
+            chunk=chunk,
+            start_index=page_cursor,
+        )
+        page_number = None
+        if page_index is not None:
+            page_cursor = page_index
+            page_number = normalized_pages[page_index]["page_number"]
 
         sections.append({
             "section_code": code,
             "title": title,
             "level": level,
-            "page_start": None,
-            "page_end": None,
+            "page_start": page_number,
+            "page_end": page_number,
             "text": text,
         })
 
@@ -437,6 +589,21 @@ def _parse_llm_json(raw: str) -> list[dict]:
     return []
 
 
+def _is_retryable_ai_gateway_status(exc: httpx.HTTPStatusError) -> bool:
+    response = exc.response
+    if response.status_code not in {502, 504}:
+        return False
+
+    payload = ""
+    try:
+        payload = json.dumps(response.json(), ensure_ascii=False)
+    except Exception:
+        payload = response.text
+
+    haystack = f"{str(exc)} {payload}".lower()
+    return "timed out" in haystack or "timeout" in haystack
+
+
 def _process_scope_with_retries(
     conn: Connection,
     scope: ProcessingScope,
@@ -450,7 +617,9 @@ def _process_scope_with_retries(
         prompt = build_prompt(current_scope)
         try:
             raw_response = _call_ai_gateway(conn, prompt, current_scope.chapter_label)
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            if isinstance(exc, httpx.HTTPStatusError) and not _is_retryable_ai_gateway_status(exc):
+                raise
             retry_scopes = rebalance_scopes(
                 [current_scope],
                 max_chars=max(500, len(current_scope.text) // 2),
@@ -537,9 +706,10 @@ def process_standard_ai(
             entries = _process_scope_with_retries(conn, scope)
             all_entries.extend(entries)
 
-            # Rate limit: 2-second delay between scopes
             if i < len(scopes) - 1:
-                time.sleep(2)
+                delay_seconds = _scope_delay_seconds()
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
 
         logger.info("all_scopes_processed", total_entries=len(all_entries))
 

@@ -280,6 +280,15 @@
   margin-bottom: var(--space-4);
 }
 
+.standards-table-card__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
 .standards-table-card__header h2,
 .standard-search-card__header h2 {
   font-size: var(--text-lg);
@@ -298,6 +307,10 @@
 }
 
 .standards-table-card__name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
   font-weight: 600;
   margin-bottom: 4px;
 }

@@ -33,6 +33,8 @@ class StandardProcessingScheduler:
         standard_repo: StandardRepository | Any | None = None,
         run_ocr: Callable[..., int] | None = None,
         run_ai: Callable[..., dict] | None = None,
+        ocr_worker_count: int = 1,
+        ai_worker_count: int = 1,
         poll_interval_seconds: float = 2.0,
     ) -> None:
         self.pool = pool
@@ -40,6 +42,8 @@ class StandardProcessingScheduler:
         self.standard_repo = standard_repo or StandardRepository()
         self.run_ocr = run_ocr or ensure_standard_ocr
         self.run_ai = run_ai or process_standard_ai
+        self.ocr_worker_count = max(1, int(ocr_worker_count))
+        self.ai_worker_count = max(1, int(ai_worker_count))
         self.poll_interval_seconds = poll_interval_seconds
         self._wake_event = threading.Event()
         self._stop_event = threading.Event()
@@ -51,8 +55,22 @@ class StandardProcessingScheduler:
             return
 
         self._threads = [
-            threading.Thread(target=self._ocr_loop, name="standard-ocr-loop", daemon=True),
-            threading.Thread(target=self._ai_loop, name="standard-ai-loop", daemon=True),
+            *[
+                threading.Thread(
+                    target=self._ocr_loop,
+                    name=f"standard-ocr-loop-{index + 1}",
+                    daemon=True,
+                )
+                for index in range(self.ocr_worker_count)
+            ],
+            *[
+                threading.Thread(
+                    target=self._ai_loop,
+                    name=f"standard-ai-loop-{index + 1}",
+                    daemon=True,
+                )
+                for index in range(self.ai_worker_count)
+            ],
         ]
         for thread in self._threads:
             thread.start()
@@ -79,6 +97,7 @@ class StandardProcessingScheduler:
             try:
                 self.run_ocr(conn, document_id=str(job.document_id))
             except Exception as exc:
+                conn.rollback()
                 self.job_repo.mark_ocr_failed(conn, job_id=job.id, error=str(exc))
                 self.standard_repo.update_processing_status(
                     conn, job.standard_id, "failed", error_message=str(exc)
@@ -103,6 +122,7 @@ class StandardProcessingScheduler:
                     document_id=str(job.document_id),
                 )
             except Exception as exc:
+                conn.rollback()
                 self.job_repo.mark_ai_failed(conn, job_id=job.id, error=str(exc))
                 self.standard_repo.update_processing_status(
                     conn, job.standard_id, "failed", error_message=str(exc)
@@ -136,7 +156,9 @@ def get_standard_processing_scheduler() -> StandardProcessingScheduler:
             if not settings.database_url:
                 raise RuntimeError("DATABASE_URL is not configured")
             _scheduler = StandardProcessingScheduler(
-                pool=get_pool(database_url=settings.database_url)
+                pool=get_pool(database_url=settings.database_url),
+                ocr_worker_count=settings.standard_ocr_worker_count,
+                ai_worker_count=settings.standard_ai_worker_count,
             )
         return _scheduler
 

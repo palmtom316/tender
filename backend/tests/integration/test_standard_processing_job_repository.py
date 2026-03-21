@@ -77,6 +77,15 @@ def _ensure_schema(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
+def _reset_standard_tables(conn: psycopg.Connection) -> None:
+    conn.execute("DELETE FROM standard_processing_job;")
+    conn.execute("DELETE FROM standard;")
+    conn.execute("DELETE FROM document;")
+    conn.execute("DELETE FROM project_file;")
+    conn.execute("DELETE FROM project WHERE id <> %s;", (_STANDARD_PROJECT_ID,))
+    conn.commit()
+
+
 @pytest.fixture()
 def conn() -> psycopg.Connection:
     db_url = _db_url()
@@ -85,15 +94,11 @@ def conn() -> psycopg.Connection:
 
     conn = psycopg.connect(db_url, row_factory=dict_row)
     _ensure_schema(conn)
-    conn.execute("DELETE FROM standard_processing_job;")
-    conn.execute("DELETE FROM standard;")
-    conn.execute("DELETE FROM document;")
-    conn.execute("DELETE FROM project_file;")
-    conn.execute("DELETE FROM project WHERE id <> %s;", (_STANDARD_PROJECT_ID,))
-    conn.commit()
+    _reset_standard_tables(conn)
     try:
         yield conn
     finally:
+        _reset_standard_tables(conn)
         conn.close()
 
 

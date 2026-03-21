@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_prefix: str = "/api"
     database_url: str | None = None
+    standard_ocr_worker_count: int = 1
+    standard_ai_worker_count: int = 4
+    standard_ai_scope_delay_ms: int = 200
+    standard_ai_scope_delay_jitter_ms: int = 200
+    standard_ai_gateway_timeout_seconds: float = 120.0
     version: str = "0.1.0"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

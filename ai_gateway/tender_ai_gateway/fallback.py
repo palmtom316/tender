@@ -94,7 +94,10 @@ def call_with_fallback(
 ) -> CompletionResult:
     """Call primary provider, fall back to secondary on failure."""
     settings = get_settings()
+    profile = TASK_PROFILES.get(task_type, {})
     primary, fallback = _get_providers(task_type, primary_override, fallback_override)
+    timeout = profile.get("timeout", settings.default_timeout)
+    max_retries = profile.get("max_retries", settings.default_retry_count)
 
     for attempt, provider in enumerate([primary, fallback]):
         if not provider.api_key:
@@ -104,8 +107,8 @@ def call_with_fallback(
         client = OpenAI(
             api_key=provider.api_key,
             base_url=provider.base_url,
-            timeout=settings.default_timeout,
-            max_retries=settings.default_retry_count,
+            timeout=timeout,
+            max_retries=max_retries,
         )
 
         start = time.perf_counter()

@@ -32,10 +32,12 @@ class _FakeResponse:
             raise RuntimeError(f"HTTP {self.status_code}")
 
 
-def _zip_bytes(full_md: str) -> bytes:
+def _zip_bytes(full_md: str, extra_files: dict[str, str] | None = None) -> bytes:
     buf = BytesIO()
     with ZipFile(buf, "w") as zf:
         zf.writestr("full.md", full_md)
+        for name, content in (extra_files or {}).items():
+            zf.writestr(name, content)
     return buf.getvalue()
 
 
@@ -93,7 +95,16 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
                 },
             })
         if url == "https://download.example.com/result.zip":
-            return _FakeResponse(content=_zip_bytes("1 总则\n正文内容"))
+            return _FakeResponse(content=_zip_bytes(
+                "1 总则\n正文内容\n\n2 术语\n术语正文",
+                {
+                    "middle.json": (
+                        '{"pages": ['
+                        '{"page_number": 7, "markdown": "1 总则\\n正文内容"},'
+                        '{"page_number": 8, "markdown": "2 术语\\n术语正文"}'
+                        "]}"),
+                },
+            ))
         pytest.fail(f"unexpected GET {url}")
 
     persisted: dict[str, object] = {}
@@ -117,7 +128,7 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
 
     count = norm_processor._parse_via_mineru(object(), "11111111-1111-1111-1111-111111111111")
 
-    assert count == 1
+    assert count == 2
     assert calls[0] == (
         "POST",
         "https://mineru.net/api/v4/file-urls/batch",
@@ -134,14 +145,53 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
     assert ("GET", "https://mineru.net/api/v4/extract-results/batch/batch-123", None, {"Authorization": "Bearer token"}) in calls
     assert ("GET", "https://download.example.com/result.zip", None, None) in calls
     assert persisted["document_id"] == UUID("11111111-1111-1111-1111-111111111111")
-    assert persisted["sections"] == [{
-        "section_code": "1",
-        "title": "总则",
-        "level": 1,
-        "page_start": None,
-        "page_end": None,
-        "text": "正文内容",
-    }]
+    assert persisted["sections"] == [
+        {
+            "section_code": "1",
+            "title": "总则",
+            "level": 1,
+            "page_start": 7,
+            "page_end": 7,
+            "text": "正文内容",
+        },
+        {
+            "section_code": "2",
+            "title": "术语",
+            "level": 1,
+            "page_start": 8,
+            "page_end": 8,
+            "text": "术语正文",
+        },
+    ]
+
+
+def test_mineru_to_sections_uses_page_markdown_to_anchor_headings() -> None:
+    sections = norm_processor._mineru_to_sections(
+        "1 总则\n正文内容\n\n2 术语\n术语正文",
+        [
+            {"page_number": 3, "markdown": "1 总则\n正文内容"},
+            {"page_number": 4, "markdown": "2 术语\n术语正文"},
+        ],
+    )
+
+    assert sections == [
+        {
+            "section_code": "1",
+            "title": "总则",
+            "level": 1,
+            "page_start": 3,
+            "page_end": 3,
+            "text": "正文内容",
+        },
+        {
+            "section_code": "2",
+            "title": "术语",
+            "level": 1,
+            "page_start": 4,
+            "page_end": 4,
+            "text": "术语正文",
+        },
+    ]
 
 
 def test_call_ai_gateway_uses_api_prefix(monkeypatch) -> None:
@@ -182,7 +232,7 @@ def test_call_ai_gateway_uses_api_prefix(monkeypatch) -> None:
 
     assert raw == "[]"
     assert called["url"] == "http://ai-gateway:8100/api/ai/chat"
-    assert called["timeout"] == 180.0
+    assert called["timeout"] == 120.0
 
 
 def test_call_ai_gateway_uses_longer_timeout_for_reasoner(monkeypatch) -> None:
@@ -221,6 +271,48 @@ def test_call_ai_gateway_uses_longer_timeout_for_reasoner(monkeypatch) -> None:
     assert called["timeout"] == 300.0
 
 
+def test_call_ai_gateway_uses_configured_backend_timeout(monkeypatch) -> None:
+    called: dict[str, object] = {}
+
+    class _ChatResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "content": "[]",
+                "resolved_model": "deepseek-ai/DeepSeek-V3.2",
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "used_fallback": False,
+            }
+
+    def fake_post(url: str, **kwargs):
+        called["timeout"] = kwargs.get("timeout")
+        return _ChatResponse()
+
+    monkeypatch.setattr(norm_processor._agent_repo, "get_by_key", lambda conn, key: SimpleNamespace(
+        enabled=True,
+        base_url="https://api.siliconflow.cn/v1",
+        api_key="primary-key",
+        primary_model="deepseek-ai/DeepSeek-V3.2",
+        fallback_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        fallback_api_key="fallback-key",
+        fallback_model="qwen-plus",
+    ))
+    monkeypatch.setattr(
+        norm_processor,
+        "get_settings",
+        lambda: SimpleNamespace(standard_ai_gateway_timeout_seconds=120.0),
+        raising=False,
+    )
+    monkeypatch.setattr(norm_processor.httpx, "post", fake_post)
+
+    norm_processor._call_ai_gateway(object(), "prompt text", "第1章")
+
+    assert called["timeout"] == 120.0
+
+
 def test_process_scope_with_retries_rebalances_on_timeout(monkeypatch) -> None:
     calls: list[str] = []
     scope = ProcessingScope(
@@ -253,6 +345,46 @@ def test_process_scope_with_retries_rebalances_on_timeout(monkeypatch) -> None:
     assert entries == []
     assert calls[0] == "8 电力变压器"
     assert calls[1:] == ["8 电力变压器 (1/2)", "8 电力变压器 (2/2)"]
+
+
+def test_process_scope_with_retries_rebalances_on_ai_gateway_timeout_502(monkeypatch) -> None:
+    calls: list[str] = []
+    scope = ProcessingScope(
+        scope_type="normative",
+        chapter_label="4 电力变压器",
+        text=(
+            "4 电力变压器\n\n"
+            "4.0.1 第一条正文\n\n"
+            "4.0.2 第二条正文\n\n"
+            "4.0.3 第三条正文\n\n"
+            "4.0.4 第四条正文"
+        ),
+        page_start=1,
+        page_end=3,
+        section_ids=["s1"],
+    )
+
+    def fake_call_ai_gateway(conn, prompt: str, scope_label: str) -> str:
+        calls.append(scope_label)
+        if scope_label == "4 电力变压器":
+            request = httpx.Request("POST", "http://ai-gateway:8100/api/ai/chat")
+            response = httpx.Response(
+                502,
+                request=request,
+                json={"detail": "All providers failed: Request timed out."},
+            )
+            raise httpx.HTTPStatusError("502 timeout", request=request, response=response)
+        return "[]"
+
+    monkeypatch.setattr(norm_processor, "_call_ai_gateway", fake_call_ai_gateway)
+    monkeypatch.setattr(norm_processor, "_parse_llm_json", lambda raw: [])
+    monkeypatch.setattr(norm_processor, "build_prompt", lambda current_scope: current_scope.text)
+
+    entries = norm_processor._process_scope_with_retries(object(), scope)
+
+    assert entries == []
+    assert calls[0] == "4 电力变压器"
+    assert calls[1:] == ["4 电力变压器 (1/2)", "4 电力变压器 (2/2)"]
 
 
 def test_validate_tree_ignores_empty_structural_parent_clause() -> None:
@@ -546,6 +678,69 @@ def test_process_standard_ai_uses_existing_ocr_sections(monkeypatch) -> None:
     assert captured["indexed"] == 1
 
 
+def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:
+    standard_id = UUID("33333333-3333-3333-3333-333333333333")
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
+    monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1.0.1 正文",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        ),
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="2 术语",
+            text="2.0.1 正文",
+            page_start=2,
+            page_end=2,
+            section_ids=["s2"],
+        ),
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(
+        norm_processor,
+        "get_settings",
+        lambda: SimpleNamespace(
+            standard_ai_scope_delay_ms=200,
+            standard_ai_scope_delay_jitter_ms=0,
+            standard_ai_gateway_timeout_seconds=120.0,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(norm_processor.random, "uniform", lambda start, end: 0.0, raising=False)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda value: sleep_calls.append(value))
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="44444444-4444-4444-4444-444444444444",
+    )
+
+    assert summary["status"] == "completed"
+    assert sleep_calls == [0.2]
+
+
 def test_rebalance_scopes_splits_oversized_scope_by_paragraphs() -> None:
     scopes = [
         ProcessingScope(
@@ -648,3 +843,28 @@ def test_rebalance_scopes_uses_safer_default_clause_limit() -> None:
     assert "8.0.4 第四条正文" in rebalanced[0].text
     assert "8.0.5 第五条正文" not in rebalanced[0].text
     assert rebalanced[1].text == "8.0.5 第五条正文"
+
+
+def test_rebalance_scopes_splits_large_single_paragraph_html_table() -> None:
+    rows = "".join(
+        f"<tr><td>{idx}</td><td>术语说明{idx}</td><td>这是一个较长的表格单元格内容，用于触发表格拆分。</td></tr>"
+        for idx in range(1, 9)
+    )
+    scopes = [
+        ProcessingScope(
+            scope_type="commentary",
+            chapter_label="2 术语 (2/12)",
+            text=f"<table>{rows}</table>",
+            page_start=10,
+            page_end=12,
+            section_ids=["s1"],
+        )
+    ]
+
+    rebalanced = rebalance_scopes(scopes, max_chars=250, max_clause_blocks=2)
+
+    assert len(rebalanced) > 1
+    assert rebalanced[0].chapter_label.startswith("2 术语 (2/12) (1/")
+    assert rebalanced[-1].chapter_label.endswith(f"/{len(rebalanced)})")
+    assert all(part.text.startswith("<table>") for part in rebalanced)
+    assert all(part.text.endswith("</table>") for part in rebalanced)

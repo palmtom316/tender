@@ -17,6 +17,9 @@ def test_build_clause_index_docs_includes_viewer_fields() -> None:
             {
                 "id": uuid4(),
                 "clause_no": "3.2.1",
+                "node_type": "item",
+                "node_key": "3.2.1#1",
+                "node_label": "1",
                 "clause_title": "材料要求",
                 "clause_text": "混凝土强度等级不应低于 C30。",
                 "summary": "规定混凝土最低强度等级。",
@@ -29,5 +32,8 @@ def test_build_clause_index_docs_includes_viewer_fields() -> None:
 
     _, body = docs[0]
     assert body["standard_name"] == "混凝土结构设计规范"
+    assert body["node_type"] == "item"
+    assert body["node_key"] == "3.2.1#1"
+    assert body["node_label"] == "1"
     assert body["page_start"] == 15
     assert body["page_end"] == 16

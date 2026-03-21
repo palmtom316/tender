@@ -34,6 +34,26 @@ export function StandardViewerModal({
 
   const selectedClause = findClauseNode(viewerData.clause_tree, selectedClauseId)
     ?? firstClauseNode(viewerData.clause_tree);
+  const selectedClauseMarker = selectedClause?.node_label
+    ? `${selectedClause.clause_no ?? ""} ${selectedClause.node_label}`.trim()
+    : selectedClause?.clause_no ?? null;
+  const commentaryClauses = selectedClause?.clause_type === "normative"
+    ? selectedClause.children.filter((child) => child.clause_type === "commentary")
+    : [];
+  const selectedClausePageStart = selectedClause?.page_start;
+  const fallbackCommentaryPage = commentaryClauses.find(
+    (child) => child.page_start != null && child.page_start > 0,
+  )?.page_start;
+  const targetPage = selectedClausePageStart != null
+    ? Math.max(selectedClausePageStart, 1)
+    : fallbackCommentaryPage ?? null;
+  const displayPageStart = selectedClausePageStart != null
+    ? Math.max(selectedClausePageStart, 1)
+    : fallbackCommentaryPage ?? null;
+  const displayPageEnd = selectedClause?.page_end != null
+    ? Math.max(selectedClause.page_end, displayPageStart ?? 1)
+    : commentaryClauses.find((child) => child.page_end != null && child.page_end > 0)?.page_end
+      ?? displayPageStart;
 
   return (
     <div className="standard-viewer-modal">
@@ -58,7 +78,7 @@ export function StandardViewerModal({
           <div className="standard-viewer-modal__pdf">
             <StandardPdfPane
               pdfUrl={viewerData.pdf_url}
-              targetPage={selectedClause?.page_start ?? null}
+              targetPage={targetPage}
             />
           </div>
 
@@ -75,7 +95,7 @@ export function StandardViewerModal({
               {selectedClause ? (
                 <>
                   <div className="standard-viewer-modal__detail-header">
-                    {selectedClause.clause_no && <span>{selectedClause.clause_no}</span>}
+                    {selectedClauseMarker && <span>{selectedClauseMarker}</span>}
                     <strong>{selectedClause.clause_title || "条款详情"}</strong>
                   </div>
                   {selectedClause.summary && (
@@ -83,6 +103,23 @@ export function StandardViewerModal({
                   )}
                   {selectedClause.clause_text && (
                     <p className="standard-viewer-modal__text">{selectedClause.clause_text}</p>
+                  )}
+                  {!selectedClause.clause_text && selectedClause.clause_type === "outline" && (
+                    <p className="standard-viewer-modal__text">
+                      当前选中的是目录节点，可继续展开查看其下 AI 条款。
+                    </p>
+                  )}
+                  {commentaryClauses.length > 0 && (
+                    <>
+                      <div className="standard-viewer-modal__detail-header">
+                        <strong>条文说明</strong>
+                      </div>
+                      {commentaryClauses.map((commentary) => (
+                        <p key={commentary.id} className="standard-viewer-modal__text">
+                          {commentary.clause_text}
+                        </p>
+                      ))}
+                    </>
                   )}
                   {selectedClause.tags.length > 0 && (
                     <div className="standard-viewer-modal__tags">
@@ -93,8 +130,8 @@ export function StandardViewerModal({
                   )}
                   <div className="standard-viewer-modal__page">
                     原文页码：
-                    {selectedClause.page_start != null
-                      ? ` P${selectedClause.page_start}${selectedClause.page_end && selectedClause.page_end !== selectedClause.page_start ? `-${selectedClause.page_end}` : ""}`
+                    {displayPageStart != null
+                      ? ` P${displayPageStart}${displayPageEnd && displayPageEnd !== displayPageStart ? `-${displayPageEnd}` : ""}`
                       : " 未标注"}
                   </div>
                 </>

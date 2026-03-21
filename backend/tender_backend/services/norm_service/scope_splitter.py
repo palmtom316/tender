@@ -32,6 +32,7 @@ _CLAUSE_PUNCTUATION = ("，", "。", "；", "：", ":", "!", "?", "！", "？")
 _MAX_HEADING_LENGTH = 60
 _DEFAULT_SCOPE_MAX_CHARS = 3000
 _DEFAULT_SCOPE_MAX_CLAUSE_BLOCKS = 4
+_TABLE_ROW_PATTERN = re.compile(r"<tr\b.*?</tr>", re.IGNORECASE | re.DOTALL)
 
 
 @dataclass
@@ -177,6 +178,12 @@ def split_into_scopes(windows: list[PageWindow]) -> list[ProcessingScope]:
 
 def _split_block_by_paragraphs(text: str, max_chars: int) -> list[str]:
     """Split a text block into paragraph-based parts within the character budget."""
+    stripped = text.strip()
+    if stripped.lower().startswith("<table") and stripped.lower().endswith("</table>"):
+        row_parts = _split_html_table_by_rows(stripped, max_chars)
+        if len(row_parts) > 1:
+            return row_parts
+
     parts: list[str] = []
     current = ""
     for paragraph in [p.strip() for p in text.split("\n\n") if p.strip()]:
@@ -190,6 +197,36 @@ def _split_block_by_paragraphs(text: str, max_chars: int) -> list[str]:
     if current:
         parts.append(current)
     return parts
+
+
+def _split_html_table_by_rows(text: str, max_chars: int) -> list[str]:
+    """Split a large HTML table into smaller valid table fragments by row."""
+    rows = _TABLE_ROW_PATTERN.findall(text)
+    if len(rows) <= 1:
+        return [text]
+
+    open_end = text.lower().find(">")
+    close_start = text.lower().rfind("</table>")
+    if open_end == -1 or close_start == -1 or close_start <= open_end:
+        return [text]
+
+    table_open = text[: open_end + 1]
+    table_close = text[close_start:]
+    parts: list[str] = []
+    current_rows: list[str] = []
+
+    for row in rows:
+        candidate_rows = [*current_rows, row]
+        candidate = f"{table_open}{''.join(candidate_rows)}{table_close}"
+        if current_rows and len(candidate) > max_chars:
+            parts.append(f"{table_open}{''.join(current_rows)}{table_close}")
+            current_rows = [row]
+        else:
+            current_rows = candidate_rows
+
+    if current_rows:
+        parts.append(f"{table_open}{''.join(current_rows)}{table_close}")
+    return parts or [text]
 
 
 def _split_into_clause_blocks(text: str) -> list[tuple[str, int]]:

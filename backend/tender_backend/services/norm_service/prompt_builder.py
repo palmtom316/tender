@@ -10,21 +10,44 @@ CLAUSE_EXTRACTION_PROMPT = """\
 你是一个建筑工程规范条款提取助手。请从以下规范文本中提取所有条款，以 JSON 数组格式输出。
 
 要求：
-1. 每条包含: clause_no（条款编号如"3.2.1"）、clause_title（标题，可为空）、clause_text（完整条文）、summary（一句话摘要）、tags（关键词数组）、page_start（页码，如已知）
+1. 每个主条款对象包含: node_type（固定为"clause"）、clause_no（条款编号如"3.2.1"）、clause_title（标题，可为空）、clause_text（完整条文）、summary（一句话摘要）、tags（关键词数组）、page_start（页码，如已知）、children（下级项数组）
 2. 严格按照原文提取，不要修改条文内容
 3. 条款编号格式保持原文一致（如"3.2.1"、"第3.2.1条"等均保留原始格式）
-4. tags 应包含：专业领域（如"结构"、"给排水"）、条款类型（如"强制性条文"、"推荐性条文"）、关键技术词
-5. 如果条文包含"必须"、"应"、"不得"、"严禁"等强制性用词，在tags中标注"强制性条文"
+4. 如果条文下存在“1、2、3”这类项，必须放入 children，并将节点写为：node_type="item"、node_label="1"（保留原编号文本）、clause_text、summary、tags、page_start、children
+5. 如果项下还存在“1)”“2）”这类子项，必须继续放入 children，并将节点写为：node_type="subitem"、node_label="1)"（保留原编号文本）、clause_text、summary、tags、page_start
+6. tags 应包含：专业领域（如"结构"、"给排水"）、条款类型（如"强制性条文"、"推荐性条文"）、关键技术词
+7. 如果条文包含"必须"、"应"、"不得"、"严禁"等强制性用词，在tags中标注"强制性条文"
 
 仅输出 JSON 数组，不要输出其他文字。格式示例：
 [
   {{
+    "node_type": "clause",
     "clause_no": "3.2.1",
     "clause_title": "一般规定",
     "clause_text": "混凝土强度等级不应低于C25...",
     "summary": "规定了混凝土最低强度等级要求",
     "tags": ["结构", "混凝土", "强制性条文"],
-    "page_start": 15
+    "page_start": 15,
+    "children": [
+      {{
+        "node_type": "item",
+        "node_label": "1",
+        "clause_text": "第一项内容...",
+        "summary": "第一项摘要",
+        "tags": ["结构"],
+        "page_start": 15,
+        "children": [
+          {{
+            "node_type": "subitem",
+            "node_label": "1)",
+            "clause_text": "子项内容...",
+            "summary": "子项摘要",
+            "tags": ["结构"],
+            "page_start": 15
+          }}
+        ]
+      }}
+    ]
   }}
 ]
 

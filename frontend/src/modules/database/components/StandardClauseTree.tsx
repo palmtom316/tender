@@ -29,6 +29,15 @@ function findNode(nodes: StandardClauseNode[], targetId: string | null): Standar
   return null;
 }
 
+function displayClauseMarker(node: StandardClauseNode): string | null {
+  if (node.node_label) return node.node_label;
+  return node.clause_no;
+}
+
+function displayNodeTitle(node: StandardClauseNode): string {
+  return node.clause_title || node.clause_text || "未命名条款";
+}
+
 function ClauseTreeItem({
   node,
   depth,
@@ -68,11 +77,14 @@ function ClauseTreeItem({
           {hasChildren ? <Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} /> : null}
         </span>
         <span className="standard-clause-tree__meta">
-          {node.clause_no && <span className="standard-clause-tree__no">{node.clause_no}</span>}
+          {displayClauseMarker(node) && <span className="standard-clause-tree__no">{displayClauseMarker(node)}</span>}
           <span className="standard-clause-tree__title">
-            {node.clause_title || node.clause_text || "未命名条款"}
+            {displayNodeTitle(node)}
           </span>
         </span>
+        {node.clause_type === "outline" && (
+          <Badge variant="info">目录</Badge>
+        )}
         {node.page_start != null && (
           <Badge variant="default">P{node.page_start}</Badge>
         )}
@@ -105,7 +117,10 @@ export function findClauseNode(
 export function firstClauseNode(nodes: StandardClauseNode[]): StandardClauseNode | null {
   if (nodes.length === 0) return null;
   const [first] = nodes;
-  return first.children.length > 0 ? firstClauseNode(first.children) ?? first : first;
+  if (!first.clause_text && first.children.length > 0) {
+    return firstClauseNode(first.children) ?? first;
+  }
+  return first;
 }
 
 export function StandardClauseTree({

@@ -62,6 +62,9 @@ def _apply_extra_schema(conn: psycopg.Connection) -> None:
       sort_order INT NOT NULL DEFAULT 0,
       clause_type VARCHAR(20) NOT NULL DEFAULT 'normative',
       commentary_clause_id UUID REFERENCES standard_clause(id) ON DELETE SET NULL,
+      node_type VARCHAR(20) NOT NULL DEFAULT 'clause',
+      node_key VARCHAR(255),
+      node_label VARCHAR(100),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -87,6 +90,26 @@ def _apply_extra_schema(conn: psycopg.Connection) -> None:
     VALUES ('00000000-0000-0000-0000-000000000001', '规范规程资料库')
     ON CONFLICT DO NOTHING;
     """)
+    conn.execute("""
+    ALTER TABLE standard_clause
+      ADD COLUMN IF NOT EXISTS clause_type VARCHAR(20) NOT NULL DEFAULT 'normative',
+      ADD COLUMN IF NOT EXISTS commentary_clause_id UUID REFERENCES standard_clause(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS node_type VARCHAR(20) NOT NULL DEFAULT 'clause',
+      ADD COLUMN IF NOT EXISTS node_key VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS node_label VARCHAR(100);
+    """)
+    conn.commit()
+
+
+def _reset_standard_tables(conn: psycopg.Connection) -> None:
+    conn.execute("DELETE FROM standard_processing_job;")
+    conn.execute("DELETE FROM standard_clause;")
+    conn.execute("DELETE FROM standard;")
+    conn.execute("DELETE FROM document;")
+    conn.execute("DELETE FROM project_file;")
+    conn.execute(
+        "DELETE FROM project WHERE id <> '00000000-0000-0000-0000-000000000001'"
+    )
     conn.commit()
 
 
@@ -104,15 +127,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     with psycopg.connect(db_url) as conn:
         conn.execute(load_initial_schema_sql())
         _apply_extra_schema(conn)
-        conn.execute("DELETE FROM standard_processing_job;")
-        conn.execute("DELETE FROM standard_clause;")
-        conn.execute("DELETE FROM standard;")
-        conn.execute("DELETE FROM document;")
-        conn.execute("DELETE FROM project_file;")
-        conn.execute(
-            "DELETE FROM project WHERE id <> '00000000-0000-0000-0000-000000000001'"
-        )
-        conn.commit()
+        _reset_standard_tables(conn)
 
     import tender_backend.api.standards as standards_api
     import tender_backend.main as main_module
@@ -124,7 +139,12 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
 
     test_client = TestClient(app)
     test_client.headers.update(_AUTH_HEADERS)
-    return test_client
+    try:
+        yield test_client
+    finally:
+        test_client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_standard_tables(conn)
 
 
 def test_batch_upload_creates_queue_jobs_and_returns_queue_state(client: TestClient) -> None:

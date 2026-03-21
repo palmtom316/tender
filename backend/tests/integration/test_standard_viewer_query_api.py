@@ -62,6 +62,9 @@ def _apply_extra_schema(conn: psycopg.Connection) -> None:
       sort_order INT NOT NULL DEFAULT 0,
       clause_type VARCHAR(20) NOT NULL DEFAULT 'normative',
       commentary_clause_id UUID REFERENCES standard_clause(id) ON DELETE SET NULL,
+      node_type VARCHAR(20) NOT NULL DEFAULT 'clause',
+      node_key VARCHAR(255),
+      node_label VARCHAR(100),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -87,6 +90,26 @@ def _apply_extra_schema(conn: psycopg.Connection) -> None:
     VALUES ('00000000-0000-0000-0000-000000000001', '规范规程资料库')
     ON CONFLICT DO NOTHING;
     """)
+    conn.execute("""
+    ALTER TABLE standard_clause
+      ADD COLUMN IF NOT EXISTS clause_type VARCHAR(20) NOT NULL DEFAULT 'normative',
+      ADD COLUMN IF NOT EXISTS commentary_clause_id UUID REFERENCES standard_clause(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS node_type VARCHAR(20) NOT NULL DEFAULT 'clause',
+      ADD COLUMN IF NOT EXISTS node_key VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS node_label VARCHAR(100);
+    """)
+    conn.commit()
+
+
+def _reset_standard_tables(conn: psycopg.Connection) -> None:
+    conn.execute("DELETE FROM standard_processing_job;")
+    conn.execute("DELETE FROM standard_clause;")
+    conn.execute("DELETE FROM standard;")
+    conn.execute("DELETE FROM document;")
+    conn.execute("DELETE FROM project_file;")
+    conn.execute(
+        "DELETE FROM project WHERE id <> '00000000-0000-0000-0000-000000000001'"
+    )
     conn.commit()
 
 
@@ -104,15 +127,7 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     with psycopg.connect(db_url) as conn:
         conn.execute(load_initial_schema_sql())
         _apply_extra_schema(conn)
-        conn.execute("DELETE FROM standard_processing_job;")
-        conn.execute("DELETE FROM standard_clause;")
-        conn.execute("DELETE FROM standard;")
-        conn.execute("DELETE FROM document;")
-        conn.execute("DELETE FROM project_file;")
-        conn.execute(
-            "DELETE FROM project WHERE id <> '00000000-0000-0000-0000-000000000001'"
-        )
-        conn.commit()
+        _reset_standard_tables(conn)
 
     import tender_backend.api.standards as standards_api
     import tender_backend.main as main_module
@@ -124,7 +139,12 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
 
     test_client = TestClient(app)
     test_client.headers.update(_AUTH_HEADERS)
-    return test_client
+    try:
+        yield test_client
+    finally:
+        test_client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_standard_tables(conn)
 
 
 @pytest.fixture()
@@ -136,15 +156,7 @@ def anon_client(tmp_path: Path, monkeypatch) -> TestClient:
     with psycopg.connect(db_url) as conn:
         conn.execute(load_initial_schema_sql())
         _apply_extra_schema(conn)
-        conn.execute("DELETE FROM standard_processing_job;")
-        conn.execute("DELETE FROM standard_clause;")
-        conn.execute("DELETE FROM standard;")
-        conn.execute("DELETE FROM document;")
-        conn.execute("DELETE FROM project_file;")
-        conn.execute(
-            "DELETE FROM project WHERE id <> '00000000-0000-0000-0000-000000000001'"
-        )
-        conn.commit()
+        _reset_standard_tables(conn)
 
     import tender_backend.api.standards as standards_api
     import tender_backend.main as main_module
@@ -154,7 +166,13 @@ def anon_client(tmp_path: Path, monkeypatch) -> TestClient:
     monkeypatch.setattr(main_module, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
     monkeypatch.setattr(standards_api, "ensure_standard_processing_scheduler_started", lambda: scheduler_stub)
 
-    return TestClient(app)
+    test_client = TestClient(app)
+    try:
+        yield test_client
+    finally:
+        test_client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_standard_tables(conn)
 
 
 def _seed_standard(
@@ -164,9 +182,12 @@ def _seed_standard(
     processing_status: str = "completed",
     ocr_status: str = "completed",
     ai_status: str = "completed",
+    storage_key: str | None = None,
+    filename: str = "spec.pdf",
 ) -> dict[str, str]:
     pdf_bytes = b"%PDF-1.7 standard"
-    pdf_path = tmp_path / f"{uuid4()}.pdf"
+    pdf_path = Path(storage_key) if storage_key is not None else (tmp_path / f"{uuid4()}.pdf")
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
     pdf_path.write_bytes(pdf_bytes)
 
     project_file_id = uuid4()
@@ -182,7 +203,7 @@ def _seed_standard(
             INSERT INTO project_file (id, project_id, filename, content_type, size_bytes, storage_key)
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (project_file_id, _STANDARD_PROJECT_ID, "spec.pdf", "application/pdf", len(pdf_bytes), str(pdf_path)),
+            (project_file_id, _STANDARD_PROJECT_ID, filename, "application/pdf", len(pdf_bytes), str(pdf_path)),
         )
         conn.execute(
             "INSERT INTO document (id, project_file_id) VALUES (%s, %s)",
@@ -260,6 +281,59 @@ def _seed_standard(
     }
 
 
+def test_reset_standard_tables_removes_seeded_standard(tmp_path: Path) -> None:
+    db_url = _db_url()
+    if not db_url:
+        pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(load_initial_schema_sql())
+        _apply_extra_schema(conn)
+        _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+        _reset_standard_tables(conn)
+
+        assert conn.execute("SELECT count(*) FROM standard;").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM standard_processing_job;").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM document;").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM project_file;").fetchone()[0] == 0
+
+
+def test_list_standards_marks_pytest_temp_file_as_dev_artifact(client: TestClient, tmp_path: Path) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+
+    _seed_standard(
+        db_url=db_url,
+        tmp_path=tmp_path,
+        storage_key="/tmp/pytest-of-root/pytest-99/test-case/spec.pdf",
+    )
+
+    response = client.get("/api/standards")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["is_dev_artifact"] is True
+
+
+def test_list_standards_leaves_regular_uploaded_file_unmarked(client: TestClient, tmp_path: Path) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+
+    _seed_standard(
+        db_url=db_url,
+        tmp_path=tmp_path,
+        storage_key="/workspace/data/standards/gb50010.pdf",
+        filename="gb50010.pdf",
+    )
+
+    response = client.get("/api/standards")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["is_dev_artifact"] is False
+
+
 def test_get_standard_viewer_returns_pdf_url_and_clause_tree(
     client: TestClient,
     tmp_path: Path,
@@ -278,6 +352,86 @@ def test_get_standard_viewer_returns_pdf_url_and_clause_tree(
     assert payload["pdf_url"].endswith(f"/api/standards/{seeded['standard_id']}/pdf")
     assert len(payload["clause_tree"]) == 1
     assert payload["clause_tree"][0]["children"][0]["id"] == seeded["child_clause_id"]
+
+
+def test_get_standard_viewer_nests_commentary_under_matching_clause(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+    commentary_id = uuid4()
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(
+            """
+            INSERT INTO standard_clause (
+              id, standard_id, parent_id, clause_no, clause_title, clause_text,
+              summary, tags, page_start, page_end, sort_order, clause_type, commentary_clause_id
+            ) VALUES (%s, %s, NULL, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
+            """,
+            (
+                commentary_id,
+                seeded["standard_id"],
+                "3.2.1",
+                "条文说明",
+                "说明内容",
+                "说明摘要",
+                '["混凝土"]',
+                18,
+                18,
+                3,
+                "commentary",
+                seeded["child_clause_id"],
+            ),
+        )
+        conn.commit()
+
+    response = client.get(f"/api/standards/{seeded['standard_id']}/viewer")
+
+    assert response.status_code == 200
+    payload = response.json()
+    child = payload["clause_tree"][0]["children"][0]
+    assert len(child["children"]) == 1
+    assert child["children"][0]["id"] == str(commentary_id)
+    assert child["children"][0]["clause_type"] == "commentary"
+
+
+def test_get_standard_viewer_returns_outline_first_tree(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(
+            """
+            INSERT INTO document_section
+              (id, document_id, section_code, title, level, page_start, page_end, text)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, %s, %s),
+              (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                uuid4(), seeded["document_id"], "3", "总则", 1, 12, 12, None,
+                uuid4(), seeded["document_id"], "3.2", "材料", 2, 15, 15, None,
+            ),
+        )
+        conn.commit()
+
+    response = client.get(f"/api/standards/{seeded['standard_id']}/viewer")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["clause_tree"]) == 1
+    assert payload["clause_tree"][0]["clause_no"] == "3"
+    assert payload["clause_tree"][0]["clause_type"] == "normative"
+    assert payload["clause_tree"][0]["children"][0]["clause_no"] == "3.2"
+    assert payload["clause_tree"][0]["children"][0]["clause_type"] == "outline"
+    assert payload["clause_tree"][0]["children"][0]["children"][0]["id"] == seeded["child_clause_id"]
 
 
 def test_standard_endpoints_require_authentication(

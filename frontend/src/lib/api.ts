@@ -9,12 +9,40 @@ function getToken(): string {
   return localStorage.getItem("tender_token") ?? "dev-token";
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${BASE_URL}/api${path}`;
-  const headers: Record<string, string> = {
-    ...(init?.headers as Record<string, string>),
+function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return { ...headers };
+}
+
+export function buildApiUrl(path: string): string {
+  if (/^(?:https?:|blob:|data:)/.test(path)) {
+    return path;
+  }
+  if (path.startsWith("/api/")) {
+    return `${BASE_URL}${path}`;
+  }
+  if (path.startsWith("/")) {
+    return `${BASE_URL}/api${path}`;
+  }
+  return `${BASE_URL}/api/${path}`;
+}
+
+export function getAuthHeaders(headers?: HeadersInit): Record<string, string> {
+  return {
+    ...normalizeHeaders(headers),
+    Authorization: `Bearer ${getToken()}`,
   };
-  headers["Authorization"] = `Bearer ${getToken()}`;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = buildApiUrl(path);
+  const headers = getAuthHeaders(init?.headers);
 
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
@@ -363,7 +391,7 @@ export interface MeResponse {
 }
 
 export async function login(username: string, password: string): Promise<LoginResponse> {
-  const url = `${BASE_URL}/api/auth/login`;
+  const url = buildApiUrl("/auth/login");
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -457,6 +485,7 @@ export interface Standard {
   error_message?: string | null;
   queue_position?: number | null;
   clause_count: number;
+  is_dev_artifact?: boolean;
   created_at: string | null;
 }
 
@@ -475,6 +504,10 @@ export interface StandardViewerData extends StandardDetail {
 export interface StandardClause {
   id: string;
   clause_no: string | null;
+  // "outline" is used by the merged viewer tree for OCR-derived directory nodes.
+  node_type?: string;
+  node_key?: string | null;
+  node_label?: string | null;
   clause_title: string | null;
   clause_text: string | null;
   summary: string | null;

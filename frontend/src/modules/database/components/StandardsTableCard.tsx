@@ -1,4 +1,5 @@
 import { Card } from "../../../components/ui/Card";
+import { Badge } from "../../../components/ui/Badge";
 import { ClayButton } from "../../../components/ui/ClayButton";
 import { Icon } from "../../../components/ui/Icon";
 import type { Standard } from "../../../lib/api";
@@ -8,6 +9,10 @@ type StandardsTableCardProps = {
   standards: Standard[];
   loading: boolean;
   error: string;
+  isDevMode: boolean;
+  showDevArtifacts: boolean;
+  hiddenDevArtifactCount: number;
+  onToggleShowDevArtifacts: (nextValue: boolean) => void;
   onRetry: (standardId: string) => void;
   onDelete: (standardId: string) => void;
   onOpenViewer: (standardId: string) => void;
@@ -17,6 +22,10 @@ export function StandardsTableCard({
   standards,
   loading,
   error,
+  isDevMode,
+  showDevArtifacts,
+  hiddenDevArtifactCount,
+  onToggleShowDevArtifacts,
   onRetry,
   onDelete,
   onOpenViewer,
@@ -28,6 +37,19 @@ export function StandardsTableCard({
           <h2>规范规程列表</h2>
           <p>统一管理整份规范的处理状态、重试、删除与查阅入口。</p>
         </div>
+        {isDevMode && (
+          <label className="standards-table-card__toggle">
+            <input
+              type="checkbox"
+              checked={showDevArtifacts}
+              onChange={(event) => onToggleShowDevArtifacts(event.target.checked)}
+            />
+            <span>
+              显示测试残留
+              {hiddenDevArtifactCount > 0 ? `（已隐藏 ${hiddenDevArtifactCount} 条）` : ""}
+            </span>
+          </label>
+        )}
       </div>
 
       {error && <div className="warning-banner">{error}</div>}
@@ -37,7 +59,11 @@ export function StandardsTableCard({
           <div className="spinner" />
         </div>
       ) : standards.length === 0 ? (
-        <div className="empty-state">暂无规范，请先批量上传规范 PDF 文件。</div>
+        <div className="empty-state">
+          {isDevMode && hiddenDevArtifactCount > 0
+            ? `当前仅剩 ${hiddenDevArtifactCount} 条测试残留，打开上方开关可查看。`
+            : "暂无规范，请先批量上传规范 PDF 文件。"}
+        </div>
       ) : (
         <div className="standards-table-card__table-wrap">
           <table className="data-table">
@@ -56,7 +82,10 @@ export function StandardsTableCard({
                 <tr key={std.id}>
                   <td>{std.standard_code}</td>
                   <td>
-                    <div className="standards-table-card__name">{std.standard_name}</div>
+                    <div className="standards-table-card__name">
+                      <span>{std.standard_name}</span>
+                      {std.is_dev_artifact && <Badge variant="warning">测试残留</Badge>}
+                    </div>
                     <div className="standards-table-card__meta">
                       {std.version_year ? `${std.version_year}版` : "版本未标注"}
                       <span>{std.clause_count} 条款</span>

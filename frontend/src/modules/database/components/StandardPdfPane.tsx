@@ -3,6 +3,7 @@ import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type PDFPagePr
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 import { ClayButton } from "../../../components/ui/ClayButton";
+import { buildApiUrl, getAuthHeaders } from "../../../lib/api";
 
 GlobalWorkerOptions.workerSrc = workerSrc;
 
@@ -25,7 +26,10 @@ export function StandardPdfPane({ pdfUrl, targetPage }: StandardPdfPaneProps) {
     setLoading(true);
     setError("");
 
-    const task = getDocument(pdfUrl);
+    const task = getDocument({
+      url: buildApiUrl(pdfUrl),
+      httpHeaders: getAuthHeaders(),
+    });
     task.promise
       .then((doc: PDFDocumentProxy) => {
         if (disposed) return;

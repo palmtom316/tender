@@ -53,6 +53,7 @@ def _serialize_standard(std: dict, *, clause_count: int | None = None) -> dict:
         "error_message": std.get("error_message"),
         "ocr_status": std.get("ocr_status"),
         "ai_status": std.get("ai_status"),
+        "is_dev_artifact": bool(std.get("is_dev_artifact", False)),
         "created_at": std["created_at"].isoformat() if std.get("created_at") else None,
     }
     if std.get("document_id"):
@@ -281,7 +282,7 @@ def get_standard_viewer(
         **_serialize_standard(std, clause_count=clause_count),
         "document_id": str(file_meta["document_id"]),
         "pdf_url": f"/api/standards/{standard_id}/pdf",
-        "clause_tree": _repo.get_clause_tree(conn, standard_id),
+        "clause_tree": _repo.get_viewer_tree(conn, standard_id),
     }
 
 

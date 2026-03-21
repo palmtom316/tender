@@ -213,6 +213,7 @@ function StandardsWorkbench() {
   const [standards, setStandards] = useState<Standard[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState("");
+  const [showDevArtifacts, setShowDevArtifacts] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerMode, setViewerMode] = useState<"browse" | "search-hit">("browse");
   const [viewerData, setViewerData] = useState<StandardViewerData | null>(null);
@@ -315,15 +316,27 @@ function StandardsWorkbench() {
     void openViewer(hit.standard_id, "search-hit", hit.clause_id);
   };
 
+  const isDevMode = import.meta.env.DEV;
+  const hiddenDevArtifactCount = isDevMode
+    ? standards.filter((std) => std.is_dev_artifact).length
+    : 0;
+  const visibleStandards = isDevMode && !showDevArtifacts
+    ? standards.filter((std) => !std.is_dev_artifact)
+    : standards;
+
   return (
     <div className="standards-workbench">
       <UploadForm onUploaded={loadStandards} />
 
       <div className="standards-workbench__cards">
         <StandardsTableCard
-          standards={standards}
+          standards={visibleStandards}
           loading={loading}
           error={actionError}
+          isDevMode={isDevMode}
+          showDevArtifacts={showDevArtifacts}
+          hiddenDevArtifactCount={!showDevArtifacts ? hiddenDevArtifactCount : 0}
+          onToggleShowDevArtifacts={setShowDevArtifacts}
           onRetry={(id) => void handleRetry(id)}
           onDelete={(id) => void handleDelete(id)}
           onOpenViewer={(id) => void openViewer(id, "browse")}
