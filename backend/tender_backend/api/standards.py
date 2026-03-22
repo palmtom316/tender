@@ -122,6 +122,45 @@ def _serialize_search_hit(hit: dict, *, fallback: dict | None = None) -> dict:
     }
 
 
+def _serialize_parse_document(document: dict | None) -> dict | None:
+    if not document:
+        return None
+    return {
+        "id": str(document["id"]),
+        "parser_name": document.get("parser_name"),
+        "parser_version": document.get("parser_version"),
+        "raw_payload": document.get("raw_payload"),
+    }
+
+
+def _serialize_parse_section(section: dict) -> dict:
+    return {
+        "id": str(section["id"]),
+        "section_code": section.get("section_code"),
+        "title": section.get("title"),
+        "level": section.get("level"),
+        "text": section.get("text"),
+        "text_source": section.get("text_source"),
+        "sort_order": section.get("sort_order"),
+        "page_start": section.get("page_start"),
+        "page_end": section.get("page_end"),
+        "raw_json": section.get("raw_json"),
+    }
+
+
+def _serialize_parse_table(table: dict) -> dict:
+    return {
+        "id": str(table["id"]),
+        "section_id": str(table["section_id"]) if table.get("section_id") else None,
+        "page": table.get("page"),
+        "page_start": table.get("page_start"),
+        "page_end": table.get("page_end"),
+        "table_title": table.get("table_title"),
+        "table_html": table.get("table_html"),
+        "raw_json": table.get("raw_json"),
+    }
+
+
 def _search_hit_is_usable(hit: dict) -> bool:
     return bool(hit.get("standard_id") and hit.get("standard_name") and hit.get("clause_id"))
 
@@ -263,6 +302,27 @@ async def get_standard_detail(
     }
 
 
+@router.get("/standards/{standard_id}/parse-assets")
+async def get_standard_parse_assets(
+    standard_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> dict:
+    std = _repo.get_standard(conn, standard_id)
+    if not std:
+        raise HTTPException(status_code=404, detail="Standard not found")
+
+    assets = _repo.get_standard_parse_assets(conn, standard_id=standard_id)
+    if assets is None:
+        raise HTTPException(status_code=404, detail="Standard source PDF not found")
+
+    return {
+        "standard_id": str(standard_id),
+        "document": _serialize_parse_document(assets.get("document")),
+        "sections": [_serialize_parse_section(section) for section in assets.get("sections", [])],
+        "tables": [_serialize_parse_table(table) for table in assets.get("tables", [])],
+    }
+
+
 @router.get("/standards/{standard_id}/viewer")
 async def get_standard_viewer(
     standard_id: UUID,
@@ -340,6 +400,8 @@ async def list_clauses(
             "page_end": c.get("page_end"),
             "sort_order": c.get("sort_order"),
             "parent_id": str(c["parent_id"]) if c.get("parent_id") else None,
+            "source_type": c.get("source_type", "text"),
+            "source_label": c.get("source_label"),
         }
         for c in clauses
     ]
@@ -362,7 +424,7 @@ async def delete_standard(
             detail="Cannot delete a standard while processing is active",
         )
 
-    asyncio.run(delete_standard_clauses_from_index(standard_id=str(standard_id)))
+    await delete_standard_clauses_from_index(standard_id=str(standard_id))
     file_meta = _repo.get_standard_file(conn, standard_id)
     deleted = _repo.delete_standard(conn, standard_id=standard_id)
     if not deleted:
@@ -371,6 +433,35 @@ async def delete_standard(
     _storage.delete_managed_file(file_meta.get("storage_key") if file_meta else None)
 
     return {"standard_id": str(standard_id), "deleted": True}
+
+
+@router.post("/standards/{standard_id}/process-vision")
+async def trigger_vision_processing(
+    standard_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
+) -> dict:
+    """Re-process a standard using the Qwen3-VL vision pipeline (A/B comparison)."""
+    from tender_backend.services.vision_service.vision_processor import process_standard_vision
+
+    std = _repo.get_standard(conn, standard_id)
+    if not std:
+        raise HTTPException(status_code=404, detail="Standard not found")
+
+    document_id = std.get("document_id")
+    if not document_id:
+        raise HTTPException(status_code=400, detail="Standard has no linked document")
+
+    _repo.update_processing_status(conn, standard_id, "processing")
+    try:
+        summary = process_standard_vision(
+            conn, standard_id=standard_id, document_id=str(document_id),
+        )
+        _repo.update_processing_status(conn, standard_id, "completed")
+        return summary
+    except Exception as exc:
+        _repo.update_processing_status(conn, standard_id, "failed", error_message=str(exc))
+        raise HTTPException(status_code=502, detail=str(exc))
 
 
 @router.post("/standards/{standard_id}/process")

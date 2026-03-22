@@ -13,9 +13,8 @@ from psycopg.rows import dict_row
 from tender_backend.db.pool import get_pool
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.standard_repo import StandardRepository
-from tender_backend.services.norm_service.layout_compressor import compress_sections
+from tender_backend.services.norm_service.norm_processor import _build_processing_scopes
 from tender_backend.services.norm_service.prompt_builder import build_prompt
-from tender_backend.services.norm_service.scope_splitter import split_into_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.tools.reindex_standard_clauses import build_clause_index_docs
 from tender_backend.workflows.base import (
@@ -88,9 +87,18 @@ class BuildClauseTree(WorkflowStep):
                        ORDER BY page_start, level, section_code""",
                     (document_id,),
                 ).fetchall()
+                tables = cur.execute(
+                    """SELECT id, section_id, page, page_start, page_end, table_title, table_html, raw_json
+                       FROM document_table
+                       WHERE document_id = %s
+                       ORDER BY
+                         CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
+                         page_start,
+                         page""",
+                    (document_id,),
+                ).fetchall()
 
-        windows = compress_sections(sections)
-        scopes = split_into_scopes(windows)
+        scopes = _build_processing_scopes(sections, tables)
 
         ctx.data["scopes"] = [
             {
@@ -204,4 +212,41 @@ class StandardIngestionWorkflow(BaseWorkflow):
             BuildClauseTree(),
             TagClauses(),
             IndexToOpenSearch(),
+        ]
+
+
+class VisionExtractClauses(WorkflowStep):
+    name = "vision_extract_clauses"
+
+    async def execute(self, ctx: WorkflowContext) -> StepResult:
+        """Process standard via Qwen3-VL vision pipeline, bypassing OCR+scope steps."""
+        from tender_backend.services.vision_service.vision_processor import process_standard_vision
+
+        standard_id = ctx.data.get("standard_id")
+        document_id = ctx.data.get("document_id")
+        if not standard_id or not document_id:
+            return StepResult(state=StepState.FAILED, message="Missing standard_id or document_id")
+
+        with _get_conn() as conn:
+            summary = process_standard_vision(
+                conn, standard_id=UUID(standard_id), document_id=document_id,
+            )
+            _std_repo.update_processing_status(conn, UUID(standard_id), "completed")
+
+        ctx.data["clause_count"] = summary.get("total_clauses", 0)
+        ctx.data["clauses_to_index"] = []  # Already indexed by vision_processor
+
+        return StepResult(
+            state=StepState.COMPLETED,
+            message=f"Vision extracted {summary.get('total_clauses', 0)} clauses from {summary.get('pages_processed', 0)} pages",
+        )
+
+
+@register_workflow
+class StandardVisionIngestionWorkflow(BaseWorkflow):
+    workflow_name = "standard_vision_ingestion"
+
+    def _define_steps(self) -> list[WorkflowStep]:
+        return [
+            VisionExtractClauses(),
         ]

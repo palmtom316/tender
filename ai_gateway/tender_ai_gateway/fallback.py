@@ -86,7 +86,7 @@ def _get_providers(
 def call_with_fallback(
     *,
     task_type: str,
-    messages: list[dict[str, str]],
+    messages: list[dict],
     temperature: float = 0.3,
     max_tokens: int = 4096,
     primary_override: Any | None = None,

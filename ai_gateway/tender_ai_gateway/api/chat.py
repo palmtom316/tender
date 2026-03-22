@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -19,7 +21,7 @@ class ChatRequest(BaseModel):
     provider_hint: str | None = Field(default=None, examples=["deepseek"])
     model: str | None = Field(default=None, examples=["deepseek-chat"])
     credential_id: str | None = None
-    messages: list[dict[str, str]]
+    messages: list[dict[str, Any]]
     temperature: float = 0.3
     max_tokens: int = 4096
     primary_override: ProviderOverride | None = None

@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 COST_PER_1M: dict[str, dict[str, float]] = {
     "deepseek-chat": {"input": 0.14, "output": 0.28},
     "qwen-max": {"input": 2.0, "output": 6.0},
+    "Qwen/Qwen3-VL-8B-Instruct": {"input": 0.18, "output": 0.68},
 }
 
 

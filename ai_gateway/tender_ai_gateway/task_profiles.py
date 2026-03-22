@@ -13,4 +13,10 @@ TASK_PROFILES = {
         "timeout": 180,
         "max_retries": 0,
     },
+    "vision_extract_clauses": {
+        "primary_model": "Qwen/Qwen3-VL-8B-Instruct",
+        "fallback_model": "Qwen/Qwen3-VL-8B-Instruct",
+        "timeout": 120,
+        "max_retries": 1,
+    },
 }
