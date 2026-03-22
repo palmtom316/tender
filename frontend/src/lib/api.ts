@@ -670,6 +670,12 @@ export function triggerStandardProcessing(
   return request(`/standards/${standardId}/process`, { method: "POST" });
 }
 
+export function triggerVisionProcessing(
+  standardId: string,
+): Promise<{ standard_id: string; status: string; pipeline: string; total_clauses: number }> {
+  return request(`/standards/${standardId}/process-vision`, { method: "POST" });
+}
+
 export function searchStandardClauses(
   query: string,
   options?: { specialty?: string; topK?: number; signal?: AbortSignal },

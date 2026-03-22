@@ -17,6 +17,7 @@ import {
   fetchStandardViewer,
   listStandards,
   triggerStandardProcessing,
+  triggerVisionProcessing,
   uploadStandards,
 } from "../../lib/api";
 import { StandardSearchCard } from "./components/StandardSearchCard";
@@ -345,6 +346,16 @@ function StandardsWorkbench() {
     void openViewer(hit.standard_id, "search-hit", hit.clause_id);
   };
 
+  const handleVisionProcess = async (id: string) => {
+    setActionError("");
+    try {
+      await triggerVisionProcessing(id);
+      loadStandards();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "VL 解析触发失败");
+    }
+  };
+
   const isDevMode = import.meta.env.DEV;
   const hiddenDevArtifactCount = isDevMode
     ? standards.filter((std) => std.is_dev_artifact).length
@@ -369,6 +380,7 @@ function StandardsWorkbench() {
           onRetry={(id) => void handleRetry(id)}
           onDelete={(id) => void handleDelete(id)}
           onOpenViewer={(id) => void openViewer(id, "browse")}
+          onVisionProcess={(id) => void handleVisionProcess(id)}
         />
 
         <StandardSearchCard onOpenHit={handleOpenSearchHit} />
