@@ -513,6 +513,8 @@ export interface StandardClause {
   summary: string | null;
   tags: string[];
   clause_type: string;
+  source_type?: string;
+  source_label?: string | null;
   page_start: number | null;
   page_end: number | null;
   sort_order: number | null;
@@ -544,6 +546,42 @@ export interface StandardProcessingStatus {
   clause_count: number;
   processing_started_at: string | null;
   processing_finished_at: string | null;
+}
+
+export interface StandardParseAssetSection {
+  id: string;
+  section_code: string | null;
+  title: string;
+  level: number;
+  text: string | null;
+  text_source: string | null;
+  sort_order: number | null;
+  page_start: number | null;
+  page_end: number | null;
+  raw_json: unknown;
+}
+
+export interface StandardParseAssetTable {
+  id: string;
+  section_id: string | null;
+  page: number | null;
+  page_start: number | null;
+  page_end: number | null;
+  table_title: string | null;
+  table_html: string | null;
+  raw_json: unknown;
+}
+
+export interface StandardParseAssets {
+  standard_id: string;
+  document: {
+    id: string;
+    parser_name: string | null;
+    parser_version: string | null;
+    raw_payload: unknown;
+  } | null;
+  sections: StandardParseAssetSection[];
+  tables: StandardParseAssetTable[];
 }
 
 export interface BatchStandardUploadItem {
@@ -613,6 +651,15 @@ export function fetchStandardViewer(
   options?: { signal?: AbortSignal },
 ): Promise<StandardViewerData> {
   return request<StandardViewerData>(`/standards/${standardId}/viewer`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchStandardParseAssets(
+  standardId: string,
+  options?: { signal?: AbortSignal },
+): Promise<StandardParseAssets> {
+  return request<StandardParseAssets>(`/standards/${standardId}/parse-assets`, {
     signal: options?.signal,
   });
 }

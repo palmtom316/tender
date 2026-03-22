@@ -7,11 +7,13 @@ import { useNavigation } from "../../lib/NavigationContext";
 import type {
   BatchStandardUploadItem,
   Standard,
+  StandardParseAssets,
   StandardSearchHit,
   StandardViewerData,
 } from "../../lib/api";
 import {
   deleteStandard,
+  fetchStandardParseAssets,
   fetchStandardViewer,
   listStandards,
   triggerStandardProcessing,
@@ -217,6 +219,9 @@ function StandardsWorkbench() {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerMode, setViewerMode] = useState<"browse" | "search-hit">("browse");
   const [viewerData, setViewerData] = useState<StandardViewerData | null>(null);
+  const [viewerParseAssets, setViewerParseAssets] = useState<StandardParseAssets | null>(null);
+  const [viewerParseAssetsLoading, setViewerParseAssetsLoading] = useState(false);
+  const [viewerParseAssetsError, setViewerParseAssetsError] = useState("");
   const [initialClauseId, setInitialClauseId] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
   const viewerRequestRef = useRef(0);
@@ -266,8 +271,27 @@ function StandardsWorkbench() {
     viewerAbortRef.current?.abort();
     const controller = new AbortController();
     viewerAbortRef.current = controller;
+    setViewerParseAssets(null);
+    setViewerParseAssetsError("");
+    setViewerParseAssetsLoading(true);
 
     try {
+      const parseAssetsPromise = fetchStandardParseAssets(standardId, { signal: controller.signal })
+        .then((assets) => {
+          if (viewerRequestRef.current !== requestId || controller.signal.aborted) return;
+          setViewerParseAssets(assets);
+          setViewerParseAssetsError("");
+        })
+        .catch((err: unknown) => {
+          if (viewerRequestRef.current !== requestId || controller.signal.aborted) return;
+          setViewerParseAssets(null);
+          setViewerParseAssetsError(err instanceof Error ? err.message : "加载解析诊断失败");
+        })
+        .finally(() => {
+          if (viewerRequestRef.current !== requestId || controller.signal.aborted) return;
+          setViewerParseAssetsLoading(false);
+        });
+
       const data = await fetchStandardViewer(standardId, { signal: controller.signal });
       if (viewerRequestRef.current !== requestId) return;
       setViewerData(data);
@@ -275,9 +299,11 @@ function StandardsWorkbench() {
       setInitialClauseId(clauseId);
       setViewerOpen(true);
       setActionError("");
+      await parseAssetsPromise;
     } catch (err: unknown) {
       if (controller.signal.aborted) return;
       if (viewerRequestRef.current !== requestId) return;
+      setViewerParseAssetsLoading(false);
       setActionError(err instanceof Error ? err.message : "加载查阅数据失败");
     } finally {
       if (viewerAbortRef.current === controller) {
@@ -305,6 +331,9 @@ function StandardsWorkbench() {
       if (viewerOpen && viewerData?.id === id) {
         setViewerOpen(false);
         setViewerData(null);
+        setViewerParseAssets(null);
+        setViewerParseAssetsError("");
+        setViewerParseAssetsLoading(false);
       }
       loadStandards();
     } catch (err: unknown) {
@@ -349,8 +378,17 @@ function StandardsWorkbench() {
         open={viewerOpen}
         mode={viewerMode}
         viewerData={viewerData}
+        parseAssets={viewerParseAssets}
+        parseAssetsLoading={viewerParseAssetsLoading}
+        parseAssetsError={viewerParseAssetsError}
         initialClauseId={initialClauseId}
-        onClose={() => setViewerOpen(false)}
+        onClose={() => {
+          viewerAbortRef.current?.abort();
+          viewerAbortRef.current = null;
+          setViewerOpen(false);
+          setViewerParseAssetsLoading(false);
+          setViewerParseAssetsError("");
+        }}
       />
     </div>
   );

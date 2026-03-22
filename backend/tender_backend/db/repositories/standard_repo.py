@@ -84,6 +84,8 @@ def _build_clause_node(clause: dict) -> dict:
             if clause.get("commentary_clause_id")
             else None
         ),
+        "source_type": clause.get("source_type", "text"),
+        "source_label": clause.get("source_label"),
         "children": [],
     }
 
@@ -330,17 +332,61 @@ class StandardRepository:
         with conn.cursor(row_factory=dict_row) as cur:
             return cur.execute(
                 """
-                SELECT id, section_code, title, level, text, page_start, page_end
+                SELECT id, section_code, title, level, text, raw_json, text_source, sort_order, page_start, page_end
                 FROM document_section
                 WHERE document_id = %s
                 ORDER BY
                   CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
                   page_start,
+                  sort_order,
                   level,
                   ctid
                 """,
                 (document_id,),
             ).fetchall()
+
+    def list_document_tables(self, conn: Connection, *, document_id: UUID) -> list[dict]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                """
+                SELECT id, section_id, page, page_start, page_end, table_title, table_html, raw_json
+                FROM document_table
+                WHERE document_id = %s
+                ORDER BY
+                  CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
+                  page_start,
+                  page,
+                  created_at
+                """,
+                (document_id,),
+            ).fetchall()
+
+    def get_document_parse_info(self, conn: Connection, *, document_id: UUID) -> dict | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                """
+                SELECT id, parser_name, parser_version, raw_payload
+                FROM document
+                WHERE id = %s
+                """,
+                (document_id,),
+            ).fetchone()
+
+    def get_standard_parse_assets(self, conn: Connection, *, standard_id: UUID) -> dict | None:
+        file_meta = self.get_standard_file(conn, standard_id)
+        if not file_meta:
+            return None
+
+        document_id = file_meta["document_id"]
+        document = self.get_document_parse_info(conn, document_id=document_id)
+        sections = self.list_document_sections(conn, document_id=document_id)
+        tables = self.list_document_tables(conn, document_id=document_id)
+
+        return {
+            "document": document,
+            "sections": sections,
+            "tables": tables,
+        }
 
     def get_viewer_tree(self, conn: Connection, standard_id: UUID) -> list[dict]:
         file_meta = self.get_standard_file(conn, standard_id)
@@ -441,18 +487,20 @@ class StandardRepository:
                 """INSERT INTO standard_clause
                        (id, standard_id, parent_id, clause_no, clause_title,
                         clause_text, summary, tags, page_start, page_end,
-                        sort_order, clause_type, commentary_clause_id,
+                        sort_order, clause_type, commentary_clause_id, source_type, source_label,
                         node_type, node_key, node_label)
                    VALUES (%(id)s, %(standard_id)s, %(parent_id)s, %(clause_no)s,
                            %(clause_title)s, %(clause_text)s, %(summary)s,
                            %(tags)s, %(page_start)s, %(page_end)s,
-                           %(sort_order)s, %(clause_type)s, %(commentary_clause_id)s,
+                           %(sort_order)s, %(clause_type)s, %(commentary_clause_id)s, %(source_type)s, %(source_label)s,
                            %(node_type)s, %(node_key)s, %(node_label)s)""",
                 [
                     {
                         **c,
                         "tags": _json.dumps(c.get("tags") or []),
                         "commentary_clause_id": c.get("commentary_clause_id"),
+                        "source_type": c.get("source_type", "text"),
+                        "source_label": c.get("source_label"),
                         "node_type": c.get("node_type", "clause"),
                         "node_key": c.get("node_key"),
                         "node_label": c.get("node_label"),
@@ -532,15 +580,15 @@ class StandardRepository:
                 """
                 INSERT INTO standard_clause
                     (id, standard_id, parent_id, clause_no, clause_title,
-                     clause_text, summary, tags, page_start, page_end, sort_order,
+                     clause_text, summary, tags, page_start, page_end, sort_order, source_type, source_label,
                      node_type, node_key, node_label)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
                     uuid4(), standard_id, parent_id, clause_no, clause_title,
                     clause_text, summary, json.dumps(tags or []),
-                    page_start, page_end, sort_order, "clause", clause_no, None,
+                    page_start, page_end, sort_order, "text", None, "clause", clause_no, None,
                 ),
             ).fetchone()
         conn.commit()

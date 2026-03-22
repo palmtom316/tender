@@ -11,6 +11,7 @@ import pytest
 
 from tender_backend.services.norm_service import norm_processor
 from tender_backend.services.norm_service.layout_compressor import PageWindow, compress_sections
+from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
 from tender_backend.services.norm_service.tree_builder import validate_tree
 from tender_backend.services.parse_service import parser as parse_parser
@@ -125,6 +126,7 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(norm_processor.httpx, "get", fake_get)
     monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
     monkeypatch.setattr(parse_parser, "persist_sections", fake_persist_sections)
+    monkeypatch.setattr(parse_parser, "update_document_parse_assets", lambda *args, **kwargs: None)
 
     count = norm_processor._parse_via_mineru(object(), "11111111-1111-1111-1111-111111111111")
 
@@ -153,6 +155,12 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
             "page_start": 7,
             "page_end": 7,
             "text": "正文内容",
+            "text_source": "mineru_markdown",
+            "sort_order": 0,
+            "raw_json": {
+                "page_number": 7,
+                "markdown": "1 总则\n正文内容",
+            },
         },
         {
             "section_code": "2",
@@ -161,6 +169,12 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
             "page_start": 8,
             "page_end": 8,
             "text": "术语正文",
+            "text_source": "mineru_markdown",
+            "sort_order": 1,
+            "raw_json": {
+                "page_number": 8,
+                "markdown": "2 术语\n术语正文",
+            },
         },
     ]
 
@@ -182,6 +196,12 @@ def test_mineru_to_sections_uses_page_markdown_to_anchor_headings() -> None:
             "page_start": 3,
             "page_end": 3,
             "text": "正文内容",
+            "text_source": "mineru_markdown",
+            "sort_order": 0,
+            "raw_json": {
+                "page_number": 3,
+                "markdown": "1 总则\n正文内容",
+            },
         },
         {
             "section_code": "2",
@@ -190,7 +210,94 @@ def test_mineru_to_sections_uses_page_markdown_to_anchor_headings() -> None:
             "page_start": 4,
             "page_end": 4,
             "text": "术语正文",
+            "text_source": "mineru_markdown",
+            "sort_order": 1,
+            "raw_json": {
+                "page_number": 4,
+                "markdown": "2 术语\n术语正文",
+            },
         },
+    ]
+
+
+def test_parse_via_mineru_persists_tables_from_structured_payload(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "spec.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7 fake pdf")
+
+    def fake_post(url: str, **kwargs):
+        if url.endswith("/file-urls/batch"):
+            return _FakeResponse(json_data={
+                "data": {
+                    "batch_id": "batch-456",
+                    "file_urls": ["https://upload.example.com/file-2"],
+                },
+            })
+        pytest.fail(f"unexpected POST {url}")
+
+    def fake_put(url: str, **kwargs):
+        return _FakeResponse(status_code=200)
+
+    poll_count = {"value": 0}
+
+    def fake_get(url: str, **kwargs):
+        if url.endswith("/extract-results/batch/batch-456"):
+            poll_count["value"] += 1
+            if poll_count["value"] == 1:
+                return _FakeResponse(json_data={"data": {"extract_result": [{"state": "running"}]}})
+            return _FakeResponse(json_data={
+                "data": {
+                    "extract_result": [{
+                        "state": "done",
+                        "full_zip_url": "https://download.example.com/result-table.zip",
+                    }],
+                },
+            })
+        if url == "https://download.example.com/result-table.zip":
+            return _FakeResponse(content=_zip_bytes(
+                "1 总则\n正文内容",
+                {
+                    "middle.json": (
+                        '{"pages": ['
+                        '{"page_number": 7, "markdown": "1 总则\\n正文内容"}'
+                        '], "tables": ['
+                        '{"page": 8, "title": "主要参数", "html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>"}'
+                        "]}"
+                    ),
+                },
+            ))
+        pytest.fail(f"unexpected GET {url}")
+
+    persisted: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor._agent_repo, "get_by_key", lambda conn, key: SimpleNamespace(
+        enabled=True,
+        api_key="token",
+        base_url="https://mineru.net/api/v4/extract/task",
+    ))
+    monkeypatch.setattr(norm_processor, "_get_pdf_path", lambda conn, document_id: str(pdf_path))
+    monkeypatch.setattr(norm_processor.httpx, "post", fake_post)
+    monkeypatch.setattr(norm_processor.httpx, "put", fake_put)
+    monkeypatch.setattr(norm_processor.httpx, "get", fake_get)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+    monkeypatch.setattr(parse_parser, "persist_sections", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(parse_parser, "update_document_parse_assets", lambda *args, **kwargs: None)
+    monkeypatch.setattr(parse_parser, "persist_tables", lambda conn, *, document_id, tables: persisted.setdefault("tables", tables) or len(tables))
+
+    norm_processor._parse_via_mineru(object(), "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert persisted["tables"] == [
+        {
+            "page": 8,
+            "page_start": 8,
+            "page_end": 8,
+            "table_title": "主要参数",
+            "table_html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+            "data": {
+                "page": 8,
+                "title": "主要参数",
+                "html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+            },
+        }
     ]
 
 
@@ -385,6 +492,77 @@ def test_process_scope_with_retries_rebalances_on_ai_gateway_timeout_502(monkeyp
     assert entries == []
     assert calls[0] == "4 电力变压器"
     assert calls[1:] == ["4 电力变压器 (1/2)", "4 电力变压器 (2/2)"]
+
+
+def test_process_scope_with_retries_marks_table_entries_with_table_source(monkeypatch) -> None:
+    scope = ProcessingScope(
+        scope_type="table",
+        chapter_label="表格: 主要参数",
+        text="<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+        page_start=8,
+        page_end=8,
+        section_ids=["t1"],
+    )
+
+    monkeypatch.setattr(norm_processor, "_call_ai_gateway", lambda conn, prompt, scope_label: '[{"clause_text":"额定电压不应低于10kV。"}]')
+    monkeypatch.setattr(norm_processor, "build_prompt", lambda current_scope: current_scope.text)
+
+    entries = norm_processor._process_scope_with_retries(object(), scope)
+
+    assert entries == [
+        {
+            "clause_text": "额定电压不应低于10kV。",
+            "clause_type": "normative",
+            "page_start": 8,
+            "source_type": "table",
+            "source_label": "表格: 主要参数",
+        }
+    ]
+
+
+def test_build_processing_scopes_appends_table_segments() -> None:
+    sections = [
+        {
+            "id": "s1",
+            "section_code": "1",
+            "title": "总则",
+            "level": 1,
+            "page_start": 1,
+            "page_end": 1,
+            "text": "1.0.1 正文",
+        }
+    ]
+    tables = [
+        {
+            "page": 2,
+            "page_start": 2,
+            "page_end": 2,
+            "table_title": "主要参数",
+            "table_html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+        }
+    ]
+
+    scopes = norm_processor._build_processing_scopes(sections, tables)
+
+    assert [scope.scope_type for scope in scopes] == ["normative", "table"]
+    assert scopes[0].chapter_label == "1 总则"
+    assert scopes[1].chapter_label == "表格: 主要参数"
+    assert scopes[1].text == "<table><tr><td>额定电压</td><td>10kV</td></tr></table>"
+    assert scopes[1].page_start == 2
+
+
+def test_build_prompt_uses_table_specific_prompt() -> None:
+    prompt = build_prompt(ProcessingScope(
+        scope_type="table",
+        chapter_label="表格: 主要参数",
+        text="<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+        page_start=8,
+        page_end=8,
+        section_ids=["t1"],
+    ))
+
+    assert "规范表格" in prompt
+    assert "<table><tr><td>额定电压</td><td>10kV</td></tr></table>" in prompt
 
 
 def test_validate_tree_ignores_empty_structural_parent_clause() -> None:
@@ -623,6 +801,7 @@ def test_process_standard_ai_uses_existing_ocr_sections(monkeypatch) -> None:
     monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
         {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
     ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
     monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
     monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
     monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [
@@ -678,6 +857,59 @@ def test_process_standard_ai_uses_existing_ocr_sections(monkeypatch) -> None:
     assert captured["indexed"] == 1
 
 
+def test_process_standard_ai_processes_text_and_table_scopes(monkeypatch) -> None:
+    standard_id = UUID("12121212-1212-1212-1212-121212121212")
+    processed_scopes: list[str] = []
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [
+        {
+            "id": "t1",
+            "table_title": "主要参数",
+            "table_html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+            "page_start": 2,
+            "page_end": 2,
+        }
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
+    monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1.0.1 正文",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: processed_scopes.append(scope.chapter_label) or [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="34343434-3434-3434-3434-343434343434",
+    )
+
+    assert summary["status"] == "completed"
+    assert processed_scopes == ["1 总则", "表格: 主要参数"]
+
+
 def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:
     standard_id = UUID("33333333-3333-3333-3333-333333333333")
     sleep_calls: list[float] = []
@@ -685,6 +917,7 @@ def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:
     monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
         {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
     ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
     monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
     monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
     monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [

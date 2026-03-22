@@ -151,6 +151,69 @@ def _extract_pages_from_zip(content: bytes) -> list[dict]:
     return []
 
 
+def _extract_tables_from_payload(payload: object) -> list[dict]:
+    """Best-effort extraction of table payloads from MinerU JSON."""
+    if isinstance(payload, list):
+        if payload and all(isinstance(item, dict) for item in payload):
+            if any(
+                isinstance(item.get("html"), str)
+                or isinstance(item.get("table_html"), str)
+                or isinstance(item.get("cells"), list)
+                for item in payload
+            ):
+                return payload
+        for item in payload:
+            tables = _extract_tables_from_payload(item)
+            if tables:
+                return tables
+        return []
+
+    if isinstance(payload, dict):
+        for key in ("tables", "table_infos", "table_info", "table_results", "data", "result"):
+            if key in payload:
+                tables = _extract_tables_from_payload(payload[key])
+                if tables:
+                    return tables
+        for value in payload.values():
+            tables = _extract_tables_from_payload(value)
+            if tables:
+                return tables
+
+    return []
+
+
+def _extract_tables_from_zip(content: bytes) -> list[dict]:
+    with ZipFile(BytesIO(content)) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".json"):
+                continue
+            try:
+                payload = json.loads(zf.read(name).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            tables = _extract_tables_from_payload(payload)
+            if tables:
+                return tables
+    return []
+
+
+def _normalize_tables(tables: list[dict]) -> list[dict]:
+    normalized: list[dict] = []
+    for table in tables:
+        page = table.get("page")
+        if not isinstance(page, int):
+            page = table.get("page_number")
+        normalized.append({
+            "page": page,
+            "page_start": table.get("page_start", page),
+            "page_end": table.get("page_end", page),
+            "table_title": table.get("table_title") or table.get("title"),
+            "table_html": table.get("table_html") or table.get("html"),
+            "data": table,
+        })
+    return normalized
+
+
 def _normalize_match_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
@@ -201,6 +264,7 @@ def _normalize_pages(pages: list[dict]) -> list[dict]:
         normalized.append({
             "page_number": _extract_page_number(page, index),
             "text": text,
+            "raw_page": page,
         })
     return normalized
 
@@ -251,7 +315,11 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
 
     Returns the number of sections persisted.
     """
-    from tender_backend.services.parse_service.parser import persist_sections
+    from tender_backend.services.parse_service.parser import (
+        persist_sections,
+        persist_tables,
+        update_document_parse_assets,
+    )
 
     config = _agent_repo.get_by_key(conn, "parse")
     if not config or not config.enabled or not config.api_key:
@@ -362,8 +430,27 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
                 _extract_pages_from_zip(zip_resp.content)
                 or _extract_pages_from_payload(item.get("pages") or [])
             )
+            tables = (
+                _extract_tables_from_zip(zip_resp.content)
+                or _extract_tables_from_payload(item.get("tables") or [])
+            )
 
             sections = _mineru_to_sections(raw_content, pages)
+            update_document_parse_assets(
+                conn,
+                document_id=UUID(document_id),
+                parser_name="mineru",
+                raw_payload={
+                    "pages": pages,
+                    "tables": tables,
+                    "full_markdown": raw_content,
+                    "batch_id": batch_id,
+                    "result_item": item,
+                },
+            )
+            normalized_tables = _normalize_tables(tables)
+            if normalized_tables:
+                persist_tables(conn, document_id=UUID(document_id), tables=normalized_tables)
             count = persist_sections(conn, document_id=UUID(document_id), sections=sections)
             logger.info("mineru_sections_persisted", document_id=document_id, count=count)
             return count
@@ -430,9 +517,11 @@ def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
             start_index=page_cursor,
         )
         page_number = None
+        page_payload = None
         if page_index is not None:
             page_cursor = page_index
             page_number = normalized_pages[page_index]["page_number"]
+            page_payload = normalized_pages[page_index]["raw_page"]
 
         sections.append({
             "section_code": code,
@@ -441,6 +530,9 @@ def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
             "page_start": page_number,
             "page_end": page_number,
             "text": text,
+            "text_source": "mineru_markdown",
+            "sort_order": i,
+            "raw_json": page_payload,
         })
 
     return sections
@@ -453,15 +545,65 @@ def _fetch_sections(conn: Connection, document_id: str) -> list[dict]:
     with conn.cursor(row_factory=dict_row) as cur:
         return cur.execute(
             """SELECT id, section_code, title, level, text,
+                      raw_json, text_source, sort_order,
                       page_start, page_end
                FROM document_section
                WHERE document_id = %s
                ORDER BY
                    CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
                    page_start,
+                   sort_order,
                    ctid""",
             (document_id,),
         ).fetchall()
+
+
+def _fetch_tables(conn: Connection, document_id: str) -> list[dict]:
+    """Fetch all document_table rows for a document."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(
+            """
+            SELECT id, section_id, page, page_start, page_end, table_title, table_html, raw_json
+            FROM document_table
+            WHERE document_id = %s
+            ORDER BY
+                CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
+                page_start,
+                page
+            """,
+            (document_id,),
+        ).fetchall()
+
+
+def _build_processing_scopes(sections: list[dict], tables: list[dict]) -> list[ProcessingScope]:
+    """Build text and table processing scopes from persisted OCR assets."""
+    windows = compress_sections(sections)
+    scopes = split_into_scopes(windows)
+
+    for table in tables:
+        html = (table.get("table_html") or "").strip()
+        if not html:
+            continue
+        title = (table.get("table_title") or "").strip() or "未命名表格"
+        scopes.append(
+            ProcessingScope(
+                scope_type="table",
+                chapter_label=f"表格: {title}",
+                text=html,
+                page_start=table.get("page_start") or table.get("page") or 0,
+                page_end=table.get("page_end") or table.get("page_start") or table.get("page") or 0,
+                section_ids=[str(table.get("section_id"))] if table.get("section_id") else [],
+            )
+        )
+
+    return sorted(
+        scopes,
+        key=lambda scope: (
+            scope.page_start,
+            1 if scope.scope_type == "table" else 0,
+            scope.chapter_label,
+        ),
+    )
 
 
 _ACTUAL_CHAPTER_TITLE = re.compile(r"^\d+\s+\S")
@@ -638,9 +780,11 @@ def _process_scope_with_retries(
 
         entries = _parse_llm_json(raw_response)
         for entry in entries:
-            entry["clause_type"] = current_scope.scope_type
+            entry["clause_type"] = "commentary" if current_scope.scope_type == "commentary" else "normative"
             if entry.get("page_start") is None:
                 entry["page_start"] = current_scope.page_start
+            entry["source_type"] = "table" if current_scope.scope_type == "table" else "text"
+            entry["source_label"] = current_scope.chapter_label
         all_entries.extend(entries)
 
     return all_entries
@@ -684,11 +828,11 @@ def process_standard_ai(
         sections = _normalize_sections_for_processing(sections)
         if not sections:
             raise ValueError("No normalized sections available for processing")
+        tables = _fetch_tables(conn, document_id)
 
         logger.info("processing_started", standard_id=str(standard_id), section_count=len(sections))
 
-        windows = compress_sections(sections)
-        scopes = split_into_scopes(windows)
+        scopes = _build_processing_scopes(sections, tables)
         scopes = rebalance_scopes(scopes)
         if not scopes:
             raise ValueError("No processing scopes generated")

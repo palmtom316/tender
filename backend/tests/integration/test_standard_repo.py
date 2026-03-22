@@ -73,7 +73,25 @@ def _ensure_schema(conn: psycopg.Connection) -> None:
       ADD COLUMN IF NOT EXISTS commentary_clause_id UUID REFERENCES standard_clause(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS node_type VARCHAR(20) NOT NULL DEFAULT 'clause',
       ADD COLUMN IF NOT EXISTS node_key VARCHAR(255),
-      ADD COLUMN IF NOT EXISTS node_label VARCHAR(100);
+      ADD COLUMN IF NOT EXISTS node_label VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) NOT NULL DEFAULT 'text',
+      ADD COLUMN IF NOT EXISTS source_label TEXT;
+
+    ALTER TABLE document
+      ADD COLUMN IF NOT EXISTS parser_name TEXT,
+      ADD COLUMN IF NOT EXISTS parser_version TEXT,
+      ADD COLUMN IF NOT EXISTS raw_payload JSONB;
+
+    ALTER TABLE document_section
+      ADD COLUMN IF NOT EXISTS raw_json JSONB,
+      ADD COLUMN IF NOT EXISTS text_source VARCHAR(32),
+      ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
+
+    ALTER TABLE document_table
+      ADD COLUMN IF NOT EXISTS page_start INT,
+      ADD COLUMN IF NOT EXISTS page_end INT,
+      ADD COLUMN IF NOT EXISTS table_title TEXT,
+      ADD COLUMN IF NOT EXISTS table_html TEXT;
     """)
     conn.execute(
         """
@@ -258,6 +276,35 @@ def test_get_clause_tree_nests_commentary_under_linked_normative_clause(
     assert len(tree[0]["children"]) == 1
     assert tree[0]["children"][0]["id"] == str(commentary_id)
     assert tree[0]["children"][0]["clause_type"] == "commentary"
+
+
+def test_list_document_sections_prefers_explicit_sort_order(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    _, document_id = _create_standard(conn, code="GB 3")
+
+    first_id = uuid4()
+    second_id = uuid4()
+
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, text_source, sort_order, raw_json)
+        VALUES
+          (%s, %s, '2', '术语', 1, NULL, NULL, '第二章正文', 'mineru_markdown', 1, '{"page_number": 8}'::jsonb),
+          (%s, %s, '1', '总则', 1, NULL, NULL, '第一章正文', 'mineru_markdown', 0, '{"page_number": 7}'::jsonb)
+        """,
+        (first_id, document_id, second_id, document_id),
+    )
+    conn.commit()
+
+    rows = repo.list_document_sections(conn, document_id=document_id)
+
+    assert [row["title"] for row in rows] == ["总则", "术语"]
+    assert rows[0]["sort_order"] == 0
+    assert rows[0]["text_source"] == "mineru_markdown"
+    assert rows[0]["raw_json"] == {"page_number": 7}
 
 
 def test_get_viewer_tree_prefers_outline_and_mounts_ai_nodes(

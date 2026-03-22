@@ -150,6 +150,8 @@ def _flatten_entries(
             "page_start": entry.get("page_start"),
             "page_end": entry.get("page_end"),
             "clause_type": clause_type,
+            "source_type": entry.get("source_type", "text"),
+            "source_label": entry.get("source_label"),
         })
 
         children = entry.get("children")
@@ -245,6 +247,8 @@ def build_tree(
                 "page_start": entry.get("page_start"),
                 "page_end": entry.get("page_end"),
                 "clause_type": ctype,
+                "source_type": entry.get("source_type", "text"),
+                "source_label": entry.get("source_label"),
             })
 
     for index, clause in enumerate(result):

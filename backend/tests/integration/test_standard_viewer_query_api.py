@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import psycopg
@@ -97,6 +98,26 @@ def _apply_extra_schema(conn: psycopg.Connection) -> None:
       ADD COLUMN IF NOT EXISTS node_type VARCHAR(20) NOT NULL DEFAULT 'clause',
       ADD COLUMN IF NOT EXISTS node_key VARCHAR(255),
       ADD COLUMN IF NOT EXISTS node_label VARCHAR(100);
+
+    ALTER TABLE document
+      ADD COLUMN IF NOT EXISTS parser_name TEXT,
+      ADD COLUMN IF NOT EXISTS parser_version TEXT,
+      ADD COLUMN IF NOT EXISTS raw_payload JSONB;
+
+    ALTER TABLE document_section
+      ADD COLUMN IF NOT EXISTS raw_json JSONB,
+      ADD COLUMN IF NOT EXISTS text_source VARCHAR(32),
+      ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
+
+    ALTER TABLE document_table
+      ADD COLUMN IF NOT EXISTS page_start INT,
+      ADD COLUMN IF NOT EXISTS page_end INT,
+      ADD COLUMN IF NOT EXISTS table_title TEXT,
+      ADD COLUMN IF NOT EXISTS table_html TEXT;
+
+    ALTER TABLE standard_clause
+      ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) NOT NULL DEFAULT 'text',
+      ADD COLUMN IF NOT EXISTS source_label TEXT;
     """)
     conn.commit()
 
@@ -352,6 +373,94 @@ def test_get_standard_viewer_returns_pdf_url_and_clause_tree(
     assert payload["pdf_url"].endswith(f"/api/standards/{seeded['standard_id']}/pdf")
     assert len(payload["clause_tree"]) == 1
     assert payload["clause_tree"][0]["children"][0]["id"] == seeded["child_clause_id"]
+    assert payload["clause_tree"][0]["children"][0]["source_type"] == "text"
+
+
+def test_get_standard_viewer_includes_clause_source_metadata(
+    client: SyncASGIClient,
+    tmp_path: Path,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(
+            """
+            UPDATE standard_clause
+            SET source_type = 'table',
+                source_label = '表格: 主要参数'
+            WHERE id = %s
+            """,
+            (seeded["child_clause_id"],),
+        )
+        conn.commit()
+
+    response = client.get(f"/api/standards/{seeded['standard_id']}/viewer")
+
+    assert response.status_code == 200
+    child = response.json()["clause_tree"][0]["children"][0]
+    assert child["source_type"] == "table"
+    assert child["source_label"] == "表格: 主要参数"
+
+
+def test_get_standard_parse_assets_returns_parser_sections_and_tables(
+    client: SyncASGIClient,
+    tmp_path: Path,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(
+            """
+            UPDATE document
+            SET parser_name = 'mineru',
+                parser_version = 'v1',
+                raw_payload = %s::jsonb
+            WHERE id = %s
+            """,
+            ('{"batch_id":"batch-123"}', seeded["document_id"]),
+        )
+        conn.execute(
+            """
+            INSERT INTO document_section
+              (id, document_id, section_code, title, level, page_start, page_end, text, text_source, sort_order, raw_json)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            (
+                uuid4(), seeded["document_id"], "3", "总则", 1, 12, 12, "正文内容",
+                "mineru_markdown", 0, '{"page_number":12,"markdown":"3 总则\\n正文内容"}',
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO document_table
+              (id, document_id, section_id, page, page_start, page_end, table_title, table_html, raw_json)
+            VALUES
+              (%s, %s, NULL, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            (
+                uuid4(), seeded["document_id"], 13, 13, 13, "主要参数",
+                "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+                '{"page":13,"title":"主要参数"}',
+            ),
+        )
+        conn.commit()
+
+    response = client.get(f"/api/standards/{seeded['standard_id']}/parse-assets")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["standard_id"] == seeded["standard_id"]
+    assert payload["document"]["parser_name"] == "mineru"
+    assert payload["document"]["raw_payload"] == {"batch_id": "batch-123"}
+    assert payload["sections"][0]["text_source"] == "mineru_markdown"
+    assert payload["sections"][0]["raw_json"]["page_number"] == 12
+    assert payload["tables"][0]["table_title"] == "主要参数"
+    assert payload["tables"][0]["table_html"].startswith("<table>")
 
 
 def test_get_standard_viewer_nests_commentary_under_matching_clause(
@@ -629,3 +738,30 @@ def test_delete_standard_blocks_active_processing(client: TestClient, tmp_path: 
 
     assert response.status_code == 409
     assert "processing" in response.json()["detail"].lower()
+
+
+def test_delete_standard_does_not_invoke_asyncio_run(client: TestClient, tmp_path: Path) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+    import tender_backend.api.standards as standards_api
+
+    captured: dict[str, object] = {}
+
+    async def fake_delete_from_index(*, standard_id: str) -> None:
+        captured["standard_id"] = standard_id
+
+    def fail_asyncio_run(*args, **kwargs):
+        raise AssertionError("delete endpoint must not call asyncio.run inside request handling")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(standards_api, "delete_standard_clauses_from_index", fake_delete_from_index, raising=False)
+    monkeypatch.setattr(standards_api, "asyncio", SimpleNamespace(run=fail_asyncio_run), raising=False)
+
+    response = client.delete(f"/api/standards/{seeded['standard_id']}")
+
+    assert response.status_code == 200
+    assert captured == {"standard_id": seeded["standard_id"]}
+
+    monkeypatch.undo()

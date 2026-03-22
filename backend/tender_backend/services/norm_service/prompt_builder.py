@@ -73,6 +73,23 @@ COMMENTARY_EXTRACTION_PROMPT = """\
 --- 条文说明结束 ---
 """
 
+# ── Table extraction prompt (规范表格) ──
+
+TABLE_EXTRACTION_PROMPT = """\
+你是一个建筑工程规范表格条款提取助手。请从以下规范表格中提取能形成规范要求的条款，以 JSON 数组格式输出。
+
+要求：
+1. 仅提取表格中明确表达的规范要求、参数要求、限值、条件、检测项、技术指标
+2. 每条仍输出为与正文兼容的结构：node_type、clause_no（如无明确编号可为空）、clause_title、clause_text、summary、tags、page_start、children
+3. 如果表格只是标题或说明，不能形成独立规范要求时，返回空数组
+4. `clause_text` 必须保留关键数字、单位、符号和条件，不要改写
+5. 仅输出 JSON 数组，不要输出其他文字
+
+--- 规范表格开始 ---
+{text}
+--- 规范表格结束 ---
+"""
+
 # ── Tag summary prompt ──
 
 TAG_SUMMARY_PROMPT = """\
@@ -96,6 +113,8 @@ def build_prompt(scope: ProcessingScope) -> str:
     """Build the appropriate LLM prompt based on scope type."""
     if scope.scope_type == "commentary":
         return COMMENTARY_EXTRACTION_PROMPT.format(text=scope.text)
+    if scope.scope_type == "table":
+        return TABLE_EXTRACTION_PROMPT.format(text=scope.text)
     return CLAUSE_EXTRACTION_PROMPT.format(text=scope.text)
 
 

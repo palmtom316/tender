@@ -504,6 +504,117 @@
   color: var(--color-text-muted);
 }
 
+.standard-viewer-modal__diagnostics {
+  margin-top: var(--space-4);
+  border: 1px solid rgba(120, 104, 84, 0.16);
+  border-radius: var(--radius-md);
+  background: rgba(249, 246, 239, 0.9);
+  overflow: hidden;
+}
+
+.standard-viewer-modal__diagnostics-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  padding: var(--space-3) var(--space-4);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.standard-viewer-modal__diagnostics-summary::-webkit-details-marker {
+  display: none;
+}
+
+.standard-viewer-modal__diagnostics-count {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.standard-viewer-modal__diagnostics-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.standard-viewer-modal__diagnostics-note {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.standard-viewer-modal__asset-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.standard-viewer-modal__asset-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+.standard-viewer-modal__asset-card,
+.standard-viewer-modal__document-raw {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(120, 104, 84, 0.12);
+}
+
+.standard-viewer-modal__document-raw summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.standard-viewer-modal__asset-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.standard-viewer-modal__asset-meta strong {
+  color: var(--color-text);
+}
+
+.standard-viewer-modal__asset-meta span,
+.standard-viewer-modal__asset-caption {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.standard-viewer-modal__asset-text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.standard-viewer-modal__asset-raw {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(33, 38, 45, 0.92);
+  color: #f6eee2;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
 .standard-clause-tree {
   display: flex;
   flex-direction: column;

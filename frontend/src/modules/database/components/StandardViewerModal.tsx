@@ -1,24 +1,232 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 
 import { Badge } from "../../../components/ui/Badge";
 import { ClayButton } from "../../../components/ui/ClayButton";
 import { Icon } from "../../../components/ui/Icon";
-import type { StandardViewerData } from "../../../lib/api";
+import type {
+  StandardClauseNode,
+  StandardParseAssetSection,
+  StandardParseAssetTable,
+  StandardParseAssets,
+  StandardViewerData,
+} from "../../../lib/api";
 import { StandardClauseTree, findClauseNode, firstClauseNode } from "./StandardClauseTree";
-import { StandardPdfPane } from "./StandardPdfPane";
+
+const StandardPdfPane = lazy(async () => import("./StandardPdfPane").then((module) => ({
+  default: module.StandardPdfPane,
+})));
 
 type StandardViewerModalProps = {
   open: boolean;
   mode: "browse" | "search-hit";
   viewerData: StandardViewerData | null;
+  parseAssets: StandardParseAssets | null;
+  parseAssetsLoading?: boolean;
+  parseAssetsError?: string;
   initialClauseId?: string | null;
   onClose: () => void;
 };
+
+function clampText(value: string | null | undefined, maxLength = 180): string {
+  if (!value) return "";
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength).trimEnd()}...`;
+}
+
+function formatPageRange(pageStart: number | null, pageEnd: number | null): string {
+  if (pageStart == null && pageEnd == null) return "页码未标注";
+  if (pageStart == null) return `P${pageEnd}`;
+  if (pageEnd == null || pageStart === pageEnd) return `P${pageStart}`;
+  return `P${pageStart}-${pageEnd}`;
+}
+
+function formatRawPreview(value: unknown): string {
+  if (value == null) return "无原始载荷";
+  if (typeof value === "string") return clampText(value, 320);
+  try {
+    return clampText(JSON.stringify(value, null, 2), 320);
+  } catch {
+    return "原始载荷无法序列化";
+  }
+}
+
+function normalizeSourceLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value.replace(/^表格[:：]\s*/u, "").trim() || null;
+}
+
+function normalizeText(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildKeywords(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const keywords: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (!normalized) continue;
+    if (normalized.length >= 2 && !seen.has(normalized)) {
+      seen.add(normalized);
+      keywords.push(normalized);
+    }
+    for (const token of normalized.split(" ")) {
+      if (token.length < 2 || seen.has(token)) continue;
+      seen.add(token);
+      keywords.push(token);
+    }
+  }
+  return keywords;
+}
+
+function rangesOverlap(
+  startA: number | null,
+  endA: number | null,
+  startB: number | null,
+  endB: number | null,
+): boolean {
+  const normalizedStartA = startA ?? endA;
+  const normalizedEndA = endA ?? startA;
+  const normalizedStartB = startB ?? endB;
+  const normalizedEndB = endB ?? startB;
+  if (normalizedStartA == null || normalizedEndA == null || normalizedStartB == null || normalizedEndB == null) {
+    return false;
+  }
+  return normalizedStartA <= normalizedEndB && normalizedStartB <= normalizedEndA;
+}
+
+function rankMatches<T>(
+  candidates: T[],
+  scoreCandidate: (candidate: T) => number,
+): T[] {
+  const scored = candidates
+    .map((candidate, index) => ({ candidate, index, score: scoreCandidate(candidate) }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  if (scored.length === 0) return [];
+
+  const strongestScore = scored[0].score;
+  if (strongestScore < 45) {
+    return scored.slice(0, 3).map((item) => item.candidate);
+  }
+
+  const minimumScore = Math.max(35, Math.floor(strongestScore * 0.45));
+  return scored
+    .filter((item) => item.score >= minimumScore)
+    .slice(0, 3)
+    .map((item) => item.candidate);
+}
+
+function getRelatedSections(
+  parseAssets: StandardParseAssets | null,
+  selectedClause: StandardClauseNode | null,
+): StandardParseAssetSection[] {
+  if (!parseAssets || !selectedClause) return [];
+
+  const clauseCode = normalizeText(selectedClause.clause_no);
+  const clauseTitle = normalizeText(selectedClause.clause_title);
+  const clauseText = normalizeText(selectedClause.clause_text);
+  const keywords = buildKeywords([
+    selectedClause.clause_no,
+    selectedClause.clause_title,
+    selectedClause.source_label,
+    selectedClause.clause_text?.slice(0, 48),
+  ]);
+
+  return rankMatches(parseAssets.sections, (section) => {
+    let score = 0;
+    const sectionCode = normalizeText(section.section_code);
+    const sectionTitle = normalizeText(section.title);
+    const sectionText = normalizeText(section.text);
+    const combined = `${sectionCode} ${sectionTitle} ${sectionText}`.trim();
+
+    if (rangesOverlap(section.page_start, section.page_end, selectedClause.page_start, selectedClause.page_end)) {
+      score += 24;
+    }
+    if (clauseCode && sectionCode === clauseCode) {
+      score += 80;
+    }
+    if (clauseTitle && sectionTitle === clauseTitle) {
+      score += 70;
+    } else if (clauseTitle && sectionTitle && (sectionTitle.includes(clauseTitle) || clauseTitle.includes(sectionTitle))) {
+      score += 42;
+    }
+    if (clauseText && clauseText.length >= 6 && sectionText.includes(clauseText.slice(0, Math.min(24, clauseText.length)))) {
+      score += 55;
+    }
+    for (const keyword of keywords) {
+      if (combined.includes(keyword)) {
+        score += keyword.length >= 6 ? 12 : 6;
+      }
+    }
+
+    return score;
+  });
+}
+
+function getRelatedTables(
+  parseAssets: StandardParseAssets | null,
+  selectedClause: StandardClauseNode | null,
+): StandardParseAssetTable[] {
+  if (!parseAssets || !selectedClause) return [];
+  const normalizedLabel = normalizeSourceLabel(selectedClause.source_label);
+  const normalizedLabelText = normalizeText(normalizedLabel);
+  const clauseCode = normalizeText(selectedClause.clause_no);
+  const clauseTitle = normalizeText(selectedClause.clause_title);
+  const clauseText = normalizeText(selectedClause.clause_text);
+  const keywords = buildKeywords([
+    normalizedLabel,
+    selectedClause.clause_no,
+    selectedClause.clause_title,
+    selectedClause.clause_text?.slice(0, 32),
+  ]);
+
+  return rankMatches(parseAssets.tables, (table) => {
+    let score = 0;
+    const tableTitle = normalizeText(table.table_title);
+    const tableHtml = normalizeText(table.table_html);
+    const tableRaw = normalizeText(formatRawPreview(table.raw_json));
+    const combined = `${tableTitle} ${tableHtml} ${tableRaw}`.trim();
+
+    if (rangesOverlap(table.page_start, table.page_end, selectedClause.page_start, selectedClause.page_end)) {
+      score += 18;
+    }
+    if (selectedClause.source_type === "table" && normalizedLabelText && tableTitle === normalizedLabelText) {
+      score += 95;
+    } else if (selectedClause.source_type === "table" && normalizedLabelText && tableTitle
+      && (tableTitle.includes(normalizedLabelText) || normalizedLabelText.includes(tableTitle))) {
+      score += 56;
+    }
+    if (clauseTitle && tableTitle && (tableTitle.includes(clauseTitle) || clauseTitle.includes(tableTitle))) {
+      score += 36;
+    }
+    if (clauseCode && combined.includes(clauseCode)) {
+      score += 24;
+    }
+    if (clauseText && clauseText.length >= 4 && combined.includes(clauseText.slice(0, Math.min(16, clauseText.length)))) {
+      score += 30;
+    }
+    for (const keyword of keywords) {
+      if (combined.includes(keyword)) {
+        score += keyword.length >= 6 ? 10 : 5;
+      }
+    }
+
+    return score;
+  });
+}
 
 export function StandardViewerModal({
   open,
   mode,
   viewerData,
+  parseAssets,
+  parseAssetsLoading = false,
+  parseAssetsError = "",
   initialClauseId = null,
   onClose,
 }: StandardViewerModalProps) {
@@ -54,6 +262,11 @@ export function StandardViewerModal({
     ? Math.max(selectedClause.page_end, displayPageStart ?? 1)
     : commentaryClauses.find((child) => child.page_end != null && child.page_end > 0)?.page_end
       ?? displayPageStart;
+  const relatedSections = getRelatedSections(parseAssets, selectedClause ?? null);
+  const relatedTables = getRelatedTables(parseAssets, selectedClause ?? null);
+  const parserLabel = [parseAssets?.document?.parser_name, parseAssets?.document?.parser_version]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className="standard-viewer-modal">
@@ -76,10 +289,18 @@ export function StandardViewerModal({
 
         <div className="standard-viewer-modal__body">
           <div className="standard-viewer-modal__pdf">
-            <StandardPdfPane
-              pdfUrl={viewerData.pdf_url}
-              targetPage={targetPage}
-            />
+            <Suspense fallback={(
+              <div className="empty-state">
+                <div className="spinner" />
+                <p>PDF 组件加载中...</p>
+              </div>
+            )}
+            >
+              <StandardPdfPane
+                pdfUrl={viewerData.pdf_url}
+                targetPage={targetPage}
+              />
+            </Suspense>
           </div>
 
           <div className="standard-viewer-modal__aside">
@@ -100,6 +321,16 @@ export function StandardViewerModal({
                   </div>
                   {selectedClause.summary && (
                     <p className="standard-viewer-modal__summary">{selectedClause.summary}</p>
+                  )}
+                  {selectedClause.source_type && selectedClause.source_type !== "text" && (
+                    <div className="standard-viewer-modal__tags">
+                      <Badge variant="warning">
+                        {selectedClause.source_type === "table" ? "来自表格" : selectedClause.source_type}
+                      </Badge>
+                      {selectedClause.source_label && (
+                        <Badge variant="default">{selectedClause.source_label}</Badge>
+                      )}
+                    </div>
                   )}
                   {selectedClause.clause_text && (
                     <p className="standard-viewer-modal__text">{selectedClause.clause_text}</p>
@@ -134,6 +365,95 @@ export function StandardViewerModal({
                       ? ` P${displayPageStart}${displayPageEnd && displayPageEnd !== displayPageStart ? `-${displayPageEnd}` : ""}`
                       : " 未标注"}
                   </div>
+                  <details className="standard-viewer-modal__diagnostics" open={mode === "search-hit"}>
+                    <summary className="standard-viewer-modal__diagnostics-summary">
+                      <span>解析诊断</span>
+                      {parseAssets && (
+                        <span className="standard-viewer-modal__diagnostics-count">
+                          {parseAssets.sections.length} 段 / {parseAssets.tables.length} 表
+                        </span>
+                      )}
+                    </summary>
+                    <div className="standard-viewer-modal__diagnostics-body">
+                      {parseAssetsLoading && (
+                        <div className="standard-viewer-modal__diagnostics-note">正在加载解析诊断数据...</div>
+                      )}
+                      {!parseAssetsLoading && parseAssetsError && (
+                        <div className="warning-banner">{parseAssetsError}</div>
+                      )}
+                      {!parseAssetsLoading && !parseAssetsError && (
+                        <>
+                          <div className="standard-viewer-modal__tags">
+                            <Badge variant="info">{parserLabel || "解析器未标注"}</Badge>
+                            <Badge variant="default">段落 {parseAssets?.sections.length ?? 0}</Badge>
+                            <Badge variant="default">表格 {parseAssets?.tables.length ?? 0}</Badge>
+                            <Badge variant={selectedClause?.source_type === "table" ? "warning" : "default"}>
+                              来源 {selectedClause?.source_type === "table" ? "表格" : "正文"}
+                            </Badge>
+                            {selectedClause?.source_label && (
+                              <Badge variant="default">{selectedClause.source_label}</Badge>
+                            )}
+                          </div>
+
+                          {relatedSections.length > 0 && (
+                            <div className="standard-viewer-modal__asset-group">
+                              <div className="standard-viewer-modal__asset-title">相关原始段落</div>
+                              {relatedSections.map((section) => (
+                                <div key={section.id} className="standard-viewer-modal__asset-card">
+                                  <div className="standard-viewer-modal__asset-meta">
+                                    <strong>{section.section_code ? `${section.section_code} ` : ""}{section.title}</strong>
+                                    <span>{formatPageRange(section.page_start, section.page_end)}</span>
+                                  </div>
+                                  <div className="standard-viewer-modal__asset-caption">
+                                    text_source: {section.text_source ?? "unknown"} · sort_order: {section.sort_order ?? "-"}
+                                  </div>
+                                  {section.text && (
+                                    <p className="standard-viewer-modal__asset-text">{clampText(section.text, 220)}</p>
+                                  )}
+                                  <pre className="standard-viewer-modal__asset-raw">{formatRawPreview(section.raw_json)}</pre>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {relatedTables.length > 0 && (
+                            <div className="standard-viewer-modal__asset-group">
+                              <div className="standard-viewer-modal__asset-title">相关原始表格</div>
+                              {relatedTables.map((table) => (
+                                <div key={table.id} className="standard-viewer-modal__asset-card">
+                                  <div className="standard-viewer-modal__asset-meta">
+                                    <strong>{table.table_title ?? "未命名表格"}</strong>
+                                    <span>{formatPageRange(table.page_start ?? table.page, table.page_end ?? table.page)}</span>
+                                  </div>
+                                  {table.table_html && (
+                                    <p className="standard-viewer-modal__asset-text">
+                                      HTML 预览：{clampText(table.table_html.replace(/\s+/g, " "), 220)}
+                                    </p>
+                                  )}
+                                  <pre className="standard-viewer-modal__asset-raw">{formatRawPreview(table.raw_json)}</pre>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {relatedSections.length === 0 && relatedTables.length === 0 && (
+                            <div className="standard-viewer-modal__diagnostics-note">
+                              当前条款还没有匹配到可预览的原始段落或表格，可结合页码与来源标签继续排查。
+                            </div>
+                          )}
+
+                          {parseAssets?.document?.raw_payload && (
+                            <details className="standard-viewer-modal__document-raw">
+                              <summary>查看文档级原始载荷摘要</summary>
+                              <pre className="standard-viewer-modal__asset-raw">
+                                {formatRawPreview(parseAssets.document.raw_payload)}
+                              </pre>
+                            </details>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </details>
                 </>
               ) : (
                 <div className="empty-state">未找到条款详情</div>

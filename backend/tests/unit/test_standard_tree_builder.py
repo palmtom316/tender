@@ -81,3 +81,23 @@ def test_build_tree_keeps_legacy_flat_clause_number_parenting() -> None:
     assert clauses[1]["node_type"] == "clause"
     assert clauses[1]["node_key"] == "3.2.1"
     assert clauses[1]["parent_id"] is None
+
+
+def test_build_tree_preserves_clause_source_metadata() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "6.1.1",
+                "clause_text": "额定电压不应低于 10kV。",
+                "source_type": "table",
+                "source_label": "表格: 主要参数",
+            }
+        ],
+        standard_id,
+    )
+
+    assert len(clauses) == 1
+    assert clauses[0]["source_type"] == "table"
+    assert clauses[0]["source_label"] == "表格: 主要参数"

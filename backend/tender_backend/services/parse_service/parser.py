@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from uuid import UUID, uuid4
 
 import structlog
@@ -15,12 +16,13 @@ def persist_sections(conn: Connection, *, document_id: UUID, sections: list[dict
     """Insert parsed sections into document_section. Returns count."""
     count = 0
     with conn.cursor() as cur:
-        for s in sections:
+        for index, s in enumerate(sections):
             cur.execute(
                 """
                 INSERT INTO document_section
-                    (id, document_id, section_code, title, level, page_start, page_end, text)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    (id, document_id, section_code, title, level, page_start, page_end, text,
+                     raw_json, text_source, sort_order)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     uuid4(),
@@ -31,6 +33,9 @@ def persist_sections(conn: Connection, *, document_id: UUID, sections: list[dict
                     s.get("page_start"),
                     s.get("page_end"),
                     s.get("text"),
+                    json.dumps(s.get("raw_json")) if s.get("raw_json") is not None else None,
+                    s.get("text_source"),
+                    s.get("sort_order", index),
                 ),
             )
             count += 1
@@ -41,22 +46,24 @@ def persist_sections(conn: Connection, *, document_id: UUID, sections: list[dict
 
 def persist_tables(conn: Connection, *, document_id: UUID, tables: list[dict]) -> int:
     """Insert parsed tables into document_table. Returns count."""
-    import json
-
     count = 0
     with conn.cursor() as cur:
         for t in tables:
             cur.execute(
                 """
                 INSERT INTO document_table
-                    (id, document_id, section_id, page, raw_json)
-                VALUES (%s, %s, %s, %s, %s)
+                    (id, document_id, section_id, page, page_start, page_end, table_title, table_html, raw_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     uuid4(),
                     document_id,
                     t.get("section_id"),
                     t.get("page"),
+                    t.get("page_start", t.get("page")),
+                    t.get("page_end", t.get("page")),
+                    t.get("table_title") or t.get("title"),
+                    t.get("table_html") or t.get("html"),
                     json.dumps(t.get("data", t)),
                 ),
             )
@@ -108,5 +115,32 @@ def update_parse_job_status(
             WHERE id = %s
             """,
             (status, provider_job_id, error, parse_job_id),
+        )
+    conn.commit()
+
+
+def update_document_parse_assets(
+    conn: Connection,
+    *,
+    document_id: UUID,
+    parser_name: str,
+    parser_version: str | None = None,
+    raw_payload: dict | list | None = None,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE document
+            SET parser_name = %s,
+                parser_version = %s,
+                raw_payload = %s
+            WHERE id = %s
+            """,
+            (
+                parser_name,
+                parser_version,
+                json.dumps(raw_payload) if raw_payload is not None else None,
+                document_id,
+            ),
         )
     conn.commit()

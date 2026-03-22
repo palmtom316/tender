@@ -85,6 +85,9 @@ function ClauseTreeItem({
         {node.clause_type === "outline" && (
           <Badge variant="info">目录</Badge>
         )}
+        {node.source_type === "table" && (
+          <Badge variant="warning">表格</Badge>
+        )}
         {node.page_start != null && (
           <Badge variant="default">P{node.page_start}</Badge>
         )}
