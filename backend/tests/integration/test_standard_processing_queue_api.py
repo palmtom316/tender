@@ -205,6 +205,12 @@ def test_batch_upload_rejects_missing_required_metadata(client: SyncASGIClient) 
     assert "standard_code" in response.json()["detail"]
 
 
+def test_process_vision_endpoint_is_not_registered(client: SyncASGIClient) -> None:
+    response = client.post("/api/standards/11111111-1111-1111-1111-111111111111/process-vision")
+
+    assert response.status_code == 404
+
+
 def test_retry_endpoint_requeues_failed_jobs_with_stage_aware_reset(client: SyncASGIClient) -> None:
     db_url = _db_url()
     assert db_url is not None

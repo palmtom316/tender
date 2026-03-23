@@ -434,36 +434,6 @@ async def delete_standard(
 
     return {"standard_id": str(standard_id), "deleted": True}
 
-
-@router.post("/standards/{standard_id}/process-vision")
-async def trigger_vision_processing(
-    standard_id: UUID,
-    conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
-) -> dict:
-    """Re-process a standard using the Qwen3-VL vision pipeline (A/B comparison)."""
-    from tender_backend.services.vision_service.vision_processor import process_standard_vision
-
-    std = _repo.get_standard(conn, standard_id)
-    if not std:
-        raise HTTPException(status_code=404, detail="Standard not found")
-
-    document_id = std.get("document_id")
-    if not document_id:
-        raise HTTPException(status_code=400, detail="Standard has no linked document")
-
-    _repo.update_processing_status(conn, standard_id, "processing")
-    try:
-        summary = process_standard_vision(
-            conn, standard_id=standard_id, document_id=str(document_id),
-        )
-        _repo.update_processing_status(conn, standard_id, "completed")
-        return summary
-    except Exception as exc:
-        _repo.update_processing_status(conn, standard_id, "failed", error_message=str(exc))
-        raise HTTPException(status_code=502, detail=str(exc))
-
-
 @router.post("/standards/{standard_id}/process")
 async def trigger_processing(
     standard_id: UUID,
