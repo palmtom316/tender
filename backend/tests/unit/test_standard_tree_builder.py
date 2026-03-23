@@ -93,6 +93,7 @@ def test_build_tree_preserves_clause_source_metadata() -> None:
                 "clause_text": "额定电压不应低于 10kV。",
                 "source_type": "table",
                 "source_label": "表格: 主要参数",
+                "source_ref": "table:t1",
             }
         ],
         standard_id,
@@ -101,3 +102,55 @@ def test_build_tree_preserves_clause_source_metadata() -> None:
     assert len(clauses) == 1
     assert clauses[0]["source_type"] == "table"
     assert clauses[0]["source_label"] == "表格: 主要参数"
+    assert clauses[0]["source_ref"] == "table:t1"
+
+
+def test_build_tree_normalizes_blank_and_string_page_numbers() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "6.1.2",
+                "clause_text": "条文内容",
+                "page_start": "",
+                "page_end": "12",
+            }
+        ],
+        standard_id,
+    )
+
+    assert len(clauses) == 1
+    assert clauses[0]["page_start"] is None
+    assert clauses[0]["page_end"] == 12
+
+
+def test_build_tree_deduplicates_nested_siblings_with_same_projected_node_key() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "4.3.2",
+                "clause_text": "主条文",
+                "children": [
+                    {
+                        "node_type": "item",
+                        "node_label": "1",
+                        "clause_text": "第1项正文（首次）",
+                    },
+                    {
+                        "node_type": "item",
+                        "node_label": "1",
+                        "clause_text": "第1项正文（重复）",
+                    },
+                ],
+            }
+        ],
+        standard_id,
+    )
+
+    assert len(clauses) == 2
+    assert clauses[0]["node_key"] == "4.3.2"
+    assert clauses[1]["node_key"] == "4.3.2#1"
+    assert clauses[1]["clause_text"] == "第1项正文（首次）"
