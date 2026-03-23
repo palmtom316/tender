@@ -1121,9 +1121,9 @@ def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:
         {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
     ])
     monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
     monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
-    monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
-    monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
         ProcessingScope(
             scope_type="normative",
             chapter_label="1 总则",
