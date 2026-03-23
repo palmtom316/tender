@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -1024,6 +1025,92 @@ def test_process_standard_ai_includes_structured_validation(monkeypatch) -> None
     assert summary["validation"]["phrase_flag_count"] == 1
     assert summary["validation"]["phrase_flags"][0]["phrase"] == "必须"
     assert summary["validation"]["issues"][0]["code"] == "page.missing_anchor"
+
+
+def test_process_standard_ai_repairs_symbol_numeric_anomalies_before_persist(monkeypatch) -> None:
+    standard_id = UUID("78787878-7878-7878-7878-787878787878")
+    inserted_clauses: list[dict] = []
+    clauses = [{
+        "id": uuid4(),
+        "standard_id": standard_id,
+        "parent_id": None,
+        "clause_no": "1",
+        "node_type": "clause",
+        "node_key": "1",
+        "node_label": None,
+        "clause_title": None,
+        "clause_text": "抗压强度不应小于30 MP",
+        "summary": None,
+        "tags": [],
+        "page_start": 1,
+        "page_end": 1,
+        "clause_type": "normative",
+        "source_type": "text",
+        "source_label": "1 总则",
+        "source_ref": "document_section:s1",
+        "source_refs": ["document_section:s1"],
+    }]
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1 抗压强度不应小于30 MP",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: deepcopy(clauses))
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda current_clauses: current_clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda current_clauses: [])
+    monkeypatch.setattr(
+        norm_processor,
+        "run_repair_tasks",
+        lambda conn, document_id, tasks: [
+            SimpleNamespace(
+                task_type="symbol_numeric_repair",
+                source_ref="document_section:s1",
+                status="patched",
+                patched_text="抗压强度不应小于30 MPa",
+                patched_table_html=None,
+                notes="fixed",
+            )
+        ],
+    )
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(
+        norm_processor._std_repo,
+        "bulk_create_clauses",
+        lambda conn, current_clauses: inserted_clauses.extend(deepcopy(current_clauses)) or len(current_clauses),
+    )
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, current_clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="98989898-9898-9898-9898-989898989898",
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["repair_task_count"] == 1
+    assert summary["issues_before_repair"] == 1
+    assert summary["issues_after_repair"] == 0
+    assert inserted_clauses[0]["clause_text"] == "抗压强度不应小于30 MPa"
 
 
 def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:

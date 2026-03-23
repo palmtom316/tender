@@ -13,10 +13,14 @@ class Settings(BaseSettings):
     standard_ai_scope_delay_ms: int = 200
     standard_ai_scope_delay_jitter_ms: int = 200
     standard_ai_gateway_timeout_seconds: float = 120.0
-    vision_max_concurrent_pages: int = 4
+    vision_max_concurrent_pages: int = 1
     vision_page_dpi: int = 200
     vision_page_delay_ms: int = 0
-    vision_ai_gateway_timeout_seconds: float = 120.0
+    vision_ai_gateway_timeout_seconds: float = 300.0
+    vl_repair_max_concurrent_tasks: int = 1
+    vl_repair_page_dpi: int = 200
+    vl_repair_page_delay_ms: int = 0
+    vl_repair_ai_gateway_timeout_seconds: float = 300.0
     version: str = "0.1.0"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

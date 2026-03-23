@@ -102,6 +102,8 @@ def _table_tasks_from_clauses(clauses: list[dict]) -> list[RepairTask]:
     for clause in clauses:
         if clause.get("source_type") != "table":
             continue
+        if clause.get("page_start") is None:
+            continue
         table_ref = next((ref for ref in _iter_source_refs(clause) if ref.startswith("table:")), None)
         if not table_ref:
             continue
@@ -131,6 +133,8 @@ def _symbol_numeric_tasks_from_issues(issues: list[ValidationIssue]) -> list[Rep
     tasks: list[RepairTask] = []
     for issue in issues:
         if not _is_symbol_numeric_issue(issue):
+            continue
+        if issue.page_start is None:
             continue
         if not issue.source_ref or issue.source_ref.startswith("table:"):
             continue

@@ -47,6 +47,41 @@ def render_pdf_to_pages(pdf_path: str, *, dpi: int = 200) -> list[PageImage]:
     return pages
 
 
+def render_pdf_page_range(
+    pdf_path: str,
+    *,
+    page_start: int,
+    page_end: int | None = None,
+    dpi: int = 200,
+) -> list[PageImage]:
+    """Render a 1-based page range from a PDF to PNG images in memory."""
+    if page_start <= 0:
+        raise ValueError("page_start must be >= 1")
+    if page_end is None:
+        page_end = page_start
+    if page_end < page_start:
+        raise ValueError("page_end must be >= page_start")
+
+    zoom = dpi / 72
+    mat = fitz.Matrix(zoom, zoom)
+
+    pages: list[PageImage] = []
+    with fitz.open(pdf_path) as doc:
+        if page_end > len(doc):
+            raise ValueError("page_end exceeds document page count")
+        for page_number in range(page_start, page_end + 1):
+            pix = doc.load_page(page_number - 1).get_pixmap(matrix=mat)
+            pages.append(
+                PageImage(
+                    page_number=page_number,
+                    png_bytes=pix.tobytes("png"),
+                    width=pix.width,
+                    height=pix.height,
+                )
+            )
+    return pages
+
+
 def encode_page_base64(page: PageImage) -> str:
     """Return a ``data:image/png;base64,...`` URI for OpenAI multimodal messages."""
     b64 = base64.b64encode(page.png_bytes).decode("ascii")

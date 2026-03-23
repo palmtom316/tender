@@ -8,6 +8,7 @@ import pytest
 from tender_backend.services.vision_service.pdf_renderer import (
     PageImage,
     encode_page_base64,
+    render_pdf_page_range,
     render_pdf_to_pages,
 )
 
@@ -48,6 +49,13 @@ class TestRenderPdfToPages:
     def test_missing_file_raises(self):
         with pytest.raises(Exception):
             render_pdf_to_pages("/nonexistent/file.pdf")
+
+    def test_renders_selected_page_range(self, tmp_path):
+        pdf = _create_test_pdf(str(tmp_path / "test.pdf"), num_pages=4)
+
+        pages = render_pdf_page_range(pdf, page_start=2, page_end=3, dpi=72)
+
+        assert [page.page_number for page in pages] == [2, 3]
 
 
 class TestEncodePageBase64:

@@ -24,6 +24,8 @@ from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.document_assets import build_document_asset
+from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
+from tender_backend.services.norm_service.ast_merger import merge_repair_patches
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes
 from tender_backend.services.norm_service.structural_nodes import build_processing_scopes as build_structured_processing_scopes
@@ -31,6 +33,7 @@ from tender_backend.services.norm_service.tree_builder import build_tree, link_c
 from tender_backend.services.norm_service.validation import validate_clauses
 from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
+from tender_backend.services.vision_service.repair_service import run_repair_tasks
 from tender_backend.tools.reindex_standard_clauses import build_clause_index_docs
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -881,8 +884,12 @@ def process_standard_ai(
         clauses = build_tree(all_entries, standard_id)
         clauses = link_commentary(clauses)
         structured_validation = validate_clauses(clauses)
+        repair_tasks = build_repair_tasks(clauses, structured_validation.issues)
+        repair_patches = run_repair_tasks(conn=conn, document_id=document_id, tasks=repair_tasks) if repair_tasks else []
+        clauses = merge_repair_patches(clauses, repair_patches)
+        revalidated = validate_clauses(clauses)
         warnings = validate_tree(clauses)
-        combined_warnings = warnings + structured_validation.warning_messages(limit=10)
+        combined_warnings = warnings + revalidated.warning_messages(limit=10)
 
         _std_repo.delete_clauses(conn, standard_id)
         inserted = _std_repo.bulk_create_clauses(conn, clauses)
@@ -898,8 +905,11 @@ def process_standard_ai(
             "normative": sum(1 for c in clauses if c["clause_type"] == "normative"),
             "commentary": sum(1 for c in clauses if c["clause_type"] == "commentary"),
             "scopes_processed": len(scopes),
+            "repair_task_count": len(repair_tasks),
+            "issues_before_repair": len(structured_validation.issues),
+            "issues_after_repair": len(revalidated.issues),
             "warnings": combined_warnings[:5],
-            "validation": structured_validation.to_dict(),
+            "validation": revalidated.to_dict(),
             "elapsed_seconds": round(elapsed, 1),
         }
 
