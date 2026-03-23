@@ -62,6 +62,10 @@ def _pages_from_raw_payload(raw_payload: dict[str, Any]) -> list[PageAsset]:
     return pages
 
 
+def _has_textual_page_assets(pages: list[PageAsset]) -> bool:
+    return any((page.normalized_text or "").strip() for page in pages)
+
+
 def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
@@ -263,7 +267,7 @@ def build_document_asset(
 
     page_assets = _pages_from_raw_payload(normalized_payload)
     section_page_assets = _build_pages_from_sections(sections)
-    if not page_assets:
+    if not page_assets or (section_page_assets and not _has_textual_page_assets(page_assets)):
         page_assets = section_page_assets
         normalized_payload["pages"] = [
             {"page_number": page.page_number, "markdown": page.normalized_text}

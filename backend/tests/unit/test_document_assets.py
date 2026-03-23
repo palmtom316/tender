@@ -205,6 +205,45 @@ def test_build_document_asset_falls_back_to_sections_and_tables_when_missing_in_
     assert asset.full_markdown == "3 总则\n章节正文\n\n4 术语\n术语正文"
 
 
+def test_build_document_asset_falls_back_to_sections_when_raw_pages_are_layout_blocks() -> None:
+    document_id = uuid4()
+    section_id = uuid4()
+    document = {
+        "id": document_id,
+        "parser_name": "mineru",
+        "raw_payload": {
+            "pages": [
+                {"type": "header", "content": "中华人民共和国国家标准"},
+                {"type": "title", "content": "1 总则"},
+            ],
+            "full_markdown": "# 1 总则\n1.0.1 条文正文",
+        },
+    }
+    sections = [
+        {
+            "id": section_id,
+            "section_code": "1",
+            "title": "总则",
+            "text": "1.0.1 条文正文",
+            "page_start": 1,
+            "page_end": 1,
+            "raw_json": {"page_number": 1},
+        }
+    ]
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document=document,
+        sections=sections,
+        tables=[],
+    )
+
+    assert len(asset.pages) == 1
+    assert asset.pages[0].page_number == 1
+    assert asset.pages[0].source_ref == f"document_section:{section_id}"
+    assert asset.pages[0].normalized_text == "1 总则\n1.0.1 条文正文"
+
+
 def test_update_document_parse_assets_serializes_document_asset_with_uuid_values() -> None:
     class _FakeCursor:
         def __init__(self) -> None:
