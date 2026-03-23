@@ -50,6 +50,10 @@ class ValidationIssue:
     message: str
     clause_id: UUID | None = None
     clause_no: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    source_ref: str | None = None
+    snippet: str | None = None
     details: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
@@ -59,6 +63,10 @@ class ValidationIssue:
             "message": self.message,
             "clause_id": str(self.clause_id) if self.clause_id else None,
             "clause_no": self.clause_no,
+            "page_start": self.page_start,
+            "page_end": self.page_end,
+            "source_ref": self.source_ref,
+            "snippet": self.snippet,
             "details": self.details,
         }
 
@@ -120,6 +128,7 @@ def _add_issue(
     details: dict[str, object] | None = None,
 ) -> None:
     clause_id, clause_no = _clause_identity(clause)
+    source_ref = _iter_source_refs(clause)
     result.issues.append(
         ValidationIssue(
             code=code,
@@ -127,9 +136,22 @@ def _add_issue(
             message=message,
             clause_id=clause_id,
             clause_no=clause_no,
+            page_start=clause.get("page_start"),
+            page_end=clause.get("page_end"),
+            source_ref=source_ref[0] if source_ref else None,
+            snippet=_build_snippet(clause.get("clause_text")),
             details=details or {},
         )
     )
+
+
+def _build_snippet(raw: object, *, limit: int = 160) -> str | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
 
 
 def _iter_source_refs(clause: dict) -> list[str]:
