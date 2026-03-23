@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict, is_dataclass
+from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -10,6 +12,12 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 logger = structlog.stdlib.get_logger(__name__)
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, UUID):
+        return str(value)
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
 def persist_sections(conn: Connection, *, document_id: UUID, sections: list[dict]) -> int:
@@ -125,8 +133,12 @@ def update_document_parse_assets(
     document_id: UUID,
     parser_name: str,
     parser_version: str | None = None,
-    raw_payload: dict | list | None = None,
+    raw_payload: Any = None,
 ) -> None:
+    if is_dataclass(raw_payload):
+        payload = raw_payload.raw_payload if isinstance(getattr(raw_payload, "raw_payload", None), dict) else asdict(raw_payload)
+    else:
+        payload = raw_payload
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -139,7 +151,7 @@ def update_document_parse_assets(
             (
                 parser_name,
                 parser_version,
-                json.dumps(raw_payload) if raw_payload is not None else None,
+                json.dumps(payload, default=_json_default) if payload is not None else None,
                 document_id,
             ),
         )

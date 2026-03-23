@@ -411,6 +411,8 @@ def test_get_standard_parse_assets_returns_parser_sections_and_tables(
     db_url = _db_url()
     assert db_url is not None
     seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+    section_id = uuid4()
+    table_id = uuid4()
 
     with psycopg.connect(db_url) as conn:
         conn.execute(
@@ -431,7 +433,7 @@ def test_get_standard_parse_assets_returns_parser_sections_and_tables(
               (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             """,
             (
-                uuid4(), seeded["document_id"], "3", "总则", 1, 12, 12, "正文内容",
+                section_id, seeded["document_id"], "3", "总则", 1, 12, 12, "正文内容",
                 "mineru_markdown", 0, '{"page_number":12,"markdown":"3 总则\\n正文内容"}',
             ),
         )
@@ -443,7 +445,7 @@ def test_get_standard_parse_assets_returns_parser_sections_and_tables(
               (%s, %s, NULL, %s, %s, %s, %s, %s, %s::jsonb)
             """,
             (
-                uuid4(), seeded["document_id"], 13, 13, 13, "主要参数",
+                table_id, seeded["document_id"], 13, 13, 13, "主要参数",
                 "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
                 '{"page":13,"title":"主要参数"}',
             ),
@@ -456,7 +458,26 @@ def test_get_standard_parse_assets_returns_parser_sections_and_tables(
     payload = response.json()
     assert payload["standard_id"] == seeded["standard_id"]
     assert payload["document"]["parser_name"] == "mineru"
-    assert payload["document"]["raw_payload"] == {"batch_id": "batch-123"}
+    assert payload["document"]["raw_payload"]["batch_id"] == "batch-123"
+    assert payload["document"]["raw_payload"]["pages"] == [
+        {
+            "page_number": 12,
+            "markdown": "3 总则\n正文内容",
+            "raw_page": {"page_number": 12, "markdown": "3 总则\n正文内容"},
+            "source_ref": f"document_section:{section_id}",
+        }
+    ]
+    assert payload["document"]["raw_payload"]["tables"] == [
+        {
+            "source_ref": f"table:{table_id}",
+            "page_start": 13,
+            "page_end": 13,
+            "table_title": "主要参数",
+            "table_html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+            "raw_json": {"page": 13, "title": "主要参数"},
+        }
+    ]
+    assert payload["document"]["raw_payload"]["full_markdown"] == "3 总则\n正文内容"
     assert payload["sections"][0]["text_source"] == "mineru_markdown"
     assert payload["sections"][0]["raw_json"]["page_number"] == 12
     assert payload["tables"][0]["table_title"] == "主要参数"

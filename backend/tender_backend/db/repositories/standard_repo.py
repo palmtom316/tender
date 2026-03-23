@@ -10,6 +10,11 @@ from uuid import UUID, uuid4
 from psycopg import Connection
 from psycopg.rows import dict_row
 
+from tender_backend.services.norm_service.document_assets import (
+    build_document_asset,
+    serialize_document_asset,
+)
+
 
 def _order_clauses_for_insert(clauses: list[dict]) -> list[dict]:
     """Insert self-referential clauses in dependency order.
@@ -381,9 +386,15 @@ class StandardRepository:
         document = self.get_document_parse_info(conn, document_id=document_id)
         sections = self.list_document_sections(conn, document_id=document_id)
         tables = self.list_document_tables(conn, document_id=document_id)
+        document_asset = build_document_asset(
+            document_id=document_id,
+            document=document,
+            sections=sections,
+            tables=tables,
+        )
 
         return {
-            "document": document,
+            "document": serialize_document_asset(document_asset),
             "sections": sections,
             "tables": tables,
         }
