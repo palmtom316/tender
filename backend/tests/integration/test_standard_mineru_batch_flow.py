@@ -918,9 +918,9 @@ def test_process_standard_ai_processes_text_and_table_scopes(monkeypatch) -> Non
             "page_end": 2,
         }
     ])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
     monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
-    monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
-    monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
         ProcessingScope(
             scope_type="normative",
             chapter_label="1 总则",
@@ -928,7 +928,15 @@ def test_process_standard_ai_processes_text_and_table_scopes(monkeypatch) -> Non
             page_start=1,
             page_end=1,
             section_ids=["s1"],
-        )
+        ),
+        ProcessingScope(
+            scope_type="table",
+            chapter_label="表格: 主要参数",
+            text="<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+            page_start=2,
+            page_end=2,
+            section_ids=["t1"],
+        ),
     ])
     monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
     monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: processed_scopes.append(scope.chapter_label) or [])
@@ -953,6 +961,69 @@ def test_process_standard_ai_processes_text_and_table_scopes(monkeypatch) -> Non
 
     assert summary["status"] == "completed"
     assert processed_scopes == ["1 总则", "表格: 主要参数"]
+
+
+def test_process_standard_ai_includes_structured_validation(monkeypatch) -> None:
+    standard_id = UUID("56565656-5656-5656-5656-565656565656")
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1.0.1 正文",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(
+        norm_processor,
+        "validate_clauses",
+        lambda clauses: SimpleNamespace(
+            issues=[SimpleNamespace(code="page.missing_anchor", severity="warning", message="缺少页码锚点")],
+            phrase_flags=[SimpleNamespace(phrase="必须", category="mandatory", clause_no="1.0.1")],
+            to_dict=lambda: {
+                "issue_count": 1,
+                "phrase_flag_count": 1,
+                "issues": [{"code": "page.missing_anchor", "severity": "warning", "message": "缺少页码锚点"}],
+                "phrase_flags": [{"phrase": "必须", "category": "mandatory", "clause_no": "1.0.1"}],
+            },
+            warning_messages=lambda limit=None: ["缺少页码锚点"],
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="67676767-6767-6767-6767-676767676767",
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["validation"]["issue_count"] == 1
+    assert summary["validation"]["phrase_flag_count"] == 1
+    assert summary["validation"]["phrase_flags"][0]["phrase"] == "必须"
+    assert summary["validation"]["issues"][0]["code"] == "page.missing_anchor"
 
 
 def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:

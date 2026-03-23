@@ -28,6 +28,7 @@ from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes
 from tender_backend.services.norm_service.structural_nodes import build_processing_scopes as build_structured_processing_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
+from tender_backend.services.norm_service.validation import validate_clauses
 from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
 from tender_backend.tools.reindex_standard_clauses import build_clause_index_docs
@@ -879,7 +880,9 @@ def process_standard_ai(
 
         clauses = build_tree(all_entries, standard_id)
         clauses = link_commentary(clauses)
+        structured_validation = validate_clauses(clauses)
         warnings = validate_tree(clauses)
+        combined_warnings = warnings + structured_validation.warning_messages(limit=10)
 
         _std_repo.delete_clauses(conn, standard_id)
         inserted = _std_repo.bulk_create_clauses(conn, clauses)
@@ -895,7 +898,8 @@ def process_standard_ai(
             "normative": sum(1 for c in clauses if c["clause_type"] == "normative"),
             "commentary": sum(1 for c in clauses if c["clause_type"] == "commentary"),
             "scopes_processed": len(scopes),
-            "warnings": warnings[:5],
+            "warnings": combined_warnings[:5],
+            "validation": structured_validation.to_dict(),
             "elapsed_seconds": round(elapsed, 1),
         }
 
