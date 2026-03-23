@@ -45,6 +45,9 @@ class ProcessingScope:
     page_start: int
     page_end: int
     section_ids: list[str] = field(default_factory=list)
+    source_refs: list[str] = field(default_factory=list)
+    context: dict[str, object] | None = None
+    source_chunks: list[dict[str, object]] = field(default_factory=list)
 
 
 def _detect_commentary_start(text: str) -> int | None:
@@ -273,6 +276,67 @@ def rebalance_scopes(
         return []
 
     rebalanced: list[ProcessingScope] = []
+
+    def _dedupe_refs(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            deduped.append(value)
+        return deduped
+
+    def _select_source_chunks(part_text: str, source_chunks: list[dict[str, object]]) -> list[dict[str, object]]:
+        if not source_chunks:
+            return []
+
+        full_text = "\n\n".join(str(chunk.get("text") or "") for chunk in source_chunks)
+        offsets: list[tuple[int, int, dict[str, object]]] = []
+        cursor = 0
+        for index, chunk in enumerate(source_chunks):
+            chunk_text = str(chunk.get("text") or "")
+            if index > 0:
+                cursor += 2
+            start = cursor
+            end = start + len(chunk_text)
+            offsets.append((start, end, chunk))
+            cursor = end
+
+        start = full_text.find(part_text)
+        if start == -1:
+            return []
+        end = start + len(part_text)
+        return [
+            chunk
+            for chunk_start, chunk_end, chunk in offsets
+            if chunk_end > start and chunk_start < end
+        ]
+
+    def _derive_child_provenance(scope: ProcessingScope, part_text: str) -> tuple[list[str], dict[str, object] | None, list[dict[str, object]]]:
+        if not scope.source_chunks:
+            return scope.source_refs, scope.context, scope.source_chunks
+
+        child_chunks = _select_source_chunks(part_text, scope.source_chunks)
+        if not child_chunks:
+            return scope.source_refs, scope.context, scope.source_chunks
+
+        child_refs = _dedupe_refs(
+            [str(chunk.get("source_ref")) for chunk in child_chunks if chunk.get("source_ref")]
+        )
+
+        child_context = scope.context
+        if isinstance(scope.context, dict):
+            child_context = dict(scope.context)
+            child_context["source_refs"] = child_refs
+            child_context["node_types"] = [
+                str(chunk.get("node_type"))
+                for chunk in child_chunks
+                if chunk.get("node_type")
+            ]
+
+        return child_refs, child_context, child_chunks
+
     for scope in scopes:
         clause_blocks = _split_into_clause_blocks(scope.text)
         clause_block_count = max((block_id for _, block_id in clause_blocks), default=0)
@@ -322,6 +386,7 @@ def rebalance_scopes(
 
         total_parts = len(parts)
         for idx, (part, _) in enumerate(parts, start=1):
+            child_source_refs, child_context, child_chunks = _derive_child_provenance(scope, part)
             rebalanced.append(ProcessingScope(
                 scope_type=scope.scope_type,
                 chapter_label=f"{scope.chapter_label} ({idx}/{total_parts})",
@@ -329,6 +394,9 @@ def rebalance_scopes(
                 page_start=scope.page_start,
                 page_end=scope.page_end,
                 section_ids=scope.section_ids,
+                source_refs=child_source_refs,
+                context=child_context,
+                source_chunks=child_chunks,
             ))
 
     return rebalanced

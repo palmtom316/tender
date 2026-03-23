@@ -62,13 +62,82 @@ def _pages_from_raw_payload(raw_payload: dict[str, Any]) -> list[PageAsset]:
     return pages
 
 
+def _normalize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return " ".join(str(value).split())
+
+
+def _build_section_markdown(section: dict, raw_page: dict[str, Any] | None) -> str | None:
+    raw_markdown = (raw_page or {}).get("markdown")
+    if isinstance(raw_markdown, str) and raw_markdown.strip():
+        return raw_markdown
+
+    code = str(section.get("section_code") or "").strip()
+    title = str(section.get("title") or "").strip()
+    text = str(section.get("text") or section.get("body") or "").strip()
+    heading = f"{code} {title}".strip()
+    if heading and text:
+        return f"{heading}\n{text}"
+    if heading:
+        return heading
+    if text:
+        return text
+    return None
+
+
+def _reconcile_page_assets(raw_pages: list[PageAsset], section_pages: list[PageAsset]) -> list[PageAsset]:
+    if not raw_pages or not section_pages:
+        return raw_pages
+
+    reconciled: list[PageAsset] = []
+    unused_indexes = set(range(len(section_pages)))
+
+    for raw_page in raw_pages:
+        best_index: int | None = None
+        best_score = -1
+        raw_text = _normalize_text(raw_page.normalized_text)
+
+        for section_index in list(unused_indexes):
+            candidate = section_pages[section_index]
+            score = 0
+            if (
+                raw_page.page_number is not None
+                and candidate.page_number is not None
+                and raw_page.page_number == candidate.page_number
+            ):
+                score += 2
+            if raw_text and raw_text == _normalize_text(candidate.normalized_text):
+                score += 2
+            if score > best_score:
+                best_score = score
+                best_index = section_index
+
+        if best_index is not None and best_score > 0:
+            unused_indexes.discard(best_index)
+            source_ref = section_pages[best_index].source_ref
+        else:
+            source_ref = raw_page.source_ref
+
+        reconciled.append(
+            PageAsset(
+                page_number=raw_page.page_number,
+                normalized_text=raw_page.normalized_text,
+                raw_page=raw_page.raw_page,
+                source_ref=source_ref,
+            )
+        )
+
+    return reconciled
+
+
 def _build_pages_from_sections(sections: list[dict]) -> list[PageAsset]:
     pages: list[PageAsset] = []
     for section in sections:
         raw_json = section.get("raw_json")
         raw_page = raw_json if isinstance(raw_json, dict) else None
         page_number = (raw_page or {}).get("page_number") or section.get("page_start")
-        markdown = (raw_page or {}).get("markdown") or section.get("text")
+        markdown = _build_section_markdown(section, raw_page)
         if page_number is None and not markdown:
             continue
         section_id = section.get("id")
@@ -107,6 +176,59 @@ def _tables_from_raw_payload(raw_payload: dict[str, Any]) -> list[TableAsset]:
     return tables
 
 
+def _reconcile_table_assets(raw_tables: list[TableAsset], row_tables: list[TableAsset]) -> list[TableAsset]:
+    if not raw_tables or not row_tables:
+        return raw_tables
+
+    reconciled: list[TableAsset] = []
+    unused_indexes = set(range(len(row_tables)))
+
+    for raw_table in raw_tables:
+        best_index: int | None = None
+        best_score = -1
+        raw_title = _normalize_text(raw_table.table_title)
+
+        for row_index in list(unused_indexes):
+            candidate = row_tables[row_index]
+            score = 0
+            if (
+                raw_table.page_start is not None
+                and candidate.page_start is not None
+                and raw_table.page_start == candidate.page_start
+            ):
+                score += 2
+            if (
+                raw_table.page_end is not None
+                and candidate.page_end is not None
+                and raw_table.page_end == candidate.page_end
+            ):
+                score += 1
+            if raw_title and raw_title == _normalize_text(candidate.table_title):
+                score += 2
+            if score > best_score:
+                best_score = score
+                best_index = row_index
+
+        if best_index is not None and best_score > 0:
+            unused_indexes.discard(best_index)
+            source_ref = row_tables[best_index].source_ref
+        else:
+            source_ref = raw_table.source_ref
+
+        reconciled.append(
+            TableAsset(
+                source_ref=source_ref,
+                page_start=raw_table.page_start,
+                page_end=raw_table.page_end,
+                table_title=raw_table.table_title,
+                table_html=raw_table.table_html,
+                raw_json=raw_table.raw_json,
+            )
+        )
+
+    return reconciled
+
+
 def _build_tables_from_rows(tables: list[dict]) -> list[TableAsset]:
     structured_tables: list[TableAsset] = []
     for table in tables:
@@ -140,16 +262,20 @@ def build_document_asset(
     normalized_payload = dict(existing_raw_payload) if isinstance(existing_raw_payload, dict) else {}
 
     page_assets = _pages_from_raw_payload(normalized_payload)
+    section_page_assets = _build_pages_from_sections(sections)
     if not page_assets:
-        page_assets = _build_pages_from_sections(sections)
+        page_assets = section_page_assets
         normalized_payload["pages"] = [
             {"page_number": page.page_number, "markdown": page.normalized_text}
             for page in page_assets
         ]
+    else:
+        page_assets = _reconcile_page_assets(page_assets, section_page_assets)
 
     table_assets = _tables_from_raw_payload(normalized_payload)
+    row_table_assets = _build_tables_from_rows(tables)
     if not table_assets:
-        table_assets = _build_tables_from_rows(tables)
+        table_assets = row_table_assets
         normalized_payload["tables"] = [
             asset.raw_json
             if asset.raw_json is not None
@@ -161,6 +287,8 @@ def build_document_asset(
             }
             for asset in table_assets
         ]
+    else:
+        table_assets = _reconcile_table_assets(table_assets, row_table_assets)
 
     full_markdown = normalized_payload.get("full_markdown")
     if not isinstance(full_markdown, str):

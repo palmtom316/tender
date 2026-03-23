@@ -422,6 +422,7 @@ def test_call_ai_gateway_uses_configured_backend_timeout(monkeypatch) -> None:
 
 def test_process_scope_with_retries_rebalances_on_timeout(monkeypatch) -> None:
     calls: list[str] = []
+    seen_scope_meta: dict[str, tuple[list[str], dict | None]] = {}
     scope = ProcessingScope(
         scope_type="normative",
         chapter_label="8 电力变压器",
@@ -435,6 +436,8 @@ def test_process_scope_with_retries_rebalances_on_timeout(monkeypatch) -> None:
         page_start=1,
         page_end=2,
         section_ids=["s1"],
+        source_refs=["document_section:s1"],
+        context={"document_id": "doc-1", "source_refs": ["document_section:s1"]},
     )
 
     def fake_call_ai_gateway(conn, prompt: str, scope_label: str) -> str:
@@ -445,13 +448,28 @@ def test_process_scope_with_retries_rebalances_on_timeout(monkeypatch) -> None:
 
     monkeypatch.setattr(norm_processor, "_call_ai_gateway", fake_call_ai_gateway)
     monkeypatch.setattr(norm_processor, "_parse_llm_json", lambda raw: [])
-    monkeypatch.setattr(norm_processor, "build_prompt", lambda current_scope: current_scope.text)
+    def fake_build_prompt(current_scope):
+        seen_scope_meta[current_scope.chapter_label] = (
+            list(current_scope.source_refs),
+            current_scope.context,
+        )
+        return current_scope.text
+
+    monkeypatch.setattr(norm_processor, "build_prompt", fake_build_prompt)
 
     entries = norm_processor._process_scope_with_retries(object(), scope)
 
     assert entries == []
     assert calls[0] == "8 电力变压器"
     assert calls[1:] == ["8 电力变压器 (1/2)", "8 电力变压器 (2/2)"]
+    assert seen_scope_meta["8 电力变压器 (1/2)"] == (
+        ["document_section:s1"],
+        {"document_id": "doc-1", "source_refs": ["document_section:s1"]},
+    )
+    assert seen_scope_meta["8 电力变压器 (2/2)"] == (
+        ["document_section:s1"],
+        {"document_id": "doc-1", "source_refs": ["document_section:s1"]},
+    )
 
 
 def test_process_scope_with_retries_rebalances_on_ai_gateway_timeout_502(monkeypatch) -> None:
@@ -534,6 +552,7 @@ def test_build_processing_scopes_appends_table_segments() -> None:
     ]
     tables = [
         {
+            "id": "t1",
             "page": 2,
             "page_start": 2,
             "page_end": 2,
@@ -546,9 +565,16 @@ def test_build_processing_scopes_appends_table_segments() -> None:
 
     assert [scope.scope_type for scope in scopes] == ["normative", "table"]
     assert scopes[0].chapter_label == "1 总则"
+    assert scopes[0].source_refs == ["document_section:s1"]
+    assert scopes[0].context == {
+        "document_id": "00000000-0000-0000-0000-000000000000",
+        "source_refs": ["document_section:s1"],
+        "node_types": ["page"],
+    }
     assert scopes[1].chapter_label == "表格: 主要参数"
     assert scopes[1].text == "<table><tr><td>额定电压</td><td>10kV</td></tr></table>"
     assert scopes[1].page_start == 2
+    assert scopes[1].source_refs == ["table:t1"]
 
 
 def test_build_prompt_uses_table_specific_prompt() -> None:
@@ -559,10 +585,14 @@ def test_build_prompt_uses_table_specific_prompt() -> None:
         page_start=8,
         page_end=8,
         section_ids=["t1"],
+        source_refs=["table:t1"],
+        context={"node_type": "table", "source_ref": "table:t1"},
     ))
 
     assert "规范表格" in prompt
     assert "<table><tr><td>额定电压</td><td>10kV</td></tr></table>" in prompt
+    assert "来源引用: table:t1" in prompt
+    assert '"node_type": "table"' in prompt
 
 
 def test_validate_tree_ignores_empty_structural_parent_clause() -> None:
@@ -802,36 +832,45 @@ def test_process_standard_ai_uses_existing_ocr_sections(monkeypatch) -> None:
         {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
     ])
     monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: {
+        "id": UUID(document_id),
+        "parser_name": "mineru",
+        "parser_version": "v4",
+        "raw_payload": {
+            "pages": [
+                {
+                    "page_number": 1,
+                    "markdown": "1 总则\n1.0.1 正文",
+                }
+            ],
+            "tables": [],
+            "full_markdown": "1 总则\n1.0.1 正文",
+        },
+    })
     monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
-    monkeypatch.setattr(norm_processor, "compress_sections", lambda sections: ["window-1"])
-    monkeypatch.setattr(norm_processor, "split_into_scopes", lambda windows: [
-        ProcessingScope(
-            scope_type="normative",
-            chapter_label="1 总则",
-            text="1.0.1 正文",
-            page_start=1,
-            page_end=1,
-            section_ids=["s1"],
-        )
-    ])
     monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
-    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [
-        {
-            "id": uuid4(),
-            "standard_id": standard_id,
-            "parent_id": None,
-            "clause_no": "1.0.1",
-            "clause_title": "总则条款",
-            "clause_text": "正文",
-            "summary": "摘要",
-            "tags": [],
-            "page_start": 1,
-            "page_end": 1,
-            "sort_order": 1,
-            "clause_type": "normative",
-            "commentary_clause_id": None,
-        }
-    ])
+    def fake_process_scope(conn, scope):
+        captured["scope_source_refs"] = scope.source_refs
+        captured["scope_context"] = scope.context
+        return [
+            {
+                "id": uuid4(),
+                "standard_id": standard_id,
+                "parent_id": None,
+                "clause_no": "1.0.1",
+                "clause_title": "总则条款",
+                "clause_text": "正文",
+                "summary": "摘要",
+                "tags": [],
+                "page_start": 1,
+                "page_end": 1,
+                "sort_order": 1,
+                "clause_type": "normative",
+                "commentary_clause_id": None,
+            }
+        ]
+
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", fake_process_scope)
     monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: entries)
     monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
     monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
@@ -855,6 +894,12 @@ def test_process_standard_ai_uses_existing_ocr_sections(monkeypatch) -> None:
     assert summary["total_clauses"] == 1
     assert summary["scopes_processed"] == 1
     assert captured["indexed"] == 1
+    assert captured["scope_source_refs"] == ["document_section:s1"]
+    assert captured["scope_context"] == {
+        "document_id": "22222222-2222-2222-2222-222222222222",
+        "source_refs": ["document_section:s1"],
+        "node_types": ["page"],
+    }
 
 
 def test_process_standard_ai_processes_text_and_table_scopes(monkeypatch) -> None:
@@ -983,6 +1028,12 @@ def test_rebalance_scopes_splits_oversized_scope_by_paragraphs() -> None:
             page_start=1,
             page_end=5,
             section_ids=["s1"],
+            source_refs=["document_section:s1", "document_section:s2"],
+            context={"document_id": "doc-1", "source_refs": ["document_section:s1", "document_section:s2"]},
+            source_chunks=[
+                {"text": "A" * 3000, "source_ref": "document_section:s1", "node_type": "page"},
+                {"text": "B" * 3000 + "\n\n" + "C" * 1000, "source_ref": "document_section:s2", "node_type": "page"},
+            ],
         )
     ]
 
@@ -996,6 +1047,18 @@ def test_rebalance_scopes_splits_oversized_scope_by_paragraphs() -> None:
     assert rebalanced[1].page_end == 5
     assert rebalanced[0].text == "A" * 3000
     assert rebalanced[1].text == "B" * 3000 + "\n\n" + "C" * 1000
+    assert rebalanced[0].source_refs == ["document_section:s1"]
+    assert rebalanced[1].source_refs == ["document_section:s2"]
+    assert rebalanced[0].context == {
+        "document_id": "doc-1",
+        "source_refs": ["document_section:s1"],
+        "node_types": ["page"],
+    }
+    assert rebalanced[1].context == {
+        "document_id": "doc-1",
+        "source_refs": ["document_section:s2"],
+        "node_types": ["page"],
+    }
 
 
 def test_rebalance_scopes_uses_safer_default_limit() -> None:

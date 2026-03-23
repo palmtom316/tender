@@ -23,9 +23,10 @@ from psycopg.rows import dict_row
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
-from tender_backend.services.norm_service.layout_compressor import compress_sections
+from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.prompt_builder import build_prompt
-from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
+from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes
+from tender_backend.services.norm_service.structural_nodes import build_processing_scopes as build_structured_processing_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
@@ -575,35 +576,48 @@ def _fetch_tables(conn: Connection, document_id: str) -> list[dict]:
         ).fetchall()
 
 
-def _build_processing_scopes(sections: list[dict], tables: list[dict]) -> list[ProcessingScope]:
-    """Build text and table processing scopes from persisted OCR assets."""
-    windows = compress_sections(sections)
-    scopes = split_into_scopes(windows)
+def _fetch_document(conn: Connection, document_id: str) -> dict | None:
+    """Fetch the document row, including persisted parse assets."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        return cur.execute(
+            """
+            SELECT id, parser_name, parser_version, raw_payload
+            FROM document
+            WHERE id = %s
+            """,
+            (document_id,),
+        ).fetchone()
 
-    for table in tables:
-        html = (table.get("table_html") or "").strip()
-        if not html:
-            continue
-        title = (table.get("table_title") or "").strip() or "未命名表格"
-        scopes.append(
-            ProcessingScope(
-                scope_type="table",
-                chapter_label=f"表格: {title}",
-                text=html,
-                page_start=table.get("page_start") or table.get("page") or 0,
-                page_end=table.get("page_end") or table.get("page_start") or table.get("page") or 0,
-                section_ids=[str(table.get("section_id"))] if table.get("section_id") else [],
-            )
-        )
 
-    return sorted(
-        scopes,
-        key=lambda scope: (
-            scope.page_start,
-            1 if scope.scope_type == "table" else 0,
-            scope.chapter_label,
-        ),
+def _build_processing_scopes(
+    sections: list[dict],
+    tables: list[dict],
+    *,
+    document: dict | None = None,
+    document_id: str | None = None,
+) -> list[ProcessingScope]:
+    """Build processing scopes from structured document assets."""
+    parsed_document_id: UUID
+    if document and document.get("id"):
+        try:
+            parsed_document_id = UUID(str(document["id"]))
+        except (TypeError, ValueError):
+            parsed_document_id = UUID(int=0)
+    else:
+        parsed_document_id = UUID(int=0)
+    try:
+        if document_id:
+            parsed_document_id = UUID(document_id)
+    except (TypeError, ValueError):
+        pass
+
+    asset = build_document_asset(
+        document_id=parsed_document_id,
+        document=document,
+        sections=sections,
+        tables=tables,
     )
+    return build_structured_processing_scopes(asset)
 
 
 _ACTUAL_CHAPTER_TITLE = re.compile(r"^\d+\s+\S")
@@ -829,10 +843,16 @@ def process_standard_ai(
         if not sections:
             raise ValueError("No normalized sections available for processing")
         tables = _fetch_tables(conn, document_id)
+        document = _fetch_document(conn, document_id)
 
         logger.info("processing_started", standard_id=str(standard_id), section_count=len(sections))
 
-        scopes = _build_processing_scopes(sections, tables)
+        scopes = _build_processing_scopes(
+            sections,
+            tables,
+            document=document,
+            document_id=document_id,
+        )
         scopes = rebalance_scopes(scopes)
         if not scopes:
             raise ValueError("No processing scopes generated")

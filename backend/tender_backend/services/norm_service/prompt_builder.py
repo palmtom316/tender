@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope
 
 # ── Clause extraction prompt (normative body) ──
@@ -111,11 +113,21 @@ TAG_SUMMARY_PROMPT = """\
 
 def build_prompt(scope: ProcessingScope) -> str:
     """Build the appropriate LLM prompt based on scope type."""
+    context_parts: list[str] = []
+    if scope.source_refs:
+        context_parts.append(f"来源引用: {', '.join(scope.source_refs)}")
+    if scope.context:
+        context_parts.append(f"结构化上下文(JSON): {json.dumps(scope.context, ensure_ascii=False)}")
+
+    content = scope.text
+    if context_parts:
+        content = "\n".join(context_parts) + "\n\n" + content
+
     if scope.scope_type == "commentary":
-        return COMMENTARY_EXTRACTION_PROMPT.format(text=scope.text)
+        return COMMENTARY_EXTRACTION_PROMPT.format(text=content)
     if scope.scope_type == "table":
-        return TABLE_EXTRACTION_PROMPT.format(text=scope.text)
-    return CLAUSE_EXTRACTION_PROMPT.format(text=scope.text)
+        return TABLE_EXTRACTION_PROMPT.format(text=content)
+    return CLAUSE_EXTRACTION_PROMPT.format(text=content)
 
 
 def build_tag_prompt(clause_no: str, clause_text: str) -> str:

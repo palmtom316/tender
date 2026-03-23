@@ -9,8 +9,10 @@ from tender_backend.services.norm_service.document_assets import (
 )
 
 
-def test_build_document_asset_prefers_raw_payload_pages_tables_and_full_markdown() -> None:
+def test_build_document_asset_reconciles_raw_payload_with_section_table_provenance() -> None:
     document_id = uuid4()
+    section_id = uuid4()
+    table_id = uuid4()
     document = {
         "id": document_id,
         "parser_name": "mineru",
@@ -18,23 +20,33 @@ def test_build_document_asset_prefers_raw_payload_pages_tables_and_full_markdown
         "raw_payload": {
             "batch_id": "batch-123",
             "pages": [{"page_number": 2, "markdown": "from raw payload"}],
-            "tables": [{"page": 3, "title": "raw table"}],
+            "tables": [{"page": 3, "title": "raw table", "html": "<table><tr><td>A</td></tr></table>"}],
             "full_markdown": "# raw markdown",
         },
     }
     sections = [
         {
+            "id": section_id,
             "page_start": 10,
             "text": "from section",
             "raw_json": {"page_number": 10, "markdown": "from section markdown"},
+        },
+        {
+            "id": section_id,
+            "page_start": 2,
+            "text": "from section",
+            "raw_json": {"page_number": 2, "markdown": "from raw payload"},
         }
     ]
     tables = [
         {
+            "id": table_id,
             "page": 11,
-            "table_title": "fallback table",
-            "table_html": "<table></table>",
-            "raw_json": {"page": 11, "title": "fallback table"},
+            "page_start": 3,
+            "page_end": 3,
+            "table_title": "raw table",
+            "table_html": "<table><tr><td>A</td></tr></table>",
+            "raw_json": {"page": 3, "title": "raw table", "html": "<table><tr><td>A</td></tr></table>"},
         }
     ]
 
@@ -55,11 +67,77 @@ def test_build_document_asset_prefers_raw_payload_pages_tables_and_full_markdown
     assert asset.pages[0].page_number == 2
     assert asset.pages[0].normalized_text == "from raw payload"
     assert asset.pages[0].raw_page == {"page_number": 2, "markdown": "from raw payload"}
-    assert asset.pages[0].source_ref == "document.raw_payload.pages[0]"
+    assert asset.pages[0].source_ref == f"document_section:{section_id}"
     assert len(asset.tables) == 1
     assert isinstance(asset.tables[0], TableAsset)
+    assert asset.tables[0].source_ref == f"table:{table_id}"
+    assert asset.tables[0].raw_json == {
+        "page": 3,
+        "title": "raw table",
+        "html": "<table><tr><td>A</td></tr></table>",
+    }
+
+
+def test_build_document_asset_keeps_raw_payload_provenance_when_rows_unavailable() -> None:
+    document_id = uuid4()
+    document = {
+        "id": document_id,
+        "raw_payload": {
+            "pages": [{"page_number": 2, "markdown": "from raw payload"}],
+            "tables": [{"page": 3, "title": "raw table"}],
+        },
+    }
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document=document,
+        sections=[],
+        tables=[],
+    )
+
+    assert asset.pages[0].source_ref == "document.raw_payload.pages[0]"
     assert asset.tables[0].source_ref == "document.raw_payload.tables[0]"
-    assert asset.tables[0].raw_json == {"page": 3, "title": "raw table"}
+
+
+def test_build_document_asset_does_not_force_position_match_when_evidence_missing() -> None:
+    document_id = uuid4()
+    section_id = uuid4()
+    table_id = uuid4()
+    document = {
+        "id": document_id,
+        "raw_payload": {
+            "pages": [{"page_number": 9, "markdown": "raw page text"}],
+            "tables": [{"page": 12, "title": "raw table"}],
+        },
+    }
+    sections = [
+        {
+            "id": section_id,
+            "page_start": 4,
+            "text": "different section text",
+            "raw_json": {"page_number": 4, "markdown": "different section text"},
+        }
+    ]
+    tables = [
+        {
+            "id": table_id,
+            "page_start": 8,
+            "page_end": 8,
+            "table_title": "different table title",
+            "table_html": "<table><tr><td>different</td></tr></table>",
+            "raw_json": {"page": 8, "title": "different table title"},
+        }
+    ]
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document=document,
+        sections=sections,
+        tables=tables,
+    )
+
+    assert asset.pages[0].source_ref == "document.raw_payload.pages[0]"
+    assert asset.tables[0].source_ref == "document.raw_payload.tables[0]"
 
 
 def test_build_document_asset_falls_back_to_sections_and_tables_when_missing_in_raw_payload() -> None:
@@ -175,3 +253,27 @@ def test_update_document_parse_assets_serializes_document_asset_with_uuid_values
     assert '"document_id"' not in serialized_payload
     assert '"parser_name"' not in serialized_payload
     assert '"pages"' in serialized_payload
+
+
+def test_build_document_asset_section_fallback_synthesizes_heading_when_raw_markdown_missing() -> None:
+    document_id = uuid4()
+    section_id = uuid4()
+    asset = build_document_asset(
+        document_id=document_id,
+        document={"id": document_id, "raw_payload": {}},
+        sections=[
+            {
+                "id": section_id,
+                "section_code": "1",
+                "title": "总则",
+                "page_start": 1,
+                "page_end": 1,
+                "text": "1.0.1 正文",
+                "raw_json": {"page_number": 1},
+            }
+        ],
+        tables=[],
+    )
+
+    assert asset.pages[0].source_ref == f"document_section:{section_id}"
+    assert asset.pages[0].normalized_text == "1 总则\n1.0.1 正文"
