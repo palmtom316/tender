@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 from uuid import UUID
+
+
+_TABLE_TITLE_LINE_RE = re.compile(r"^\s*(表\s*[A-Za-z]?\d+(?:\.\d+)*\s+\S[^\n]*)\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,13 @@ def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
     return " ".join(str(value).split())
+
+
+def _table_image_path(raw_json: dict[str, Any] | None) -> str:
+    value = (raw_json or {}).get("image_path")
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
 
 
 def _build_section_markdown(section: dict, raw_page: dict[str, Any] | None) -> str | None:
@@ -191,6 +202,8 @@ def _reconcile_table_assets(raw_tables: list[TableAsset], row_tables: list[Table
         best_index: int | None = None
         best_score = -1
         raw_title = _normalize_text(raw_table.table_title)
+        raw_html = _normalize_text(raw_table.table_html)
+        raw_image_path = _table_image_path(raw_table.raw_json)
 
         for row_index in list(unused_indexes):
             candidate = row_tables[row_index]
@@ -209,28 +222,128 @@ def _reconcile_table_assets(raw_tables: list[TableAsset], row_tables: list[Table
                 score += 1
             if raw_title and raw_title == _normalize_text(candidate.table_title):
                 score += 2
+            if raw_html and raw_html == _normalize_text(candidate.table_html):
+                score += 3
+            if raw_image_path and raw_image_path == _table_image_path(candidate.raw_json):
+                score += 2
             if score > best_score:
                 best_score = score
                 best_index = row_index
 
         if best_index is not None and best_score > 0:
             unused_indexes.discard(best_index)
-            source_ref = row_tables[best_index].source_ref
+            matched_table = row_tables[best_index]
+            source_ref = matched_table.source_ref
         else:
+            matched_table = None
             source_ref = raw_table.source_ref
 
         reconciled.append(
             TableAsset(
                 source_ref=source_ref,
-                page_start=raw_table.page_start,
-                page_end=raw_table.page_end,
-                table_title=raw_table.table_title,
-                table_html=raw_table.table_html,
+                page_start=raw_table.page_start if raw_table.page_start is not None else (matched_table.page_start if matched_table else None),
+                page_end=raw_table.page_end if raw_table.page_end is not None else (matched_table.page_end if matched_table else None),
+                table_title=raw_table.table_title or (matched_table.table_title if matched_table else None),
+                table_html=raw_table.table_html or (matched_table.table_html if matched_table else None),
                 raw_json=raw_table.raw_json,
             )
         )
 
     return reconciled
+
+
+def _extract_table_title_occurrences(pages: list[PageAsset]) -> list[tuple[int, str]]:
+    occurrences: list[tuple[int, str]] = []
+    for page in pages:
+        if page.page_number is None:
+            continue
+        text = page.normalized_text
+        if not isinstance(text, str) or not text.strip():
+            continue
+        for match in _TABLE_TITLE_LINE_RE.finditer(text):
+            title = match.group(1).strip()
+            if title:
+                occurrences.append((page.page_number, title))
+    return occurrences
+
+
+def _backfill_table_pages_from_pages(tables: list[TableAsset], pages: list[PageAsset]) -> list[TableAsset]:
+    if not tables or not pages:
+        return tables
+
+    title_occurrences = _extract_table_title_occurrences(pages)
+    next_title_index = 0
+    filled: list[TableAsset] = []
+    for table in tables:
+        if table.page_start is not None and table.page_end is not None:
+            table_title = table.table_title
+            while next_title_index < len(title_occurrences):
+                title_page, inferred_title = title_occurrences[next_title_index]
+                if title_page < table.page_start:
+                    next_title_index += 1
+                    continue
+                if title_page == table.page_start:
+                    if not table_title:
+                        table_title = inferred_title
+                    next_title_index += 1
+                break
+            filled.append(table)
+            continue
+
+        table_title = _normalize_text(table.table_title)
+        table_html = _normalize_text(table.table_html)
+        matched_page: int | None = None
+        inferred_title: str | None = table.table_title
+        for page in pages:
+            page_text = _normalize_text(page.normalized_text)
+            if not page_text or page.page_number is None:
+                continue
+            if table_html and table_html in page_text:
+                matched_page = page.page_number
+                break
+            if table_title and table_title in page_text:
+                matched_page = page.page_number
+                break
+
+        if matched_page is not None:
+            while next_title_index < len(title_occurrences):
+                title_page, title_text = title_occurrences[next_title_index]
+                if title_page < matched_page:
+                    next_title_index += 1
+                    continue
+                if title_page == matched_page:
+                    if not inferred_title:
+                        inferred_title = title_text
+                    next_title_index += 1
+                break
+
+        if matched_page is None:
+            while next_title_index < len(title_occurrences):
+                title_page, title_text = title_occurrences[next_title_index]
+                next_title_index += 1
+                if title_page <= 0:
+                    continue
+                matched_page = title_page
+                if not inferred_title:
+                    inferred_title = title_text
+                break
+
+        if matched_page is None:
+            filled.append(table)
+            continue
+
+        filled.append(
+            TableAsset(
+                source_ref=table.source_ref,
+                page_start=matched_page,
+                page_end=matched_page,
+                table_title=inferred_title,
+                table_html=table.table_html,
+                raw_json=table.raw_json,
+            )
+        )
+
+    return filled
 
 
 def _build_tables_from_rows(tables: list[dict]) -> list[TableAsset]:
@@ -293,6 +406,7 @@ def build_document_asset(
         ]
     else:
         table_assets = _reconcile_table_assets(table_assets, row_table_assets)
+    table_assets = _backfill_table_pages_from_pages(table_assets, page_assets)
 
     full_markdown = normalized_payload.get("full_markdown")
     if not isinstance(full_markdown, str):

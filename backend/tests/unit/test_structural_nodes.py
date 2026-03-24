@@ -113,6 +113,78 @@ def test_build_processing_scopes_includes_structured_context_and_table_scope() -
     }
 
 
+def test_build_processing_scopes_narrows_page_range_to_matched_page_nodes() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("44444444-4444-4444-4444-444444444444"),
+        parser_name="mineru",
+        parser_version="v1",
+        raw_payload={},
+        pages=[
+            PageAsset(
+                page_number=1,
+                normalized_text="1 总则\n1.0.1 正文",
+                raw_page=None,
+                source_ref="document_section:s1",
+            ),
+            PageAsset(
+                page_number=2,
+                normalized_text="2 术语\n2.0.1 正文",
+                raw_page=None,
+                source_ref="document_section:s2",
+            ),
+        ],
+        tables=[],
+        full_markdown="1 总则\n1.0.1 正文\n\n2 术语\n2.0.1 正文",
+    )
+
+    scopes = build_processing_scopes(asset)
+
+    assert [scope.chapter_label for scope in scopes] == ["1 总则", "2 术语"]
+    assert scopes[0].page_start == 1
+    assert scopes[0].page_end == 1
+    assert scopes[1].page_start == 2
+    assert scopes[1].page_end == 2
+
+
+def test_build_structural_nodes_preserves_input_order_when_page_numbers_missing() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("55555555-5555-5555-5555-555555555555"),
+        parser_name="mineru",
+        parser_version="v1",
+        raw_payload={},
+        pages=[
+            PageAsset(
+                page_number=None,
+                normalized_text="1 总则\n1.0.1 正文",
+                raw_page=None,
+                source_ref="document_section:z-last",
+            ),
+            PageAsset(
+                page_number=None,
+                normalized_text="2 术语\n2.0.1 正文",
+                raw_page=None,
+                source_ref="document_section:a-first-lexicographically",
+            ),
+            PageAsset(
+                page_number=None,
+                normalized_text="3 基本规定\n3.0.1 正文",
+                raw_page=None,
+                source_ref="document_section:m-middle",
+            ),
+        ],
+        tables=[],
+        full_markdown="",
+    )
+
+    nodes = build_structural_nodes(asset)
+
+    assert [node.source_ref for node in nodes] == [
+        "document_section:z-last",
+        "document_section:a-first-lexicographically",
+        "document_section:m-middle",
+    ]
+
+
 def test_rebalance_scopes_filters_source_refs_by_child_text_segments() -> None:
     asset = DocumentAsset(
         document_id=UUID("33333333-3333-3333-3333-333333333333"),

@@ -167,8 +167,13 @@ def _iter_source_refs(clause: dict) -> list[str]:
     return refs
 
 
-def _validate_numbering(clauses: list[dict], result: ValidationResult) -> None:
-    clause_numbers: set[str] = set()
+def _validate_numbering(
+    clauses: list[dict],
+    result: ValidationResult,
+    *,
+    outline_clause_nos: set[str] | None = None,
+) -> None:
+    clause_numbers: set[str] = set(outline_clause_nos or set())
     parsed_sequence: list[tuple[dict, tuple[int, ...]]] = []
     for clause in clauses:
         if clause.get("node_type", "clause") != "clause":
@@ -184,7 +189,10 @@ def _validate_numbering(clauses: list[dict], result: ValidationResult) -> None:
         if len(parsed) <= 1:
             continue
         parent_no = ".".join(str(part) for part in parsed[:-1])
-        if parent_no not in clause_numbers:
+        implied_parent = None
+        if len(parsed) >= 3 and parsed[-2] == 0:
+            implied_parent = ".".join(str(part) for part in parsed[:-2])
+        if parent_no not in clause_numbers and implied_parent not in clause_numbers:
             _add_issue(
                 result,
                 clause,
@@ -352,13 +360,17 @@ def _detect_phrase_flags(clauses: list[dict], result: ValidationResult) -> None:
         _append_phrase_flags(result, clause)
 
 
-def validate_clauses(clauses: list[dict]) -> ValidationResult:
+def validate_clauses(
+    clauses: list[dict],
+    *,
+    outline_clause_nos: set[str] | None = None,
+) -> ValidationResult:
     """Run deterministic post-AST validators and phrase extraction."""
     result = ValidationResult()
     if not clauses:
         return result
 
-    _validate_numbering(clauses, result)
+    _validate_numbering(clauses, result, outline_clause_nos=outline_clause_nos)
     _validate_page_anchors(clauses, result)
     _validate_table_attachments(clauses, result)
     _validate_numeric_and_symbol_anomalies(clauses, result)

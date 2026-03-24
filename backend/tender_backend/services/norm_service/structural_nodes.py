@@ -18,6 +18,7 @@ class StructuralNode:
     page_end: int
     section_ids: list[str]
     table_title: str | None = None
+    sort_index: int = 0
 
 
 def _parse_section_id(source_ref: str) -> str | None:
@@ -43,7 +44,7 @@ def _preferred_source_ref(default_ref: str, raw_payload: dict | None) -> str:
 def build_structural_nodes(document_asset: DocumentAsset) -> list[StructuralNode]:
     nodes: list[StructuralNode] = []
 
-    for page in document_asset.pages:
+    for index, page in enumerate(document_asset.pages):
         text = (page.normalized_text or "").strip()
         if not text:
             continue
@@ -58,10 +59,11 @@ def build_structural_nodes(document_asset: DocumentAsset) -> list[StructuralNode
                 page_start=page_no,
                 page_end=page_no,
                 section_ids=[section_id] if section_id else [],
+                sort_index=index,
             )
         )
 
-    for table in document_asset.tables:
+    for index, table in enumerate(document_asset.tables, start=len(document_asset.pages)):
         html = (table.table_html or "").strip()
         if not html:
             continue
@@ -75,10 +77,19 @@ def build_structural_nodes(document_asset: DocumentAsset) -> list[StructuralNode
                 page_end=_stable_page(table.page_end if table.page_end is not None else table.page_start),
                 section_ids=[],
                 table_title=(table.table_title or "").strip() or None,
+                sort_index=index,
             )
         )
 
-    return sorted(nodes, key=lambda n: (n.page_start, 1 if n.node_type == "table" else 0, n.source_ref))
+    return sorted(
+        nodes,
+        key=lambda n: (
+            n.page_start,
+            1 if n.node_type == "table" else 0,
+            n.sort_index,
+            n.source_ref,
+        ),
+    )
 
 
 def _dedupe_in_order(values: list[str]) -> list[str]:
@@ -150,6 +161,9 @@ def build_processing_scopes(document_asset: DocumentAsset) -> list[ProcessingSco
 
         for scope in scopes:
             scope_nodes = _source_refs_for_scope(scope, page_nodes)
+            if scope_nodes:
+                scope.page_start = min(node.page_start for node in scope_nodes)
+                scope.page_end = max(node.page_end for node in scope_nodes)
             scope_refs = _dedupe_in_order([node.source_ref for node in scope_nodes])
             scope.source_refs = scope_refs
             scope.context = {

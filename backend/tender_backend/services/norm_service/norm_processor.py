@@ -11,6 +11,7 @@ import os
 import random
 import re
 import time
+from dataclasses import replace
 from io import BytesIO
 from uuid import UUID
 from zipfile import ZipFile
@@ -39,6 +40,7 @@ from tender_backend.tools.reindex_standard_clauses import build_clause_index_doc
 logger = structlog.stdlib.get_logger(__name__)
 
 AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "http://localhost:8001")
+_MAX_SCOPE_RETRY_ATTEMPTS = 2
 
 _std_repo = StandardRepository()
 _agent_repo = AgentConfigRepository()
@@ -116,9 +118,89 @@ def _extract_markdown_from_zip(content: bytes) -> str:
 
 def _extract_pages_from_payload(payload: object) -> list[dict]:
     """Best-effort extraction of page-level OCR payloads from MinerU JSON."""
+    def _looks_like_page_payload(item: dict) -> bool:
+        page_keys = {"page_number", "page_no", "page_num", "page"}
+        text_keys = {"markdown", "md", "raw_markdown", "raw_text"}
+        return bool(page_keys.intersection(item.keys()) or text_keys.intersection(item.keys()))
+
+    def _looks_like_layout_block(item: dict) -> bool:
+        if not isinstance(item, dict):
+            return False
+        return (
+            ("page_idx" in item or "page_index" in item)
+            and "type" in item
+            and any(key in item for key in ("text", "content", "table_body", "table_caption", "table_footnote"))
+        )
+
+    def _aggregate_layout_blocks(items: list[dict]) -> list[dict]:
+        grouped: dict[int, list[dict]] = {}
+        for item in items:
+            page_idx = item.get("page_idx")
+            if not isinstance(page_idx, int):
+                page_idx = item.get("page_index")
+            if not isinstance(page_idx, int):
+                continue
+            grouped.setdefault(page_idx, []).append(item)
+
+        aggregated: list[dict] = []
+        for page_idx in sorted(grouped):
+            blocks = sorted(
+                grouped[page_idx],
+                key=lambda block: (
+                    (block.get("bbox") or [0, 0, 0, 0])[1],
+                    (block.get("bbox") or [0, 0, 0, 0])[0],
+                ),
+            )
+            markdown = "\n".join(
+                fragment.strip()
+                for block in blocks
+                for fragment in _collect_text_fragments(block)
+                if fragment.strip()
+            )
+            if not markdown.strip():
+                continue
+            aggregated.append({
+                "page_number": page_idx + 1,
+                "markdown": markdown,
+            })
+        return aggregated
+
+    def _aggregate_page_block_lists(items: list[list[dict]]) -> list[dict]:
+        aggregated: list[dict] = []
+        for page_index, blocks in enumerate(items, start=1):
+            ordered_blocks = sorted(
+                blocks,
+                key=lambda block: (
+                    (block.get("bbox") or [0, 0, 0, 0])[1],
+                    (block.get("bbox") or [0, 0, 0, 0])[0],
+                ),
+            )
+            markdown = "\n".join(
+                fragment.strip()
+                for block in ordered_blocks
+                for fragment in _collect_text_fragments(block)
+                if fragment.strip()
+            )
+            if not markdown.strip():
+                continue
+            aggregated.append({
+                "page_number": page_index,
+                "markdown": markdown,
+            })
+        return aggregated
+
     if isinstance(payload, list):
+        if payload and all(isinstance(item, list) for item in payload):
+            page_block_lists = [item for item in payload if all(isinstance(block, dict) for block in item)]
+            pages = _aggregate_page_block_lists(page_block_lists)
+            if pages:
+                return pages
         if payload and all(isinstance(item, dict) for item in payload):
-            if any(_extract_page_text(item) for item in payload):
+            if all(_looks_like_layout_block(item) for item in payload):
+                pages = _aggregate_layout_blocks(payload)
+                if pages:
+                    return pages
+            if any(_looks_like_page_payload(item) for item in payload):
                 return payload
         for item in payload:
             pages = _extract_pages_from_payload(item)
@@ -245,9 +327,26 @@ def _collect_text_fragments(value: object) -> list[str]:
         return fragments
     if isinstance(value, dict):
         fragments: list[str] = []
-        for key in ("markdown", "md", "text", "content", "raw_text", "raw_markdown"):
+        for key in (
+            "markdown",
+            "md",
+            "text",
+            "content",
+            "raw_text",
+            "raw_markdown",
+            "title_content",
+            "paragraph_content",
+            "page_header_content",
+            "page_footer_content",
+            "table_caption",
+            "table_footnote",
+        ):
             if key in value:
                 fragments.extend(_collect_text_fragments(value[key]))
+        if fragments:
+            return fragments
+        for nested in value.values():
+            fragments.extend(_collect_text_fragments(nested))
         return fragments
     return []
 
@@ -621,23 +720,55 @@ def _build_processing_scopes(
         sections=sections,
         tables=tables,
     )
+    bounded_pages = [
+        page_no
+        for section in sections
+        for page_no in (section.get("page_start"), section.get("page_end"))
+        if isinstance(page_no, int) and page_no > 0
+    ]
+    if asset.pages and bounded_pages:
+        first_page = min(bounded_pages)
+        last_page = max(bounded_pages)
+        filtered_pages = [
+            page
+            for page in asset.pages
+            if isinstance(page.page_number, int) and first_page <= page.page_number <= last_page
+        ]
+        if filtered_pages:
+            asset = replace(
+                asset,
+                pages=filtered_pages,
+                full_markdown="\n\n".join(
+                    str(page.normalized_text).strip()
+                    for page in filtered_pages
+                    if page.normalized_text
+                ),
+            )
     return build_structured_processing_scopes(asset)
 
 
-_ACTUAL_CHAPTER_TITLE = re.compile(r"^\d+\s+\S")
+_ACTUAL_CHAPTER_TITLE = re.compile(r"^\d{1,2}\s+\S")
+_ACTUAL_CLAUSE_TITLE = re.compile(r"^\d+(?:\.\d+)+\s+\S")
 _TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
 _TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
+_NUMERIC_SECTION_CODE = re.compile(r"^\d+(?:\.\d+)*$")
+
+
+def _section_heading_text(section: dict) -> str:
+    code = str(section.get("section_code") or "").strip()
+    title = str(section.get("title") or "").strip()
+    return f"{code} {title}".strip()
 
 
 def _is_toc_heading(section: dict) -> bool:
-    title = (section.get("title") or "").strip()
-    text = (section.get("text") or "").strip()
-    if text:
-        return False
+    title = _section_heading_text(section)
     if _TOC_PAGE_REF.search(title):
         return True
     if _TOC_DOT_LEADERS.search(title):
         return True
+    text = (section.get("text") or "").strip()
+    if text:
+        return False
     return False
 
 
@@ -648,8 +779,10 @@ def _normalize_sections_for_processing(sections: list[dict]) -> list[dict]:
 
     start_idx = 0
     for idx, section in enumerate(sections):
-        title = (section.get("title") or "").strip()
-        if _ACTUAL_CHAPTER_TITLE.match(title) and not _is_toc_heading(section):
+        heading = _section_heading_text(section)
+        if _is_toc_heading(section):
+            continue
+        if _ACTUAL_CHAPTER_TITLE.match(heading) or _ACTUAL_CLAUSE_TITLE.match(heading):
             start_idx = idx
             break
 
@@ -666,6 +799,19 @@ def _normalize_sections_for_processing(sections: list[dict]) -> list[dict]:
         first_title=(normalized[0].get("title") if normalized else None),
     )
     return normalized
+
+
+def _collect_outline_clause_nos(sections: list[dict]) -> set[str]:
+    codes: set[str] = set()
+    for section in sections:
+        raw_code = section.get("section_code")
+        if raw_code is None:
+            continue
+        code = str(raw_code).strip()
+        if not code or not _NUMERIC_SECTION_CODE.match(code):
+            continue
+        codes.add(code)
+    return codes
 
 
 def _call_ai_gateway(
@@ -769,17 +915,26 @@ def _process_scope_with_retries(
     scope: ProcessingScope,
 ) -> list[dict]:
     """Process one scope and split it into smaller chunks when the provider times out."""
-    pending_scopes = [scope]
+    pending_scopes: list[tuple[ProcessingScope, int]] = [(scope, 0)]
     all_entries: list[dict] = []
 
     while pending_scopes:
-        current_scope = pending_scopes.pop(0)
+        current_scope, attempt = pending_scopes.pop(0)
         prompt = build_prompt(current_scope)
         try:
             raw_response = _call_ai_gateway(conn, prompt, current_scope.chapter_label)
         except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
             if isinstance(exc, httpx.HTTPStatusError) and not _is_retryable_ai_gateway_status(exc):
                 raise
+            if attempt < _MAX_SCOPE_RETRY_ATTEMPTS:
+                logger.warning(
+                    "scope_retrying",
+                    scope=current_scope.chapter_label,
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_SCOPE_RETRY_ATTEMPTS,
+                )
+                pending_scopes = [(current_scope, attempt + 1)] + pending_scopes
+                continue
             retry_scopes = rebalance_scopes(
                 [current_scope],
                 max_chars=max(500, len(current_scope.text) // 2),
@@ -793,19 +948,48 @@ def _process_scope_with_retries(
                 scope=current_scope.chapter_label,
                 retry_scopes=[s.chapter_label for s in retry_scopes],
             )
-            pending_scopes = retry_scopes + pending_scopes
+            pending_scopes = [(retry_scope, 0) for retry_scope in retry_scopes] + pending_scopes
             continue
 
         entries = _parse_llm_json(raw_response)
         for entry in entries:
-            entry["clause_type"] = "commentary" if current_scope.scope_type == "commentary" else "normative"
-            if entry.get("page_start") is None:
-                entry["page_start"] = current_scope.page_start
-            entry["source_type"] = "table" if current_scope.scope_type == "table" else "text"
-            entry["source_label"] = current_scope.chapter_label
+            _apply_scope_defaults(entry, current_scope)
         all_entries.extend(entries)
 
     return all_entries
+
+
+def _apply_scope_defaults(entry: dict, scope: ProcessingScope) -> None:
+    """Recursively backfill missing provenance and page anchors from the scope."""
+    scope_refs = [ref for ref in scope.source_refs if isinstance(ref, str) and ref.strip()]
+    clause_type = "commentary" if scope.scope_type == "commentary" else "normative"
+    source_type = "table" if scope.scope_type == "table" else "text"
+    scope_page_start = scope.page_start if isinstance(scope.page_start, int) and scope.page_start > 0 else None
+    scope_page_end = scope.page_end if isinstance(scope.page_end, int) and scope.page_end > 0 else None
+
+    if not entry.get("clause_type"):
+        entry["clause_type"] = clause_type
+    entry_page_start = entry.get("page_start")
+    entry_page_end = entry.get("page_end")
+    if not isinstance(entry_page_start, int) or entry_page_start <= 0:
+        entry["page_start"] = scope_page_start
+    if not isinstance(entry_page_end, int) or entry_page_end <= 0:
+        entry["page_end"] = scope_page_end
+    if not entry.get("source_ref") and scope_refs:
+        entry["source_ref"] = scope_refs[0]
+    if not entry.get("source_refs") and scope_refs:
+        entry["source_refs"] = list(scope_refs)
+    if not entry.get("source_type"):
+        entry["source_type"] = source_type
+    if not entry.get("source_label"):
+        entry["source_label"] = scope.chapter_label
+
+    children = entry.get("children")
+    if not isinstance(children, list):
+        return
+    for child in children:
+        if isinstance(child, dict):
+            _apply_scope_defaults(child, scope)
 
 
 def ensure_standard_ocr(
@@ -840,12 +1024,13 @@ def process_standard_ai(
     started_at = time.time()
 
     try:
-        sections = _fetch_sections(conn, document_id)
-        if not sections:
+        raw_sections = _fetch_sections(conn, document_id)
+        if not raw_sections:
             raise ValueError(f"No OCR sections available for document {document_id}")
-        sections = _normalize_sections_for_processing(sections)
+        sections = _normalize_sections_for_processing(raw_sections)
         if not sections:
             raise ValueError("No normalized sections available for processing")
+        outline_clause_nos = _collect_outline_clause_nos(raw_sections)
         tables = _fetch_tables(conn, document_id)
         document = _fetch_document(conn, document_id)
 
@@ -883,11 +1068,11 @@ def process_standard_ai(
 
         clauses = build_tree(all_entries, standard_id)
         clauses = link_commentary(clauses)
-        structured_validation = validate_clauses(clauses)
+        structured_validation = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         repair_tasks = build_repair_tasks(clauses, structured_validation.issues)
         repair_patches = run_repair_tasks(conn=conn, document_id=document_id, tasks=repair_tasks) if repair_tasks else []
         clauses = merge_repair_patches(clauses, repair_patches)
-        revalidated = validate_clauses(clauses)
+        revalidated = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         warnings = validate_tree(clauses)
         combined_warnings = warnings + revalidated.warning_messages(limit=10)
 

@@ -34,6 +34,28 @@ def test_validate_clauses_detects_numbering_and_hierarchy_issues() -> None:
     assert "numbering.missing_parent" in codes
 
 
+def test_validate_clauses_accepts_outline_parent_codes_for_hierarchy_checks() -> None:
+    result = validate_clauses(
+        [_clause(clause_no="4.8.8", clause_text="正文")],
+        outline_clause_nos={"4.8"},
+    )
+
+    codes = {issue.code for issue in result.issues}
+
+    assert "numbering.missing_parent" not in codes
+
+
+def test_validate_clauses_accepts_top_level_chapter_as_parent_for_x_zero_y_numbering() -> None:
+    result = validate_clauses(
+        [_clause(clause_no="1.0.3", clause_text="正文")],
+        outline_clause_nos={"1"},
+    )
+
+    codes = {issue.code for issue in result.issues}
+
+    assert "numbering.missing_parent" not in codes
+
+
 def test_validate_clauses_detects_page_anchor_and_table_attachment_issues() -> None:
     result = validate_clauses([
         _clause(page_start=None, page_end=None),

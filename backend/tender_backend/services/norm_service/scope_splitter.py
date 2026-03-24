@@ -23,10 +23,12 @@ _COMMENTARY_BOUNDARIES = [
     re.compile(r"本规范用词说明"),
     re.compile(r"引用标准名录"),
 ]
+_TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
+_TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
 
 # Candidate numeric headings. We further filter them to avoid treating
 # full clause sentences as chapter boundaries.
-_CHAPTER_PATTERN = re.compile(r"^\d+\s+.+$", re.MULTILINE)
+_CHAPTER_PATTERN = re.compile(r"^\d+[ \t]+.+$", re.MULTILINE)
 _CLAUSE_HEADING_PATTERN = re.compile(r"^\d+(?:\.\d+){2,}\s+\S")
 _CLAUSE_PUNCTUATION = ("，", "。", "；", "：", ":", "!", "?", "！", "？")
 _MAX_HEADING_LENGTH = 60
@@ -52,11 +54,83 @@ class ProcessingScope:
 
 def _detect_commentary_start(text: str) -> int | None:
     """Return char offset where commentary section begins, or None."""
-    for pattern in _COMMENTARY_BOUNDARIES:
-        m = pattern.search(text)
-        if m:
-            return m.start()
+    candidates: list[tuple[int, int, re.Match[str]]] = []
+    for index, pattern in enumerate(_COMMENTARY_BOUNDARIES):
+        for match in pattern.finditer(text):
+            candidates.append((match.start(), index, match))
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    for _start, _index, match in candidates:
+        if _is_stray_commentary_heading(text, match):
+            continue
+        return match.start()
     return None
+
+
+def _strip_stray_commentary_headings(text: str) -> str:
+    candidates: list[tuple[int, int]] = []
+    for match in re.finditer(r"(?m)^条文说明\s*$", text):
+        if not _is_stray_commentary_heading(text, match):
+            continue
+        start = match.start()
+        end = match.end()
+        while start > 0 and text[start - 1] == "\n":
+            start -= 1
+        while end < len(text) and text[end] == "\n":
+            end += 1
+        candidates.append((start, end))
+
+    if not candidates:
+        return text
+
+    result = text
+    for start, end in reversed(candidates):
+        left = result[:start].rstrip("\n")
+        right = result[end:].lstrip("\n")
+        if left and right:
+            result = f"{left}\n\n{right}"
+        else:
+            result = left or right
+    return result.strip()
+
+
+def _iter_top_level_chapter_positions(text: str) -> list[tuple[int, int]]:
+    positions: list[tuple[int, int]] = []
+    for match in _CHAPTER_PATTERN.finditer(text):
+        line = match.group(0).strip()
+        if not _is_top_level_heading(line):
+            continue
+        positions.append((match.start(), int(line.split(None, 1)[0])))
+    return positions
+
+
+def _line_at(text: str, offset: int) -> str:
+    line_start = text.rfind("\n", 0, offset) + 1
+    line_end = text.find("\n", offset)
+    if line_end == -1:
+        line_end = len(text)
+    return text[line_start:line_end].strip()
+
+
+def _is_stray_commentary_heading(text: str, match: re.Match[str]) -> bool:
+    if _line_at(text, match.start()) != "条文说明":
+        return False
+
+    previous_chapter: int | None = None
+    next_chapter: int | None = None
+    for chapter_start, chapter_no in _iter_top_level_chapter_positions(text):
+        if chapter_start < match.start():
+            previous_chapter = chapter_no
+            continue
+        if chapter_start > match.start():
+            next_chapter = chapter_no
+            break
+
+    return (
+        previous_chapter is not None
+        and next_chapter is not None
+        and next_chapter == previous_chapter + 1
+    )
 
 
 def _is_top_level_heading(line: str) -> bool:
@@ -66,6 +140,23 @@ def _is_top_level_heading(line: str) -> bool:
     if any(mark in stripped for mark in _CLAUSE_PUNCTUATION):
         return False
     return True
+
+
+def _looks_like_toc_window(text: str) -> bool:
+    informative_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and line.strip().lower() not in {"text", "text_list"}
+    ]
+    if len(informative_lines) < 3:
+        return False
+
+    toc_like_count = sum(
+        1
+        for line in informative_lines
+        if _TOC_PAGE_REF.search(line) or _TOC_DOT_LEADERS.search(line)
+    )
+    return toc_like_count >= 3 and toc_like_count * 2 >= len(informative_lines)
 
 
 def _split_by_chapters(text: str, page_start: int, page_end: int,
@@ -140,8 +231,13 @@ def split_into_scopes(windows: list[PageWindow]) -> list[ProcessingScope]:
     if not windows:
         return []
 
+    filtered_windows = [window for window in windows if not _looks_like_toc_window(window.text)]
+    if filtered_windows:
+        windows = filtered_windows
+
     # Concatenate all windows
     full_text = "\n\n".join(w.text for w in windows)
+    full_text = _strip_stray_commentary_headings(full_text)
     all_ids = [sid for w in windows for sid in w.section_ids]
     first_page = windows[0].page_start
     last_page = windows[-1].page_end
@@ -199,7 +295,31 @@ def _split_block_by_paragraphs(text: str, max_chars: int) -> list[str]:
 
     if current:
         parts.append(current)
+    if len(parts) == 1 and len(parts[0]) > max_chars and "\n" in stripped:
+        line_parts = _split_block_by_lines(stripped, max_chars)
+        if len(line_parts) > 1:
+            return line_parts
     return parts
+
+
+def _split_block_by_lines(text: str, max_chars: int) -> list[str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return [text]
+
+    parts: list[str] = []
+    current = ""
+    for line in lines:
+        candidate = line if not current else f"{current}\n{line}"
+        if current and len(candidate) > max_chars:
+            parts.append(current)
+            current = line
+        else:
+            current = candidate
+
+    if current:
+        parts.append(current)
+    return parts or [text]
 
 
 def _split_html_table_by_rows(text: str, max_chars: int) -> list[str]:

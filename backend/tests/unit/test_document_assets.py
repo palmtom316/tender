@@ -316,3 +316,112 @@ def test_build_document_asset_section_fallback_synthesizes_heading_when_raw_mark
 
     assert asset.pages[0].source_ref == f"document_section:{section_id}"
     assert asset.pages[0].normalized_text == "1 总则\n1.0.1 正文"
+
+
+def test_build_document_asset_backfills_table_page_from_matching_page_text() -> None:
+    document_id = uuid4()
+    table_html = "<table><tr><td>试验项目</td><td>标准值</td></tr><tr><td>电气强度</td><td>≥70kV</td></tr></table>"
+    asset = build_document_asset(
+        document_id=document_id,
+        document={
+            "id": document_id,
+            "raw_payload": {
+                "pages": [
+                    {"page_number": 18, "markdown": f"4.2.4 条文\n表 4.2.4 变压器内油样性能\n{table_html}"},
+                ],
+            },
+        },
+        sections=[],
+        tables=[
+            {
+                "id": uuid4(),
+                "page_start": None,
+                "page_end": None,
+                "table_title": "表 4.2.4 变压器内油样性能",
+                "table_html": table_html,
+                "raw_json": {},
+            }
+        ],
+    )
+
+    assert asset.tables[0].page_start == 18
+    assert asset.tables[0].page_end == 18
+
+
+def test_build_document_asset_reconciles_raw_table_with_row_by_html_and_image_path() -> None:
+    document_id = uuid4()
+    table_id = uuid4()
+    table_html = "<table><tr><td>试验项目</td><td>标准值</td></tr><tr><td>电气强度</td><td>≥70kV</td></tr></table>"
+    image_path = "abc123.jpg"
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document={
+            "id": document_id,
+            "raw_payload": {
+                "tables": [
+                    {
+                        "html": table_html,
+                        "image_path": image_path,
+                    }
+                ],
+            },
+        },
+        sections=[],
+        tables=[
+            {
+                "id": table_id,
+                "page_start": None,
+                "page_end": None,
+                "table_title": None,
+                "table_html": table_html,
+                "raw_json": {"image_path": image_path},
+            }
+        ],
+    )
+
+    assert asset.tables[0].source_ref == f"table:{table_id}"
+
+
+def test_build_document_asset_backfills_table_page_from_title_order_when_html_missing_from_page() -> None:
+    document_id = uuid4()
+    table_id = uuid4()
+    table_html = (
+        "<table><tr><td>试验项目</td><td>电压等级</td><td>标准值</td></tr>"
+        "<tr><td>电气强度</td><td>750kV</td><td>≥70kV</td></tr></table>"
+    )
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document={
+            "id": document_id,
+            "raw_payload": {
+                "pages": [
+                    {"page_number": 18, "markdown": "4.2.4 应符合表4.2.4的规定：\n表 4.2.4 变压器内油样性能"},
+                    {"page_number": 19, "markdown": "4.3.1 见表4.3.1\n表 4.3.1 绝缘油取样数量"},
+                ],
+                "tables": [
+                    {
+                        "html": table_html,
+                        "image_path": "abc123.jpg",
+                    }
+                ],
+            },
+        },
+        sections=[],
+        tables=[
+            {
+                "id": table_id,
+                "page_start": None,
+                "page_end": None,
+                "table_title": None,
+                "table_html": table_html,
+                "raw_json": {"image_path": "abc123.jpg"},
+            }
+        ],
+    )
+
+    assert asset.tables[0].source_ref == f"table:{table_id}"
+    assert asset.tables[0].page_start == 18
+    assert asset.tables[0].page_end == 18
+    assert asset.tables[0].table_title == "表 4.2.4 变压器内油样性能"
