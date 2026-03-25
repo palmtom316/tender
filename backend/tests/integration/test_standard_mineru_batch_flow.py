@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from tender_backend.services.norm_service import norm_processor
+from tender_backend.services.norm_service.block_segments import BlockSegment
 from tender_backend.services.norm_service.layout_compressor import PageWindow, compress_sections
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
@@ -218,6 +219,38 @@ def test_mineru_to_sections_uses_page_markdown_to_anchor_headings() -> None:
                 "markdown": "2 术语\n术语正文",
             },
         },
+    ]
+
+
+def test_parse_llm_json_extracts_object_with_trailing_text() -> None:
+    raw = '{"clause_no":"1.0.1","clause_text":"正文"}\n以上为提取结果。'
+
+    parsed = norm_processor._parse_llm_json(raw)
+
+    assert parsed == [{"clause_no": "1.0.1", "clause_text": "正文"}]
+
+
+def test_parse_llm_json_extracts_fenced_object_with_leading_text() -> None:
+    raw = '提取结果如下：\n```json\n{"clause_no":"1.0.2","clause_text":"条文"}\n```\n请核对。'
+
+    parsed = norm_processor._parse_llm_json(raw)
+
+    assert parsed == [{"clause_no": "1.0.2", "clause_text": "条文"}]
+
+
+def test_parse_llm_json_prefers_array_over_leading_example_object() -> None:
+    raw = (
+        '以下是格式示例：{"clause_no":"0.0.0","clause_text":"示例"}\n'
+        '实际提取结果：'
+        '[{"clause_no":"1.0.1","clause_text":"第一条"},'
+        '{"clause_no":"1.0.2","clause_text":"第二条"}]'
+    )
+
+    parsed = norm_processor._parse_llm_json(raw)
+
+    assert parsed == [
+        {"clause_no": "1.0.1", "clause_text": "第一条"},
+        {"clause_no": "1.0.2", "clause_text": "第二条"},
     ]
 
 
@@ -819,9 +852,67 @@ def test_build_prompt_uses_table_specific_prompt() -> None:
     ))
 
     assert "规范表格" in prompt
-    assert "<table><tr><td>额定电压</td><td>10kV</td></tr></table>" in prompt
+
+
+def test_build_block_processing_scopes_routes_three_channels() -> None:
+    blocks = [
+        BlockSegment(
+            segment_type="normative_clause_block",
+            chapter_label="4.1.2 变压器或电抗器的装卸",
+            text="变压器或电抗器的装卸应符合下列规定：",
+            clause_no="4.1.2",
+            page_start=6,
+            page_end=6,
+            section_ids=["s1"],
+            source_refs=["document_section:s1"],
+        ),
+        BlockSegment(
+            segment_type="commentary_block",
+            chapter_label="4.1.2 条文说明",
+            text="本条说明变压器装卸控制要求。",
+            clause_no="4.1.2",
+            page_start=7,
+            page_end=7,
+            section_ids=["s2"],
+            source_refs=["document_section:s2"],
+        ),
+        BlockSegment(
+            segment_type="table_requirement_block",
+            chapter_label="表格: 表 4.2.4 变压器内油样性能",
+            text="表 4.2.4 变压器内油样性能\n含水量 ≤10μL/L",
+            table_title="表 4.2.4 变压器内油样性能",
+            page_start=18,
+            page_end=18,
+            source_refs=["table:t1"],
+        ),
+    ]
+
+    scopes = norm_processor._build_block_processing_scopes(blocks)
+
+    assert [scope.scope_type for scope in scopes] == ["normative", "commentary", "table"]
+    assert scopes[0].chapter_label == "4.1.2 变压器或电抗器的装卸"
+    assert scopes[1].chapter_label == "4.1.2 条文说明"
+    assert scopes[2].source_refs == ["table:t1"]
+
+
+def test_build_block_processing_scopes_keeps_table_prompt_on_table_channel() -> None:
+    block = BlockSegment(
+        segment_type="table_requirement_block",
+        chapter_label="表格: 表 4.2.4 变压器内油样性能",
+        text="表 4.2.4 变压器内油样性能\n含水量 ≤10μL/L",
+        table_title="表 4.2.4 变压器内油样性能",
+        page_start=18,
+        page_end=18,
+        source_refs=["table:t1"],
+    )
+
+    [scope] = norm_processor._build_block_processing_scopes([block])
+    prompt = build_prompt(scope)
+
+    assert scope.scope_type == "table"
+    assert "规范表格" in prompt
     assert "来源引用: table:t1" in prompt
-    assert '"node_type": "table"' in prompt
+    assert "表 4.2.4 变压器内油样性能" in prompt
 
 
 def test_validate_tree_ignores_empty_structural_parent_clause() -> None:
@@ -1538,6 +1629,74 @@ def test_process_standard_ai_uses_pre_normalization_outline_codes_for_validation
     assert captured["outline_clause_nos"] == {"4.2", "4.2.1"}
 
 
+def test_process_standard_ai_uses_block_scopes_for_single_standard_experiment(monkeypatch) -> None:
+    standard_id = UUID("ff2ddb6c-ba8e-4e42-862f-e75d5824437a")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "section_code": "4.1.2", "title": "变压器装卸", "text": "正文", "level": 1, "page_start": 6, "page_end": 6},
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "build_single_standard_blocks", lambda sections, tables: [
+        BlockSegment(
+            segment_type="normative_clause_block",
+            chapter_label="4.1.2 变压器装卸",
+            text="变压器装卸应符合规定。",
+            clause_no="4.1.2",
+            page_start=6,
+            page_end=6,
+            section_ids=["s1"],
+            source_refs=["document_section:s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("legacy chapter scope builder should not be used for the single-standard experiment")
+    ))
+
+    def fake_build_block_processing_scopes(blocks):
+        captured["block_scope_labels"] = [block.chapter_label for block in blocks]
+        return [
+            ProcessingScope(
+                scope_type="normative",
+                chapter_label="4.1.2 变压器装卸",
+                text="变压器装卸应符合规定。",
+                page_start=6,
+                page_end=6,
+                section_ids=["s1"],
+                source_refs=["document_section:s1"],
+            )
+        ]
+
+    monkeypatch.setattr(norm_processor, "_build_block_processing_scopes", fake_build_block_processing_scopes)
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: None)
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="e3003181-042a-44da-ad67-44615d7d25f2",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["block_scope_labels"] == ["4.1.2 变压器装卸"]
+
+
 def test_process_standard_ai_repairs_symbol_numeric_anomalies_before_persist(monkeypatch) -> None:
     standard_id = UUID("78787878-7878-7878-7878-787878787878")
     inserted_clauses: list[dict] = []
@@ -1622,6 +1781,115 @@ def test_process_standard_ai_repairs_symbol_numeric_anomalies_before_persist(mon
     assert summary["issues_before_repair"] == 1
     assert summary["issues_after_repair"] == 0
     assert inserted_clauses[0]["clause_text"] == "抗压强度不应小于30 MPa"
+
+
+def test_process_standard_ai_keeps_completed_result_when_repair_tasks_timeout(monkeypatch) -> None:
+    standard_id = UUID("44444444-4444-4444-4444-444444444444")
+    inserted_clauses: list[dict] = []
+    clauses = [{
+        "id": uuid4(),
+        "standard_id": standard_id,
+        "parent_id": None,
+        "clause_no": "1",
+        "node_type": "clause",
+        "node_key": "1",
+        "node_label": None,
+        "clause_title": None,
+        "clause_text": "抗压强度不应小于30 MP",
+        "summary": None,
+        "tags": [],
+        "page_start": 1,
+        "page_end": 1,
+        "clause_type": "normative",
+        "source_type": "text",
+        "source_label": "1 总则",
+        "source_ref": "document_section:s1",
+        "source_refs": ["document_section:s1"],
+    }]
+    validation_issue = SimpleNamespace(
+        code="text.symbol_numeric",
+        severity="warning",
+        message="suspect unit",
+        clause_id=clauses[0]["id"],
+        clause_no="1",
+        page_start=1,
+        page_end=1,
+        source_ref="document_section:s1",
+        snippet="30 MP",
+        details={},
+    )
+    validation_result = SimpleNamespace(
+        issues=[validation_issue],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 1},
+    )
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1 抗压强度不应小于30 MP",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: deepcopy(clauses))
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda current_clauses: current_clauses)
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda current_clauses, outline_clause_nos=None: validation_result)
+    monkeypatch.setattr(
+        norm_processor,
+        "build_repair_tasks",
+        lambda current_clauses, issues: [
+            SimpleNamespace(
+                task_type="symbol_numeric_repair",
+                source_ref="document_section:s1",
+                page_start=1,
+                page_end=1,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        norm_processor,
+        "run_repair_tasks",
+        lambda conn, document_id, tasks: (_ for _ in ()).throw(httpx.ReadTimeout("timed out")),
+    )
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda current_clauses: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(
+        norm_processor._std_repo,
+        "bulk_create_clauses",
+        lambda conn, current_clauses: inserted_clauses.extend(deepcopy(current_clauses)) or len(current_clauses),
+    )
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, current_clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="98989898-9898-9898-9898-989898989898",
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["repair_task_count"] == 1
+    assert summary["issues_before_repair"] == 1
+    assert summary["issues_after_repair"] == 1
+    assert summary["repair_error"] == "timed out"
+    assert "repair tasks failed: timed out" in summary["warnings"]
+    assert inserted_clauses[0]["clause_text"] == "抗压强度不应小于30 MP"
 
 
 def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:

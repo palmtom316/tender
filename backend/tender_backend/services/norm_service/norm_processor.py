@@ -24,7 +24,7 @@ from psycopg.rows import dict_row
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
-from tender_backend.services.norm_service.block_segments import build_single_standard_blocks
+from tender_backend.services.norm_service.block_segments import BlockSegment, build_single_standard_blocks
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
@@ -42,6 +42,9 @@ logger = structlog.stdlib.get_logger(__name__)
 
 AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "http://localhost:8001")
 _MAX_SCOPE_RETRY_ATTEMPTS = 2
+_SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS = {
+    UUID("ff2ddb6c-ba8e-4e42-862f-e75d5824437a"),
+}
 
 _std_repo = StandardRepository()
 _agent_repo = AgentConfigRepository()
@@ -748,6 +751,34 @@ def _build_processing_scopes(
     return build_structured_processing_scopes(asset)
 
 
+def _build_block_processing_scopes(blocks: list[BlockSegment]) -> list[ProcessingScope]:
+    scopes: list[ProcessingScope] = []
+    for block in blocks:
+        if block.segment_type == "commentary_block":
+            scope_type = "commentary"
+        elif block.segment_type == "table_requirement_block":
+            scope_type = "table"
+        else:
+            scope_type = "normative"
+
+        scopes.append(ProcessingScope(
+            scope_type=scope_type,
+            chapter_label=block.chapter_label,
+            text=block.text,
+            page_start=block.page_start or 0,
+            page_end=block.page_end or block.page_start or 0,
+            section_ids=list(block.section_ids),
+            source_refs=list(block.source_refs),
+            context={
+                "block_segment_type": block.segment_type,
+                "clause_no": block.clause_no,
+                "table_title": block.table_title,
+                "confidence": block.confidence,
+            },
+        ))
+    return scopes
+
+
 _ACTUAL_CHAPTER_TITLE = re.compile(r"^\d{1,2}\s+\S")
 _ACTUAL_CLAUSE_TITLE = re.compile(r"^\d+(?:\.\d+)+\s+\S")
 _TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
@@ -1054,12 +1085,16 @@ def process_standard_ai(
                 block_type_counts[block.segment_type] = block_type_counts.get(block.segment_type, 0) + 1
             logger.info("single_standard_blocks_built", counts=block_type_counts)
 
-        scopes = _build_processing_scopes(
-            sections,
-            tables,
-            document=document,
-            document_id=document_id,
-        )
+        if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+            logger.info("single_standard_block_path_enabled", standard_id=str(standard_id))
+            scopes = _build_block_processing_scopes(blocks)
+        else:
+            scopes = _build_processing_scopes(
+                sections,
+                tables,
+                document=document,
+                document_id=document_id,
+            )
         scopes = rebalance_scopes(scopes)
         if not scopes:
             raise ValueError("No processing scopes generated")
