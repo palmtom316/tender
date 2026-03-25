@@ -24,6 +24,7 @@ from psycopg.rows import dict_row
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
+from tender_backend.services.norm_service.block_segments import build_single_standard_blocks
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
@@ -883,14 +884,19 @@ def _parse_llm_json(raw: str) -> list[dict]:
         if isinstance(result, dict):
             return [result]
     except json.JSONDecodeError:
-        # Try to find JSON array in text
-        start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                pass
+        decoder = json.JSONDecoder()
+        for target in ("[", "{"):
+            for index, char in enumerate(text):
+                if char != target:
+                    continue
+                try:
+                    result, _end = decoder.raw_decode(text[index:])
+                    if isinstance(result, list):
+                        return result
+                    if isinstance(result, dict):
+                        return [result]
+                except json.JSONDecodeError:
+                    continue
     logger.warning("llm_json_parse_failed", raw_length=len(raw))
     return []
 
@@ -1033,8 +1039,20 @@ def process_standard_ai(
         outline_clause_nos = _collect_outline_clause_nos(raw_sections)
         tables = _fetch_tables(conn, document_id)
         document = _fetch_document(conn, document_id)
+        blocks = build_single_standard_blocks(sections, tables)
 
-        logger.info("processing_started", standard_id=str(standard_id), section_count=len(sections))
+        logger.info(
+            "processing_started",
+            standard_id=str(standard_id),
+            section_count=len(sections),
+            block_count=len(blocks),
+            block_types=dict.fromkeys(sorted({block.segment_type for block in blocks}), 0),
+        )
+        if blocks:
+            block_type_counts: dict[str, int] = {}
+            for block in blocks:
+                block_type_counts[block.segment_type] = block_type_counts.get(block.segment_type, 0) + 1
+            logger.info("single_standard_blocks_built", counts=block_type_counts)
 
         scopes = _build_processing_scopes(
             sections,
@@ -1070,10 +1088,25 @@ def process_standard_ai(
         clauses = link_commentary(clauses)
         structured_validation = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         repair_tasks = build_repair_tasks(clauses, structured_validation.issues)
-        repair_patches = run_repair_tasks(conn=conn, document_id=document_id, tasks=repair_tasks) if repair_tasks else []
+        repair_patches: list = []
+        repair_error: str | None = None
+        if repair_tasks:
+            try:
+                repair_patches = run_repair_tasks(conn=conn, document_id=document_id, tasks=repair_tasks)
+            except Exception as exc:
+                repair_error = str(exc)
+                logger.warning(
+                    "repair_tasks_failed",
+                    standard_id=str(standard_id),
+                    document_id=document_id,
+                    task_count=len(repair_tasks),
+                    error=repair_error,
+                )
         clauses = merge_repair_patches(clauses, repair_patches)
         revalidated = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         warnings = validate_tree(clauses)
+        if repair_error:
+            warnings.append(f"repair tasks failed: {repair_error}")
         combined_warnings = warnings + revalidated.warning_messages(limit=10)
 
         _std_repo.delete_clauses(conn, standard_id)
@@ -1093,6 +1126,7 @@ def process_standard_ai(
             "repair_task_count": len(repair_tasks),
             "issues_before_repair": len(structured_validation.issues),
             "issues_after_repair": len(revalidated.issues),
+            "repair_error": repair_error,
             "warnings": combined_warnings[:5],
             "validation": revalidated.to_dict(),
             "elapsed_seconds": round(elapsed, 1),
