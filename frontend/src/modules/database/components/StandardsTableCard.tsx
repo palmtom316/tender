@@ -16,7 +16,6 @@ type StandardsTableCardProps = {
   onRetry: (standardId: string) => void;
   onDelete: (standardId: string) => void;
   onOpenViewer: (standardId: string) => void;
-  onVisionProcess?: (standardId: string) => void;
 };
 
 export function StandardsTableCard({
@@ -30,7 +29,6 @@ export function StandardsTableCard({
   onRetry,
   onDelete,
   onOpenViewer,
-  onVisionProcess,
 }: StandardsTableCardProps) {
   return (
     <Card className="standards-table-card">
@@ -109,11 +107,6 @@ export function StandardsTableCard({
                       {std.processing_status === "failed" && (
                         <ClayButton type="button" variant="ghost" size="sm" onClick={() => onRetry(std.id)}>
                           <Icon name="refresh" size={14} /> 重试
-                        </ClayButton>
-                      )}
-                      {onVisionProcess && (std.processing_status === "completed" || std.processing_status === "failed") && (
-                        <ClayButton type="button" variant="ghost" size="sm" onClick={() => onVisionProcess(std.id)}>
-                          <Icon name="eye" size={14} /> VL解析
                         </ClayButton>
                       )}
                     </div>
