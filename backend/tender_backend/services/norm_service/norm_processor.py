@@ -25,6 +25,7 @@ from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.document_assets import build_document_asset
+from tender_backend.services.norm_service.outline_rebuilder import collect_outline_clause_nos_from_pages
 from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
 from tender_backend.services.norm_service.prompt_builder import build_prompt
@@ -883,14 +884,19 @@ def _parse_llm_json(raw: str) -> list[dict]:
         if isinstance(result, dict):
             return [result]
     except json.JSONDecodeError:
-        # Try to find JSON array in text
-        start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                pass
+        decoder = json.JSONDecoder()
+        for target in ("[", "{"):
+            for index, char in enumerate(text):
+                if char != target:
+                    continue
+                try:
+                    result, _end = decoder.raw_decode(text[index:])
+                    if isinstance(result, list):
+                        return result
+                    if isinstance(result, dict):
+                        return [result]
+                except json.JSONDecodeError:
+                    continue
     logger.warning("llm_json_parse_failed", raw_length=len(raw))
     return []
 
@@ -971,9 +977,20 @@ def _apply_scope_defaults(entry: dict, scope: ProcessingScope) -> None:
         entry["clause_type"] = clause_type
     entry_page_start = entry.get("page_start")
     entry_page_end = entry.get("page_end")
-    if not isinstance(entry_page_start, int) or entry_page_start <= 0:
+    page_start_in_scope = (
+        isinstance(entry_page_start, int)
+        and entry_page_start > 0
+        and (scope_page_start is None or entry_page_start >= scope_page_start)
+        and (scope_page_end is None or entry_page_start <= scope_page_end)
+    )
+    page_end_in_scope = (
+        isinstance(entry_page_end, int)
+        and entry_page_end > 0
+        and (scope_page_start is None or entry_page_end >= scope_page_start)
+        and (scope_page_end is None or entry_page_end <= scope_page_end)
+    )
+    if not page_start_in_scope or not page_end_in_scope:
         entry["page_start"] = scope_page_start
-    if not isinstance(entry_page_end, int) or entry_page_end <= 0:
         entry["page_end"] = scope_page_end
     if not entry.get("source_ref") and scope_refs:
         entry["source_ref"] = scope_refs[0]
@@ -1027,12 +1044,21 @@ def process_standard_ai(
         raw_sections = _fetch_sections(conn, document_id)
         if not raw_sections:
             raise ValueError(f"No OCR sections available for document {document_id}")
+        tables = _fetch_tables(conn, document_id)
+        document = _fetch_document(conn, document_id)
+        document_asset = build_document_asset(
+            document_id=UUID(document_id),
+            document=document,
+            sections=raw_sections,
+            tables=tables,
+        )
         sections = _normalize_sections_for_processing(raw_sections)
         if not sections:
             raise ValueError("No normalized sections available for processing")
-        outline_clause_nos = _collect_outline_clause_nos(raw_sections)
-        tables = _fetch_tables(conn, document_id)
-        document = _fetch_document(conn, document_id)
+        outline_clause_nos = (
+            collect_outline_clause_nos_from_pages(document_asset.pages)
+            | _collect_outline_clause_nos(raw_sections)
+        )
 
         logger.info("processing_started", standard_id=str(standard_id), section_count=len(sections))
 
@@ -1070,10 +1096,25 @@ def process_standard_ai(
         clauses = link_commentary(clauses)
         structured_validation = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         repair_tasks = build_repair_tasks(clauses, structured_validation.issues)
-        repair_patches = run_repair_tasks(conn=conn, document_id=document_id, tasks=repair_tasks) if repair_tasks else []
+        repair_patches: list = []
+        repair_error: str | None = None
+        if repair_tasks:
+            try:
+                repair_patches = run_repair_tasks(conn=conn, document_id=document_id, tasks=repair_tasks)
+            except Exception as exc:
+                repair_error = str(exc)
+                logger.warning(
+                    "repair_tasks_failed",
+                    standard_id=str(standard_id),
+                    document_id=document_id,
+                    task_count=len(repair_tasks),
+                    error=repair_error,
+                )
         clauses = merge_repair_patches(clauses, repair_patches)
         revalidated = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         warnings = validate_tree(clauses)
+        if repair_error:
+            warnings.append(f"repair tasks failed: {repair_error}")
         combined_warnings = warnings + revalidated.warning_messages(limit=10)
 
         _std_repo.delete_clauses(conn, standard_id)
@@ -1093,6 +1134,7 @@ def process_standard_ai(
             "repair_task_count": len(repair_tasks),
             "issues_before_repair": len(structured_validation.issues),
             "issues_after_repair": len(revalidated.issues),
+            "repair_error": repair_error,
             "warnings": combined_warnings[:5],
             "validation": revalidated.to_dict(),
             "elapsed_seconds": round(elapsed, 1),
@@ -1135,9 +1177,6 @@ def _index_clauses(standard: dict | None, clauses: list[dict]) -> None:
     try:
         manager = IndexManager()
         docs = build_clause_index_docs(standard, clauses)
-
-        asyncio.get_event_loop().run_until_complete(
-            manager.bulk_index("clause_index", docs)
-        )
+        asyncio.run(manager.bulk_index("clause_index", docs))
     except Exception:
         logger.warning("opensearch_indexing_failed", exc_info=True)

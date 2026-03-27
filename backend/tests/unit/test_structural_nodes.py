@@ -219,3 +219,125 @@ def test_rebalance_scopes_filters_source_refs_by_child_text_segments() -> None:
     assert len(rebalanced) == 2
     assert rebalanced[0].source_refs == ["document_section:s1"]
     assert rebalanced[1].source_refs == ["document_section:s2"]
+
+
+def test_build_processing_scopes_uses_leaf_outline_boundaries_from_raw_pages() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("66666666-6666-6666-6666-666666666666"),
+        parser_name="mineru",
+        parser_version="v1",
+        raw_payload={
+            "pages": [
+                {
+                    "page_number": 15,
+                    "markdown": (
+                        "4 电力变压器、油浸电抗器\n"
+                        "4.1 装卸、运输与就位\n"
+                        "4.1.1 条文正文\n"
+                        "1 水路运输时，应做好下列工作："
+                    ),
+                },
+                {
+                    "page_number": 17,
+                    "markdown": (
+                        "4.2 交接与保管\n"
+                        "4.2.1 设备到达现场后，应及时按下列规定进行外观检查："
+                    ),
+                },
+                {
+                    "page_number": 35,
+                    "markdown": (
+                        "5 互感器\n"
+                        "5.1 一般规定\n"
+                        "5.1.1 互感器运输和保管应符合产品技术文件的规定。"
+                    ),
+                },
+                {
+                    "page_number": 38,
+                    "markdown": (
+                        "附录A 新装电力变压器及油浸电抗器不需干燥的条件\n"
+                        "A.0.1 带油运输的变压器及电抗器应符合下列规定："
+                    ),
+                },
+                {
+                    "page_number": 39,
+                    "markdown": (
+                        "本规范用词说明\n"
+                        "为便于在执行本规范条文时区别对待，对要求严格程度不同的用词说明如下："
+                    ),
+                },
+            ]
+        },
+        pages=[
+            PageAsset(
+                page_number=15,
+                normalized_text=(
+                    "4 电力变压器、油浸电抗器\n"
+                    "4.1 装卸、运输与就位\n"
+                    "4.1.1 条文正文\n"
+                    "1 水路运输时，应做好下列工作："
+                ),
+                raw_page={"page_number": 15, "source_ref": "document.raw_payload.pages[0]"},
+                source_ref="document.raw_payload.pages[0]",
+            ),
+            PageAsset(
+                page_number=17,
+                normalized_text=(
+                    "4.2 交接与保管\n"
+                    "4.2.1 设备到达现场后，应及时按下列规定进行外观检查："
+                ),
+                raw_page={"page_number": 17, "source_ref": "document.raw_payload.pages[1]"},
+                source_ref="document.raw_payload.pages[1]",
+            ),
+            PageAsset(
+                page_number=35,
+                normalized_text=(
+                    "5 互感器\n"
+                    "5.1 一般规定\n"
+                    "5.1.1 互感器运输和保管应符合产品技术文件的规定。"
+                ),
+                raw_page={"page_number": 35, "source_ref": "document.raw_payload.pages[2]"},
+                source_ref="document.raw_payload.pages[2]",
+            ),
+            PageAsset(
+                page_number=38,
+                normalized_text=(
+                    "附录A 新装电力变压器及油浸电抗器不需干燥的条件\n"
+                    "A.0.1 带油运输的变压器及电抗器应符合下列规定："
+                ),
+                raw_page={"page_number": 38, "source_ref": "document.raw_payload.pages[3]"},
+                source_ref="document.raw_payload.pages[3]",
+            ),
+            PageAsset(
+                page_number=39,
+                normalized_text=(
+                    "本规范用词说明\n"
+                    "为便于在执行本规范条文时区别对待，对要求严格程度不同的用词说明如下："
+                ),
+                raw_page={"page_number": 39, "source_ref": "document.raw_payload.pages[4]"},
+                source_ref="document.raw_payload.pages[4]",
+            ),
+        ],
+        tables=[],
+        full_markdown="",
+    )
+
+    scopes = build_processing_scopes(asset)
+
+    assert [scope.scope_type for scope in scopes] == ["normative", "normative", "normative", "normative", "commentary"]
+    assert [scope.chapter_label for scope in scopes[:4]] == [
+        "4.1 装卸、运输与就位",
+        "4.2 交接与保管",
+        "5.1 一般规定",
+        "附录A 新装电力变压器及油浸电抗器不需干燥的条件",
+    ]
+    assert scopes[0].page_start == 15
+    assert scopes[0].page_end == 15
+    assert scopes[0].source_refs == ["document.raw_payload.pages[0]"]
+    assert scopes[1].page_start == 17
+    assert scopes[1].page_end == 17
+    assert scopes[2].page_start == 35
+    assert scopes[2].page_end == 35
+    assert scopes[3].page_start == 38
+    assert scopes[3].page_end == 38
+    assert all("本规范用词说明" not in scope.text for scope in scopes[:4])

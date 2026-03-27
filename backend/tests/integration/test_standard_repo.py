@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from uuid import UUID, uuid4
 
@@ -481,3 +482,328 @@ def test_get_viewer_tree_falls_back_to_ai_tree_without_outline(
     assert len(tree) == 1
     assert tree[0]["id"] == str(clause_id)
     assert tree[0]["clause_no"] == "4.5.5"
+
+
+def test_get_viewer_tree_skips_toc_and_front_matter_outline_noise(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    standard_id, document_id = _create_standard(conn, code="GB 5")
+    chapter_id = uuid4()
+    clause_id = uuid4()
+
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, sort_order)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            uuid4(), document_id, "2010", "北京", 1, 2, 2, "封面信息", 0,
+            uuid4(), document_id, None, "前言", 1, 5, 5, "前言内容", 1,
+            uuid4(), document_id, "5.4", "工程交接验收 (28)", 2, 7, 7, "附录A ...(29)\n本规范用词说明 (30)", 2,
+            uuid4(), document_id, "5", "互感器", 1, 35, 35, None, 3,
+            uuid4(), document_id, "5.4", "工程交接验收", 2, 37, 37, None, 4,
+        ),
+    )
+    conn.commit()
+
+    repo.bulk_create_clauses(conn, [
+        {
+            "id": chapter_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "5.4",
+            "clause_title": "AI 工程交接验收",
+            "clause_text": "应按要求完成交接验收。",
+            "summary": "5.4 摘要",
+            "tags": [],
+            "page_start": 37,
+            "page_end": 37,
+            "sort_order": 0,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "5.4",
+            "node_label": None,
+        },
+        {
+            "id": clause_id,
+            "standard_id": standard_id,
+            "parent_id": chapter_id,
+            "clause_no": "5.4.1",
+            "clause_title": "检查项目",
+            "clause_text": "验收时应检查外观。",
+            "summary": None,
+            "tags": [],
+            "page_start": 37,
+            "page_end": 37,
+            "sort_order": 1,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "5.4.1",
+            "node_label": None,
+        },
+    ])
+
+    tree = repo.get_viewer_tree(conn, standard_id)
+
+    assert [node["clause_no"] for node in tree] == ["5"]
+    assert tree[0]["children"][0]["id"] == str(chapter_id)
+    assert tree[0]["children"][0]["clause_no"] == "5.4"
+    assert tree[0]["children"][0]["clause_title"] == "工程交接验收"
+    assert tree[0]["children"][0]["children"][0]["id"] == str(clause_id)
+
+
+def test_get_viewer_tree_skips_duplicate_body_sections_and_clause_level_outline_noise(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    standard_id, document_id = _create_standard(conn, code="GB 4")
+    chapter_one_clause_id = uuid4()
+    chapter_two_clause_id = uuid4()
+    term_clause_id = uuid4()
+    section_clause_id = uuid4()
+
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, sort_order)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            uuid4(), document_id, None, "前言", 1, 5, 5, "前言内容", 0,
+            uuid4(), document_id, "1", "总则 (1)", 1, 7, 7, None, 1,
+            uuid4(), document_id, "2", "术语 (2)", 1, 7, 7, None, 2,
+            uuid4(), document_id, "1", "包装及密封应良好。", 2, 13, 13, None, 3,
+            uuid4(), document_id, "2", "应开箱检查并清点，规格应符合设计要求，附件、备件应齐全。", 2, 13, 13, None, 4,
+            uuid4(), document_id, "2.0.14", "电容式电压互感器 capacitance potential transformer", 2, 12, 12, "一种由电容分压器和电磁单元组成的电压互感器。", 5,
+            uuid4(), document_id, "4", "电力变压器、油浸电抗器", 1, 13, 13, None, 6,
+            uuid4(), document_id, "4.4", "排氮", 2, 21, 21, None, 7,
+        ),
+    )
+    conn.commit()
+
+    repo.bulk_create_clauses(conn, [
+        {
+            "id": chapter_one_clause_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "1.0.1",
+            "clause_title": "为保证安装质量，制定本规范。",
+            "clause_text": "为保证安装质量，制定本规范。",
+            "summary": "1.0.1 摘要",
+            "tags": [],
+            "page_start": 13,
+            "page_end": 13,
+            "sort_order": 0,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "1.0.1",
+            "node_label": None,
+        },
+        {
+            "id": chapter_two_clause_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "2.0.1",
+            "clause_title": "术语一",
+            "clause_text": "术语一定义。",
+            "summary": "2.0.1 摘要",
+            "tags": [],
+            "page_start": 13,
+            "page_end": 13,
+            "sort_order": 1,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "2.0.1",
+            "node_label": None,
+        },
+        {
+            "id": term_clause_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "2.0.14",
+            "clause_title": "电容式电压互感器 capacitance potential transformer",
+            "clause_text": "一种由电容分压器和电磁单元组成的电压互感器。",
+            "summary": "2.0.14 摘要",
+            "tags": [],
+            "page_start": 12,
+            "page_end": 12,
+            "sort_order": 2,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "2.0.14",
+            "node_label": None,
+        },
+        {
+            "id": section_clause_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "4.4",
+            "clause_title": "排氮",
+            "clause_text": "注油排氮前应将油箱内的残油排尽。",
+            "summary": "4.4 摘要",
+            "tags": [],
+            "page_start": 21,
+            "page_end": 21,
+            "sort_order": 3,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "4.4",
+            "node_label": None,
+        },
+    ])
+
+    tree = repo.get_viewer_tree(conn, standard_id)
+
+    root_titles = [node["clause_title"] for node in tree]
+    root_clause_nos = [node["clause_no"] for node in tree]
+
+    assert "包装及密封应良好。" not in root_titles
+    assert "应开箱检查并清点，规格应符合设计要求，附件、备件应齐全。" not in root_titles
+    assert "2.0.14" not in root_clause_nos
+    assert "4" in root_clause_nos
+    chapter_four = next(node for node in tree if node["clause_no"] == "4")
+    assert [child["clause_no"] for child in chapter_four["children"]] == ["4.4"]
+    assert chapter_four["children"][0]["id"] == str(section_clause_id)
+
+
+def test_get_viewer_tree_sanitizes_toc_outline_titles_when_body_heading_is_missing(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    standard_id, document_id = _create_standard(conn, code="GB TOC")
+    clause_id = uuid4()
+
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, sort_order)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            uuid4(), document_id, "4.8", "本体及附件安装 ………………………………………… (17)", 2, 7, 7, None, 0,
+            uuid4(), document_id, "4", "电力变压器、油浸电抗器 (6)", 1, 7, 7, None, 1,
+        ),
+    )
+    conn.commit()
+
+    repo.bulk_create_clauses(conn, [
+        {
+            "id": clause_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "4.8.1",
+            "clause_title": None,
+            "clause_text": "220kV及以上变压器本体露空安装附件应符合下列规定。",
+            "summary": None,
+            "tags": [],
+            "page_start": 26,
+            "page_end": 26,
+            "sort_order": 0,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "4.8.1",
+            "node_label": None,
+        },
+    ])
+
+    tree = repo.get_viewer_tree(conn, standard_id)
+
+    chapter_four = next(node for node in tree if node["clause_no"] == "4")
+    section = next(node for node in chapter_four["children"] if node["clause_no"] == "4.8")
+
+    assert section["clause_title"] == "本体及附件安装"
+    assert section["children"][0]["id"] == str(clause_id)
+
+
+def test_get_viewer_tree_prefers_rebuilt_outline_from_page_text_when_sections_are_polluted(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    standard_id, document_id = _create_standard(conn, code="GB RAW")
+    clause_id = uuid4()
+
+    conn.execute(
+        """
+        UPDATE document
+        SET raw_payload = %s
+        WHERE id = %s
+        """,
+        (
+            json.dumps({
+                "pages": [
+                    {"page_number": 7, "markdown": "目次\n4.8 本体及附件安装 ………………………………………… (17)"},
+                    {"page_number": 15, "markdown": "4 电力变压器、油浸电抗器\n4.8 本体及附件安装\n4.8.1 条文正文"},
+                ],
+                "tables": [],
+                "full_markdown": "4 电力变压器、油浸电抗器\n4.8 本体及附件安装\n4.8.1 条文正文",
+            }),
+            document_id,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, sort_order)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            uuid4(), document_id, "4.8", "本体及附件安装 (17)", 2, 7, 7, None, 0,
+            uuid4(), document_id, "1", "环境相对湿度应小于80%。", 1, 26, 26, None, 1,
+        ),
+    )
+    conn.commit()
+
+    repo.bulk_create_clauses(conn, [
+        {
+            "id": clause_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "4.8.1",
+            "clause_title": None,
+            "clause_text": "220kV及以上变压器本体露空安装附件应符合下列规定。",
+            "summary": None,
+            "tags": [],
+            "page_start": 26,
+            "page_end": 26,
+            "sort_order": 0,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "4.8.1",
+            "node_label": None,
+        },
+    ])
+
+    tree = repo.get_viewer_tree(conn, standard_id)
+
+    chapter_four = next(node for node in tree if node["clause_no"] == "4")
+    section = next(node for node in chapter_four["children"] if node["clause_no"] == "4.8")
+
+    assert section["clause_title"] == "本体及附件安装"
+    assert section["children"][0]["id"] == str(clause_id)

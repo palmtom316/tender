@@ -14,6 +14,7 @@ from tender_backend.services.norm_service.document_assets import (
     build_document_asset,
     serialize_document_asset,
 )
+from tender_backend.services.norm_service.outline_rebuilder import rebuild_outline_sections_from_pages
 
 
 def _order_clauses_for_insert(clauses: list[dict]) -> list[dict]:
@@ -66,6 +67,15 @@ def _order_clauses_for_insert(clauses: list[dict]) -> list[dict]:
 
 _TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
 _TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
+_TITLE_SENTENCE_PUNCT = ("。", "；", "：", "！", "？")
+
+
+def _sanitize_outline_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    sanitized = _TOC_PAGE_REF.sub("", title).strip()
+    sanitized = _TOC_DOT_LEADERS.sub(" ", sanitized).strip()
+    return sanitized or None
 
 
 def _build_clause_node(clause: dict) -> dict:
@@ -100,13 +110,31 @@ def _is_toc_section(section: dict) -> bool:
     text = (section.get("text") or "").strip()
     if not title:
         return True
-    if text:
-        return False
     if _TOC_PAGE_REF.search(title):
         return True
     if _TOC_DOT_LEADERS.search(title):
         return True
+    if text and (
+        _TOC_DOT_LEADERS.search(text)
+        or sum(1 for line in text.splitlines() if _TOC_PAGE_REF.search(line.strip())) >= 2
+    ):
+        return True
     return False
+
+
+def _is_outline_candidate(section: dict) -> bool:
+    title = (section.get("title") or "").strip()
+    section_code = str(section.get("section_code") or "").strip()
+    if not title:
+        return False
+
+    if section_code and section_code.count(".") >= 2:
+        return False
+
+    if any(punct in title for punct in _TITLE_SENTENCE_PUNCT):
+        return False
+
+    return True
 
 
 def _find_outline_parent_by_code(outline_by_code: dict[str, dict], section_code: str | None) -> dict | None:
@@ -121,7 +149,35 @@ def _find_outline_parent_by_code(outline_by_code: dict[str, dict], section_code:
 
 
 def _build_outline_tree(sections: list[dict]) -> tuple[list[dict], dict[str, dict]]:
-    filtered = [section for section in sections if not _is_toc_section(section)]
+    selected_by_code: dict[str, tuple[int, dict]] = {}
+    selected_no_code: list[tuple[int, dict]] = []
+
+    for index, section in enumerate(sections):
+        if not _is_outline_candidate(section):
+            continue
+
+        section_code = str(section.get("section_code") or "").strip()
+        if not section_code:
+            if not _is_toc_section(section):
+                selected_no_code.append((index, section))
+            continue
+
+        existing = selected_by_code.get(section_code)
+        if existing is None:
+            selected_by_code[section_code] = (index, section)
+            continue
+
+        _, current = existing
+        if _is_toc_section(current) and not _is_toc_section(section):
+            selected_by_code[section_code] = (index, section)
+
+    filtered = [
+        section
+        for _, section in sorted(
+            [*selected_no_code, *selected_by_code.values()],
+            key=lambda item: item[0],
+        )
+    ]
     if not filtered:
         return [], {}
 
@@ -135,7 +191,7 @@ def _build_outline_tree(sections: list[dict]) -> tuple[list[dict], dict[str, dic
         node = {
             "id": f"outline:{section['id']}",
             "clause_no": section_code,
-            "clause_title": (section.get("title") or "").strip() or None,
+            "clause_title": _sanitize_outline_title((section.get("title") or "").strip()),
             "clause_text": (section.get("text") or "").strip() or None,
             "summary": None,
             "tags": [],
@@ -168,6 +224,19 @@ def _build_outline_tree(sections: list[dict]) -> tuple[list[dict], dict[str, dic
         stack.append(node)
         if section_code and section_code not in outline_by_code:
             outline_by_code[section_code] = node
+            if roots and section_code:
+                for existing_code, existing_node in list(outline_by_code.items()):
+                    if existing_code == section_code:
+                        continue
+                    if existing_node.get("parent_id") is not None:
+                        continue
+                    parent = _find_outline_parent_by_code(outline_by_code, existing_code)
+                    if parent is not node:
+                        continue
+                    if existing_node in roots:
+                        roots.remove(existing_node)
+                    existing_node["parent_id"] = node["id"]
+                    node["children"].append(existing_node)
 
     for node in outline_by_code.values():
         node.pop("_level", None)
@@ -183,6 +252,16 @@ def _clear_outline_levels(node: dict) -> None:
     node.pop("_level", None)
     for child in node["children"]:
         _clear_outline_levels(child)
+
+
+def _prune_outline_noise(nodes: list[dict]) -> list[dict]:
+    pruned: list[dict] = []
+    for node in nodes:
+        children = _prune_outline_noise(node["children"])
+        node["children"] = children
+        if node.get("clause_type") != "outline" or children:
+            pruned.append(node)
+    return pruned
 
 
 def _find_outline_host(outline_by_code: dict[str, dict], clause_no: str | None) -> dict | None:
@@ -402,12 +481,36 @@ class StandardRepository:
     def get_viewer_tree(self, conn: Connection, standard_id: UUID) -> list[dict]:
         file_meta = self.get_standard_file(conn, standard_id)
         document_id = file_meta.get("document_id") if file_meta else None
-        sections = (
+        raw_sections = (
             self.list_document_sections(conn, document_id=document_id)
             if document_id is not None
             else []
         )
-        outline_roots, outline_by_code = _build_outline_tree(sections)
+        document = (
+            self.get_document_parse_info(conn, document_id=document_id)
+            if document_id is not None
+            else None
+        )
+        tables = (
+            self.list_document_tables(conn, document_id=document_id)
+            if document_id is not None
+            else []
+        )
+        outline_sections = raw_sections
+        if document_id is not None and document is not None:
+            document_asset = build_document_asset(
+                document_id=document_id,
+                document=document,
+                sections=raw_sections,
+                tables=tables,
+            )
+            raw_payload_pages = (document.get("raw_payload") or {}).get("pages")
+            if isinstance(raw_payload_pages, list) and raw_payload_pages:
+                rebuilt_sections = rebuild_outline_sections_from_pages(document_asset.pages)
+                if rebuilt_sections:
+                    outline_sections = rebuilt_sections
+
+        outline_roots, outline_by_code = _build_outline_tree(outline_sections)
 
         flat = self.list_clauses(conn, standard_id=standard_id)
         if not flat:
@@ -458,7 +561,7 @@ class StandardRepository:
 
             detached_roots.append(node)
 
-        return [*outline_roots, *detached_roots]
+        return [*_prune_outline_noise(outline_roots), *detached_roots]
 
     # ── Write helpers ──
 

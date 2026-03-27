@@ -221,6 +221,38 @@ def test_mineru_to_sections_uses_page_markdown_to_anchor_headings() -> None:
     ]
 
 
+def test_parse_llm_json_extracts_object_with_trailing_text() -> None:
+    raw = '{"clause_no":"1.0.1","clause_text":"正文"}\n以上为提取结果。'
+
+    parsed = norm_processor._parse_llm_json(raw)
+
+    assert parsed == [{"clause_no": "1.0.1", "clause_text": "正文"}]
+
+
+def test_parse_llm_json_extracts_fenced_object_with_leading_text() -> None:
+    raw = '提取结果如下：\n```json\n{"clause_no":"1.0.2","clause_text":"条文"}\n```\n请核对。'
+
+    parsed = norm_processor._parse_llm_json(raw)
+
+    assert parsed == [{"clause_no": "1.0.2", "clause_text": "条文"}]
+
+
+def test_parse_llm_json_prefers_array_over_leading_example_object() -> None:
+    raw = (
+        '以下是格式示例：{"clause_no":"0.0.0","clause_text":"示例"}\n'
+        '实际提取结果：'
+        '[{"clause_no":"1.0.1","clause_text":"第一条"},'
+        '{"clause_no":"1.0.2","clause_text":"第二条"}]'
+    )
+
+    parsed = norm_processor._parse_llm_json(raw)
+
+    assert parsed == [
+        {"clause_no": "1.0.1", "clause_text": "第一条"},
+        {"clause_no": "1.0.2", "clause_text": "第二条"},
+    ]
+
+
 def test_extract_pages_from_payload_skips_layout_blocks_and_keeps_real_page_payloads() -> None:
     payload = {
         "pages": [
@@ -804,6 +836,111 @@ def test_build_processing_scopes_ignores_raw_front_matter_before_normalized_sect
     assert scopes[0].page_end == 10
     assert scopes[1].page_start == 11
     assert scopes[1].page_end == 11
+
+
+def test_build_processing_scopes_uses_rebuilt_leaf_outline_when_sections_are_polluted() -> None:
+    document_id = UUID("99999999-2222-3333-4444-555555555555")
+    sections = [
+        {
+            "id": "bad-1",
+            "section_code": "4",
+            "title": "电力变压器、油浸电抗器",
+            "level": 1,
+            "page_start": 15,
+            "page_end": 38,
+            "text": "",
+            "raw_json": None,
+        },
+        {
+            "id": "bad-2",
+            "section_code": "5",
+            "title": "内部枚举污染行",
+            "level": 1,
+            "page_start": 15,
+            "page_end": 38,
+            "text": "",
+            "raw_json": None,
+        },
+        {
+            "id": "bad-3",
+            "section_code": "6",
+            "title": "内部枚举污染行",
+            "level": 1,
+            "page_start": 15,
+            "page_end": 38,
+            "text": "",
+            "raw_json": None,
+        },
+    ]
+
+    document = {
+        "id": document_id,
+        "raw_payload": {
+            "pages": [
+                {
+                    "page_number": 15,
+                    "markdown": (
+                        "4 电力变压器、油浸电抗器\n"
+                        "4.1 装卸、运输与就位\n"
+                        "4.1.1 条文正文\n"
+                        "1 水路运输时，应做好下列工作："
+                    ),
+                },
+                {
+                    "page_number": 17,
+                    "markdown": (
+                        "4.2 交接与保管\n"
+                        "4.2.1 设备到达现场后，应及时按下列规定进行外观检查："
+                    ),
+                },
+                {
+                    "page_number": 35,
+                    "markdown": (
+                        "5 互感器\n"
+                        "5.1 一般规定\n"
+                        "5.1.1 互感器运输和保管应符合产品技术文件的规定。"
+                    ),
+                },
+                {
+                    "page_number": 38,
+                    "markdown": (
+                        "附录A 新装电力变压器及油浸电抗器不需干燥的条件\n"
+                        "A.0.1 带油运输的变压器及电抗器应符合下列规定："
+                    ),
+                },
+                {
+                    "page_number": 39,
+                    "markdown": (
+                        "本规范用词说明\n"
+                        "为便于在执行本规范条文时区别对待，对要求严格程度不同的用词说明如下："
+                    ),
+                },
+            ]
+        },
+    }
+
+    scopes = norm_processor._build_processing_scopes(
+        sections,
+        [],
+        document=document,
+        document_id=str(document_id),
+    )
+
+    assert [scope.scope_type for scope in scopes] == ["normative", "normative", "normative", "normative"]
+    assert [scope.chapter_label for scope in scopes] == [
+        "4.1 装卸、运输与就位",
+        "4.2 交接与保管",
+        "5.1 一般规定",
+        "附录A 新装电力变压器及油浸电抗器不需干燥的条件",
+    ]
+    assert scopes[0].page_start == 15
+    assert scopes[0].page_end == 15
+    assert scopes[1].page_start == 17
+    assert scopes[1].page_end == 17
+    assert scopes[2].page_start == 35
+    assert scopes[2].page_end == 35
+    assert scopes[3].page_start == 38
+    assert scopes[3].page_end == 38
 
 
 def test_build_prompt_uses_table_specific_prompt() -> None:
@@ -1538,6 +1675,98 @@ def test_process_standard_ai_uses_pre_normalization_outline_codes_for_validation
     assert captured["outline_clause_nos"] == {"4.2", "4.2.1"}
 
 
+def test_apply_scope_defaults_clamps_out_of_scope_page_numbers() -> None:
+    scope = ProcessingScope(
+        scope_type="normative",
+        chapter_label="2 术语",
+        text="2.0.1 电力变压器",
+        page_start=11,
+        page_end=12,
+        section_ids=["s2"],
+        source_refs=["document_section:s2"],
+    )
+    entry = {
+        "clause_no": "2.0.9",
+        "clause_text": "密封试验 sealing test",
+        "page_start": 2,
+        "page_end": 2,
+    }
+
+    norm_processor._apply_scope_defaults(entry, scope)
+
+    assert entry["page_start"] == 11
+    assert entry["page_end"] == 12
+
+
+def test_process_standard_ai_prefers_rebuilt_outline_codes_from_page_text(monkeypatch) -> None:
+    standard_id = UUID("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "toc", "section_code": None, "title": "本体及附件安装 (17)", "text": "", "level": 2, "page_start": 7, "page_end": 7},
+        {"id": "body", "section_code": None, "title": "4.8.1", "text": "正文", "level": 3, "page_start": 26, "page_end": 26},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: {
+        "id": UUID(document_id),
+        "parser_name": "mineru",
+        "parser_version": "v4",
+        "raw_payload": {
+            "pages": [
+                {"page_number": 7, "markdown": "目次\n4.8 本体及附件安装 ………………………………………… (17)"},
+                {"page_number": 26, "markdown": "4.8 本体及附件安装\n4.8.1 220kV及以上变压器本体露空安装附件应符合下列规定："},
+            ],
+            "tables": [],
+            "full_markdown": "4.8 本体及附件安装\n4.8.1 220kV及以上变压器本体露空安装附件应符合下列规定：",
+        },
+    })
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="4 电力变压器、油浸电抗器",
+            text="4.8.1 正文",
+            page_start=26,
+            page_end=26,
+            section_ids=["body"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+
+    def fake_validate_clauses(clauses, *, outline_clause_nos=None):
+        captured["outline_clause_nos"] = outline_clause_nos
+        return SimpleNamespace(
+            issues=[],
+            phrase_flags=[],
+            to_dict=lambda: {"issue_count": 0, "phrase_flag_count": 0, "issues": [], "phrase_flags": []},
+            warning_messages=lambda limit=None: [],
+        )
+
+    monkeypatch.setattr(norm_processor, "validate_clauses", fake_validate_clauses)
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 4",
+        "specialty": "电气",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="dddddddd-dddd-dddd-dddd-dddddddddddd",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["outline_clause_nos"] == {"4.8"}
+
+
 def test_process_standard_ai_repairs_symbol_numeric_anomalies_before_persist(monkeypatch) -> None:
     standard_id = UUID("78787878-7878-7878-7878-787878787878")
     inserted_clauses: list[dict] = []
@@ -1622,6 +1851,115 @@ def test_process_standard_ai_repairs_symbol_numeric_anomalies_before_persist(mon
     assert summary["issues_before_repair"] == 1
     assert summary["issues_after_repair"] == 0
     assert inserted_clauses[0]["clause_text"] == "抗压强度不应小于30 MPa"
+
+
+def test_process_standard_ai_keeps_completed_result_when_repair_tasks_timeout(monkeypatch) -> None:
+    standard_id = UUID("44444444-4444-4444-4444-444444444444")
+    inserted_clauses: list[dict] = []
+    clauses = [{
+        "id": uuid4(),
+        "standard_id": standard_id,
+        "parent_id": None,
+        "clause_no": "1",
+        "node_type": "clause",
+        "node_key": "1",
+        "node_label": None,
+        "clause_title": None,
+        "clause_text": "抗压强度不应小于30 MP",
+        "summary": None,
+        "tags": [],
+        "page_start": 1,
+        "page_end": 1,
+        "clause_type": "normative",
+        "source_type": "text",
+        "source_label": "1 总则",
+        "source_ref": "document_section:s1",
+        "source_refs": ["document_section:s1"],
+    }]
+    validation_issue = SimpleNamespace(
+        code="text.symbol_numeric",
+        severity="warning",
+        message="suspect unit",
+        clause_id=clauses[0]["id"],
+        clause_no="1",
+        page_start=1,
+        page_end=1,
+        source_ref="document_section:s1",
+        snippet="30 MP",
+        details={},
+    )
+    validation_result = SimpleNamespace(
+        issues=[validation_issue],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 1},
+    )
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1 抗压强度不应小于30 MP",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: deepcopy(clauses))
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda current_clauses: current_clauses)
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda current_clauses, outline_clause_nos=None: validation_result)
+    monkeypatch.setattr(
+        norm_processor,
+        "build_repair_tasks",
+        lambda current_clauses, issues: [
+            SimpleNamespace(
+                task_type="symbol_numeric_repair",
+                source_ref="document_section:s1",
+                page_start=1,
+                page_end=1,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        norm_processor,
+        "run_repair_tasks",
+        lambda conn, document_id, tasks: (_ for _ in ()).throw(httpx.ReadTimeout("timed out")),
+    )
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda current_clauses: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(
+        norm_processor._std_repo,
+        "bulk_create_clauses",
+        lambda conn, current_clauses: inserted_clauses.extend(deepcopy(current_clauses)) or len(current_clauses),
+    )
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, current_clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="98989898-9898-9898-9898-989898989898",
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["repair_task_count"] == 1
+    assert summary["issues_before_repair"] == 1
+    assert summary["issues_after_repair"] == 1
+    assert summary["repair_error"] == "timed out"
+    assert "repair tasks failed: timed out" in summary["warnings"]
+    assert inserted_clauses[0]["clause_text"] == "抗压强度不应小于30 MP"
 
 
 def test_process_standard_ai_uses_configured_scope_delay(monkeypatch) -> None:
