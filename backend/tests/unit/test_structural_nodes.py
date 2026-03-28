@@ -324,7 +324,7 @@ def test_build_processing_scopes_uses_leaf_outline_boundaries_from_raw_pages() -
 
     scopes = build_processing_scopes(asset)
 
-    assert [scope.scope_type for scope in scopes] == ["normative", "normative", "normative", "normative", "commentary"]
+    assert [scope.scope_type for scope in scopes] == ["normative", "normative", "normative", "normative"]
     assert [scope.chapter_label for scope in scopes[:4]] == [
         "4.1 装卸、运输与就位",
         "4.2 交接与保管",
@@ -341,3 +341,67 @@ def test_build_processing_scopes_uses_leaf_outline_boundaries_from_raw_pages() -
     assert scopes[3].page_start == 38
     assert scopes[3].page_end == 38
     assert all("本规范用词说明" not in scope.text for scope in scopes[:4])
+
+
+def test_build_processing_scopes_starts_commentary_after_actual_provision_appendix_boundary() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("77777777-7777-7777-7777-777777777777"),
+        parser_name="mineru",
+        parser_version="v1",
+        raw_payload={},
+        pages=[
+            PageAsset(
+                page_number=38,
+                normalized_text=(
+                    "附录A 新装电力变压器及油浸电抗器不需干燥的条件\n"
+                    "A.0.1 带油运输的变压器及电抗器应符合下列规定："
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[38]",
+            ),
+            PageAsset(
+                page_number=39,
+                normalized_text=(
+                    "本规范用词说明\n"
+                    "为便于在执行本规范条文时区别对待，对要求严格程度不同的用词说明如下："
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[39]",
+            ),
+            PageAsset(
+                page_number=40,
+                normalized_text=(
+                    "引用标准名录\n"
+                    "《电气装置安装工程 电气设备交接试验标准》GB50150"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[40]",
+            ),
+            PageAsset(
+                page_number=42,
+                normalized_text=(
+                    "附：条文说明\n"
+                    "4 电力变压器、油浸电抗器\n"
+                    "4.4 排氮\n"
+                    "4.4.1 采用注油排氮时，应符合下列规定："
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[42]",
+            ),
+        ],
+        tables=[],
+        full_markdown="",
+    )
+
+    scopes = build_processing_scopes(asset)
+
+    assert [scope.scope_type for scope in scopes] == ["normative", "commentary"]
+    assert scopes[0].chapter_label == "附录A 新装电力变压器及油浸电抗器不需干燥的条件"
+    assert scopes[0].page_start == 38
+    assert scopes[0].page_end == 38
+    assert scopes[1].chapter_label == "4 电力变压器、油浸电抗器"
+    assert scopes[1].page_start == 42
+    assert scopes[1].page_end == 42
+    assert scopes[1].source_refs == ["document.raw_payload.pages[42]"]
+    assert "本规范用词说明" not in scopes[1].text
+    assert "引用标准名录" not in scopes[1].text

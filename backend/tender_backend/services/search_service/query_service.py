@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 
 import httpx
@@ -12,26 +13,99 @@ import structlog
 logger = structlog.stdlib.get_logger(__name__)
 
 OPENSEARCH_URL = os.environ.get("OPENSEARCH_URL", "http://localhost:9200")
+_QUERY_SPLIT_SUFFIXES = (
+    "安装",
+    "施工",
+    "验收",
+    "调试",
+    "设计",
+    "检查",
+    "试验",
+    "维护",
+    "保养",
+    "连接",
+)
 
 
 def _query_uses_named_analyzer(body: dict) -> bool:
-    try:
-        must_clauses = body["bool"]["must"]
-    except (KeyError, TypeError):
+    def _contains_analyzer(value: Any) -> bool:
+        if isinstance(value, dict):
+            multi_match = value.get("multi_match")
+            if isinstance(multi_match, dict) and "analyzer" in multi_match:
+                return True
+            return any(_contains_analyzer(item) for item in value.values())
+        if isinstance(value, list):
+            return any(_contains_analyzer(item) for item in value)
         return False
-    return any("analyzer" in clause.get("multi_match", {}) for clause in must_clauses if isinstance(clause, dict))
+
+    return _contains_analyzer(body)
 
 
 def _remove_named_analyzers(body: dict) -> dict:
-    must_clauses = list(body.get("bool", {}).get("must", []))
-    sanitized_must: list[dict[str, Any]] = []
-    for clause in must_clauses:
-        current = dict(clause)
-        multi_match = current.get("multi_match")
-        if isinstance(multi_match, dict) and "analyzer" in multi_match:
-            current["multi_match"] = {key: value for key, value in multi_match.items() if key != "analyzer"}
-        sanitized_must.append(current)
-    return {"bool": {"must": sanitized_must}}
+    def _strip(value: Any) -> Any:
+        if isinstance(value, dict):
+            multi_match = value.get("multi_match")
+            if isinstance(multi_match, dict) and "analyzer" in multi_match:
+                next_value = dict(value)
+                next_value["multi_match"] = {
+                    key: item for key, item in multi_match.items() if key != "analyzer"
+                }
+                return {key: _strip(item) for key, item in next_value.items()}
+            return {key: _strip(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [_strip(item) for item in value]
+        return value
+
+    return _strip(body)
+
+
+def _split_query_terms(query: str) -> list[str]:
+    trimmed = query.strip()
+    if not trimmed:
+        return []
+
+    terms: list[str] = [trimmed]
+    seen = {trimmed}
+
+    for token in re.split(r"\s+", trimmed):
+        normalized = token.strip()
+        if len(normalized) >= 2 and normalized not in seen:
+            terms.append(normalized)
+            seen.add(normalized)
+
+    compact = re.sub(r"\s+", "", trimmed)
+    if compact and compact not in seen:
+        terms.append(compact)
+        seen.add(compact)
+
+    for suffix in _QUERY_SPLIT_SUFFIXES:
+        if compact.endswith(suffix) and len(compact) > len(suffix):
+            prefix = compact[: -len(suffix)].strip()
+            for part in (prefix, suffix):
+                if len(part) >= 2 and part not in seen:
+                    terms.append(part)
+                    seen.add(part)
+
+    return terms
+
+
+def _build_clause_search_query(query: str, *, specialty: str | None = None) -> dict:
+    fields = ["standard_name^3", "clause_title^2", "clause_text", "summary"]
+    should = [
+        {
+            "multi_match": {
+                "query": term,
+                "fields": fields,
+                "analyzer": "cn_with_synonym",
+            }
+        }
+        for term in _split_query_terms(query)
+    ]
+
+    must: list[dict[str, Any]] = [{"bool": {"should": should, "minimum_should_match": 1}}]
+    if specialty:
+        must.append({"term": {"specialty": specialty}})
+    return {"bool": {"must": must}}
 
 
 def _is_missing_named_analyzer_error(exc: httpx.HTTPStatusError) -> bool:
@@ -81,19 +155,7 @@ async def search_clauses(
     top_k: int = 5,
 ) -> list[dict]:
     """Search standard clauses using BM25 with cn_with_synonym analyzer."""
-    must = [
-        {
-            "multi_match": {
-                "query": query,
-                "fields": ["clause_title^2", "clause_text", "summary"],
-                "analyzer": "cn_with_synonym",
-            }
-        }
-    ]
-    if specialty:
-        must.append({"term": {"specialty": specialty}})
-
-    body = {"bool": {"must": must}}
+    body = _build_clause_search_query(query, specialty=specialty)
     results = await _search("clause_index", body, top_k)
     logger.info("search_clauses", query=query, hits=len(results))
     return results

@@ -11,6 +11,11 @@ import type {
   StandardViewerData,
 } from "../../../lib/api";
 import { StandardClauseTree, findClauseNode, firstClauseNode } from "./StandardClauseTree";
+import {
+  buildCommentaryHeading,
+  cleanStandardClauseText,
+  getStandardClauseTitle,
+} from "./standardClausePresentation";
 
 const StandardPdfPane = lazy(async () => import("./StandardPdfPane").then((module) => ({
   default: module.StandardPdfPane,
@@ -220,6 +225,27 @@ function getRelatedTables(
   });
 }
 
+function findParentClauseNode(
+  nodes: StandardClauseNode[],
+  clauseId: string | null,
+  parent: StandardClauseNode | null = null,
+): StandardClauseNode | null {
+  if (!clauseId) return null;
+  for (const node of nodes) {
+    if (node.id === clauseId) return parent;
+    const nested = findParentClauseNode(node.children, clauseId, node);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function isPollutedCommentaryLocation(node: StandardClauseNode | null): boolean {
+  if (!node || node.clause_type !== "commentary") return false;
+  const sourceLabel = (node.source_label ?? "").trim();
+  if (!sourceLabel) return false;
+  return /^(前言|2\s*术语|本规范用词说明|引用标准名录)/u.test(sourceLabel);
+}
+
 export function StandardViewerModal({
   open,
   mode,
@@ -242,6 +268,9 @@ export function StandardViewerModal({
 
   const selectedClause = findClauseNode(viewerData.clause_tree, selectedClauseId)
     ?? firstClauseNode(viewerData.clause_tree);
+  const parentClause = selectedClause?.clause_type === "commentary"
+    ? findParentClauseNode(viewerData.clause_tree, selectedClause.id)
+    : null;
   const selectedClauseMarker = selectedClause?.node_label
     ? `${selectedClause.clause_no ?? ""} ${selectedClause.node_label}`.trim()
     : selectedClause?.clause_no ?? null;
@@ -249,16 +278,29 @@ export function StandardViewerModal({
     ? selectedClause.children.filter((child) => child.clause_type === "commentary")
     : [];
   const selectedClausePageStart = selectedClause?.page_start;
+  const parentClausePageStart = parentClause?.page_start;
+  const parentClausePageEnd = parentClause?.page_end;
+  const fallbackToParentClausePage = isPollutedCommentaryLocation(selectedClause)
+    && parentClausePageStart != null
+    && parentClausePageStart > 0;
   const fallbackCommentaryPage = commentaryClauses.find(
     (child) => child.page_start != null && child.page_start > 0,
   )?.page_start;
-  const targetPage = selectedClausePageStart != null
+  const targetPage = fallbackToParentClausePage
+    ? Math.max(parentClausePageStart ?? 1, 1)
+    : selectedClausePageStart != null
     ? Math.max(selectedClausePageStart, 1)
     : fallbackCommentaryPage ?? null;
-  const displayPageStart = selectedClausePageStart != null
+  const displayPageStart = fallbackToParentClausePage
+    ? Math.max(parentClausePageStart ?? 1, 1)
+    : selectedClausePageStart != null
     ? Math.max(selectedClausePageStart, 1)
     : fallbackCommentaryPage ?? null;
-  const displayPageEnd = selectedClause?.page_end != null
+  const displayPageEnd = fallbackToParentClausePage
+    ? (parentClausePageEnd != null
+      ? Math.max(parentClausePageEnd, displayPageStart ?? 1)
+      : displayPageStart)
+    : selectedClause?.page_end != null
     ? Math.max(selectedClause.page_end, displayPageStart ?? 1)
     : commentaryClauses.find((child) => child.page_end != null && child.page_end > 0)?.page_end
       ?? displayPageStart;
@@ -317,10 +359,10 @@ export function StandardViewerModal({
                 <>
                   <div className="standard-viewer-modal__detail-header">
                     {selectedClauseMarker && <span>{selectedClauseMarker}</span>}
-                    <strong>{selectedClause.clause_title || "条款详情"}</strong>
+                    <strong>{getStandardClauseTitle(selectedClause)}</strong>
                   </div>
                   {selectedClause.summary && (
-                    <p className="standard-viewer-modal__summary">{selectedClause.summary}</p>
+                    <p className="standard-viewer-modal__summary">{cleanStandardClauseText(selectedClause.summary)}</p>
                   )}
                   {selectedClause.source_type && selectedClause.source_type !== "text" && (
                     <div className="standard-viewer-modal__tags">
@@ -333,7 +375,7 @@ export function StandardViewerModal({
                     </div>
                   )}
                   {selectedClause.clause_text && (
-                    <p className="standard-viewer-modal__text">{selectedClause.clause_text}</p>
+                    <p className="standard-viewer-modal__text">{cleanStandardClauseText(selectedClause.clause_text)}</p>
                   )}
                   {!selectedClause.clause_text && selectedClause.clause_type === "outline" && (
                     <p className="standard-viewer-modal__text">
@@ -343,11 +385,11 @@ export function StandardViewerModal({
                   {commentaryClauses.length > 0 && (
                     <>
                       <div className="standard-viewer-modal__detail-header">
-                        <strong>条文说明</strong>
+                        <strong>{buildCommentaryHeading(commentaryClauses[0]?.clause_no ?? selectedClause.clause_no)}</strong>
                       </div>
                       {commentaryClauses.map((commentary) => (
                         <p key={commentary.id} className="standard-viewer-modal__text">
-                          {commentary.clause_text}
+                          {cleanStandardClauseText(commentary.clause_text)}
                         </p>
                       ))}
                     </>
@@ -408,9 +450,12 @@ export function StandardViewerModal({
                                     text_source: {section.text_source ?? "unknown"} · sort_order: {section.sort_order ?? "-"}
                                   </div>
                                   {section.text && (
-                                    <p className="standard-viewer-modal__asset-text">{clampText(section.text, 220)}</p>
+                                    <p className="standard-viewer-modal__asset-text">{clampText(cleanStandardClauseText(section.text), 220)}</p>
                                   )}
-                                  <pre className="standard-viewer-modal__asset-raw">{formatRawPreview(section.raw_json)}</pre>
+                                  <details className="standard-viewer-modal__document-raw">
+                                    <summary>查看原始解析数据</summary>
+                                    <pre className="standard-viewer-modal__asset-raw">{formatRawPreview(section.raw_json)}</pre>
+                                  </details>
                                 </div>
                               ))}
                             </div>
@@ -427,10 +472,13 @@ export function StandardViewerModal({
                                   </div>
                                   {table.table_html && (
                                     <p className="standard-viewer-modal__asset-text">
-                                      HTML 预览：{clampText(table.table_html.replace(/\s+/g, " "), 220)}
+                                      HTML 预览：{clampText(cleanStandardClauseText(table.table_html.replace(/\s+/g, " ")), 220)}
                                     </p>
                                   )}
-                                  <pre className="standard-viewer-modal__asset-raw">{formatRawPreview(table.raw_json)}</pre>
+                                  <details className="standard-viewer-modal__document-raw">
+                                    <summary>查看原始解析数据</summary>
+                                    <pre className="standard-viewer-modal__asset-raw">{formatRawPreview(table.raw_json)}</pre>
+                                  </details>
                                 </div>
                               ))}
                             </div>
@@ -444,7 +492,7 @@ export function StandardViewerModal({
 
                           {parseAssets?.document?.raw_payload && (
                             <details className="standard-viewer-modal__document-raw">
-                              <summary>查看文档级原始载荷摘要</summary>
+                              <summary>查看文档级原始解析数据</summary>
                               <pre className="standard-viewer-modal__asset-raw">
                                 {formatRawPreview(parseAssets.document.raw_payload)}
                               </pre>

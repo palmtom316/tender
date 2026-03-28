@@ -71,7 +71,7 @@ const parseAssets: StandardParseAssets = {
       sort_order: 1,
       page_start: 10,
       page_end: 10,
-      raw_json: { type: "section", title: "钢筋保护层" },
+      raw_json: { type: "section", title: "钢筋保护层", debug_token: "section-noise-raw" },
     },
     {
       id: "section-hit",
@@ -83,7 +83,7 @@ const parseAssets: StandardParseAssets = {
       sort_order: 2,
       page_start: 10,
       page_end: 10,
-      raw_json: { type: "section", title: "混凝土强度等级" },
+      raw_json: { type: "section", title: "混凝土强度等级", debug_token: "section-hit-raw" },
     },
   ],
   tables: [
@@ -95,7 +95,7 @@ const parseAssets: StandardParseAssets = {
       page_end: 10,
       table_title: "钢筋保护层厚度",
       table_html: "<table><tr><td>25</td></tr></table>",
-      raw_json: { cells: [["25"]] },
+      raw_json: { cells: [["25"]], debug_token: "table-noise-raw" },
     },
     {
       id: "table-hit",
@@ -105,7 +105,7 @@ const parseAssets: StandardParseAssets = {
       page_end: 10,
       table_title: "混凝土强度等级",
       table_html: "<table><tr><td>C30</td></tr></table>",
-      raw_json: { cells: [["C30"]] },
+      raw_json: { cells: [["C30"]], debug_token: "table-hit-raw" },
     },
   ],
 };
@@ -134,5 +134,56 @@ describe("StandardViewerModal diagnostics", () => {
     expect(screen.getByText("text_source: mineru_markdown · sort_order: 2")).toBeInTheDocument();
     expect(screen.getByText(/HTML 预览：.*C30/)).toBeInTheDocument();
     expect(screen.queryByText("钢筋保护层厚度")).not.toBeInTheDocument();
+    expect(screen.getAllByText("查看原始解析数据")).toHaveLength(2);
+    expect(screen.getByText(/section-hit-raw/)).not.toBeVisible();
+    expect(screen.getByText(/table-hit-raw/)).not.toBeVisible();
+  });
+
+  it("falls back to the parent clause page when a commentary node carries polluted appendix metadata", async () => {
+    const commentaryViewerData: StandardViewerData = {
+      ...viewerData,
+      clause_tree: [
+        {
+          ...viewerData.clause_tree[0],
+          children: [
+            {
+              id: "commentary-1",
+              clause_no: "4.2.3",
+              node_type: "commentary",
+              node_key: "4.2.3#commentary",
+              node_label: null,
+              clause_title: null,
+              clause_text: "条文说明正文",
+              summary: "说明摘要",
+              tags: ["说明"],
+              clause_type: "commentary",
+              source_type: "text",
+              source_label: "2 术语 (1/5)",
+              page_start: 39,
+              page_end: 63,
+              sort_order: 99,
+              parent_id: null,
+              children: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <StandardViewerModal
+        open
+        mode="browse"
+        viewerData={commentaryViewerData}
+        parseAssets={parseAssets}
+        parseAssetsLoading={false}
+        parseAssetsError=""
+        initialClauseId="commentary-1"
+        onClose={() => undefined}
+      />,
+    );
+
+    const pdfPanes = await screen.findAllByTestId("pdf-pane");
+    expect(pdfPanes[pdfPanes.length - 1]).toHaveTextContent("PDF page 10");
   });
 });

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "../../../components/ui/Badge";
 import { Icon } from "../../../components/ui/Icon";
 import type { StandardClauseNode } from "../../../lib/api";
+import { getStandardClauseMarker, getStandardClauseTitle } from "./standardClausePresentation";
 
 type StandardClauseTreeProps = {
   nodes: StandardClauseNode[];
@@ -29,23 +30,16 @@ function findNode(nodes: StandardClauseNode[], targetId: string | null): Standar
   return null;
 }
 
-function displayClauseMarker(node: StandardClauseNode): string | null {
-  if (node.node_label) return node.node_label;
-  return node.clause_no;
-}
-
-function displayNodeTitle(node: StandardClauseNode): string {
-  return node.clause_title || node.clause_text || "未命名条款";
-}
-
 function ClauseTreeItem({
   node,
   depth,
+  parentClauseNo,
   selectedClauseId,
   onSelectClause,
 }: {
   node: StandardClauseNode;
   depth: number;
+  parentClauseNo: string | null;
   selectedClauseId: string | null;
   onSelectClause: (node: StandardClauseNode) => void;
 }) {
@@ -77,9 +71,11 @@ function ClauseTreeItem({
           {hasChildren ? <Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} /> : null}
         </span>
         <span className="standard-clause-tree__meta">
-          {displayClauseMarker(node) && <span className="standard-clause-tree__no">{displayClauseMarker(node)}</span>}
+          {getStandardClauseMarker(node, parentClauseNo) && (
+            <span className="standard-clause-tree__no">{getStandardClauseMarker(node, parentClauseNo)}</span>
+          )}
           <span className="standard-clause-tree__title">
-            {displayNodeTitle(node)}
+            {getStandardClauseTitle(node)}
           </span>
         </span>
         {node.clause_type === "outline" && (
@@ -100,6 +96,7 @@ function ClauseTreeItem({
               key={child.id}
               node={child}
               depth={depth + 1}
+              parentClauseNo={node.clause_no}
               selectedClauseId={selectedClauseId}
               onSelectClause={onSelectClause}
             />
@@ -142,6 +139,7 @@ export function StandardClauseTree({
           key={node.id}
           node={node}
           depth={0}
+          parentClauseNo={null}
           selectedClauseId={selectedClauseId}
           onSelectClause={onSelectClause}
         />

@@ -13,17 +13,20 @@ export function StandardSearchCard({ onOpenHit }: StandardSearchCardProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState<StandardSearchHit[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
 
   const handleSearch = async () => {
     const trimmed = query.trim();
     if (!trimmed) {
       setResults([]);
       setError("请输入关键词");
+      setHasSearched(false);
       return;
     }
 
     setLoading(true);
     setError("");
+    setHasSearched(true);
     try {
       setResults(await searchStandardClauses(trimmed));
     } catch (err: unknown) {
@@ -63,7 +66,9 @@ export function StandardSearchCard({ onOpenHit }: StandardSearchCardProps) {
       {error && <div className="warning-banner">{error}</div>}
 
       {results.length === 0 ? (
-        <div className="empty-state">输入关键词后，可在这里查看命中的规范条款。</div>
+        <div className="empty-state">
+          {hasSearched ? "未找到匹配的规范条款，请尝试更换关键词。" : "输入关键词后，可在这里查看命中的规范条款。"}
+        </div>
       ) : (
         <div className="standard-search-card__results">
           <table className="data-table">

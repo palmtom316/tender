@@ -107,18 +107,18 @@ def _build_upload_items(files: list[UploadFile], items: list[dict]) -> list[tupl
 
 def _serialize_search_hit(hit: dict, *, fallback: dict | None = None) -> dict:
     source = fallback or {}
-    standard_id = hit.get("standard_id") or source.get("standard_id")
+    standard_id = source.get("standard_id") or hit.get("standard_id")
     clause_id = hit.get("clause_id") or source.get("id")
     return {
         "standard_id": str(standard_id) if standard_id else None,
-        "standard_name": hit.get("standard_name") or source.get("standard_name"),
-        "specialty": hit.get("specialty", source.get("specialty")),
+        "standard_name": source.get("standard_name") or hit.get("standard_name"),
+        "specialty": source.get("specialty") if source.get("specialty") is not None else hit.get("specialty"),
         "clause_id": str(clause_id) if clause_id else None,
         "clause_no": hit.get("clause_no") or source.get("clause_no"),
         "tags": hit.get("tags") if hit.get("tags") is not None else (source.get("tags") or []),
         "summary": hit.get("summary") if hit.get("summary") is not None else source.get("summary"),
-        "page_start": hit.get("page_start") if hit.get("page_start") is not None else source.get("page_start"),
-        "page_end": hit.get("page_end") if hit.get("page_end") is not None else source.get("page_end"),
+        "page_start": source.get("page_start") if source.get("page_start") is not None else hit.get("page_start"),
+        "page_end": source.get("page_end") if source.get("page_end") is not None else hit.get("page_end"),
     }
 
 
@@ -168,6 +168,66 @@ def _search_hit_is_usable(hit: dict) -> bool:
 async def delete_standard_clauses_from_index(*, standard_id: str) -> None:
     manager = IndexManager()
     await manager.delete_documents_by_term("clause_index", "standard_id", standard_id)
+
+
+async def delete_stale_clause_hits_from_index(clause_ids: list[str]) -> None:
+    if not clause_ids:
+        return
+    manager = IndexManager()
+    await asyncio.gather(*[
+        manager.delete_documents_by_term("clause_index", "clause_id", clause_id)
+        for clause_id in clause_ids
+    ])
+
+
+def _standard_exists(conn: Connection, standard_id: str | None) -> bool:
+    if not standard_id:
+        return False
+    try:
+        parsed_id = UUID(str(standard_id))
+    except ValueError:
+        return False
+    return _repo.get_standard(conn, parsed_id) is not None
+
+
+def _build_search_payload(
+    *,
+    conn: Connection,
+    hits: list[dict],
+) -> tuple[list[dict], list[str], list[str]]:
+    payload: list[dict] = []
+    fallback_clause_ids: list[UUID] = []
+    stale_clause_ids: set[str] = set()
+    stale_standard_ids: set[str] = set()
+
+    for hit in hits:
+        if not hit.get("clause_id"):
+            continue
+        try:
+            fallback_clause_ids.append(UUID(str(hit["clause_id"])))
+        except ValueError:
+            continue
+
+    fallback_by_id = _repo.get_clauses_by_ids(conn, fallback_clause_ids)
+
+    for hit in hits:
+        fallback = None
+        clause_id = hit.get("clause_id")
+        if clause_id is not None:
+            fallback = fallback_by_id.get(str(clause_id))
+            if fallback is None:
+                if _standard_exists(conn, hit.get("standard_id")):
+                    stale_clause_ids.add(str(clause_id))
+                elif hit.get("standard_id"):
+                    stale_standard_ids.add(str(hit["standard_id"]))
+                else:
+                    stale_clause_ids.add(str(clause_id))
+                continue
+        serialized = _serialize_search_hit(hit, fallback=fallback)
+        if _search_hit_is_usable(serialized):
+            payload.append(serialized)
+
+    return payload, sorted(stale_clause_ids), sorted(stale_standard_ids)
 
 
 @router.post("/standards/upload")
@@ -242,32 +302,23 @@ async def search_standards(
     conn: Connection = Depends(get_db_conn),
 ) -> list[dict]:
     """Search indexed standard clauses and backfill viewer fields from PostgreSQL when needed."""
-    hits = await search_standard_clauses(q, specialty=specialty, top_k=top_k)
-    payload: list[dict] = []
-    fallback_clause_ids: list[UUID] = []
+    for attempt in range(2):
+        hits = await search_standard_clauses(q, specialty=specialty, top_k=top_k)
+        payload, stale_clause_ids, stale_standard_ids = _build_search_payload(conn=conn, hits=hits)
+        if not stale_clause_ids and not stale_standard_ids:
+            return payload
 
-    for hit in hits:
-        needs_fallback = any(
-            hit.get(key) is None for key in ("standard_id", "standard_name", "page_start", "page_end")
+        await asyncio.gather(
+            delete_stale_clause_hits_from_index(stale_clause_ids),
+            *[
+                delete_standard_clauses_from_index(standard_id=standard_id)
+                for standard_id in stale_standard_ids
+            ],
         )
-        if needs_fallback and hit.get("clause_id"):
-            try:
-                fallback_clause_ids.append(UUID(str(hit["clause_id"])))
-            except ValueError:
-                continue
+        if attempt == 1 or not stale_standard_ids:
+            return payload
 
-    fallback_by_id = _repo.get_clauses_by_ids(conn, fallback_clause_ids)
-
-    for hit in hits:
-        fallback = None
-        clause_id = hit.get("clause_id")
-        if clause_id is not None:
-            fallback = fallback_by_id.get(str(clause_id))
-        serialized = _serialize_search_hit(hit, fallback=fallback)
-        if _search_hit_is_usable(serialized):
-            payload.append(serialized)
-
-    return payload
+    return []
 
 
 @router.get("/standards")
