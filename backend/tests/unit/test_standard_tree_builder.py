@@ -57,7 +57,7 @@ def test_build_tree_flattens_nested_clause_items_and_subitems() -> None:
     assert subitem_node["parent_id"] == item_node["id"]
 
 
-def test_build_tree_keeps_legacy_flat_clause_number_parenting() -> None:
+def test_build_tree_reattaches_flat_clause_to_nearest_existing_ancestor() -> None:
     standard_id = uuid4()
 
     clauses = build_tree(
@@ -80,7 +80,7 @@ def test_build_tree_keeps_legacy_flat_clause_number_parenting() -> None:
     assert clauses[0]["node_key"] == "3"
     assert clauses[1]["node_type"] == "clause"
     assert clauses[1]["node_key"] == "3.2.1"
-    assert clauses[1]["parent_id"] is None
+    assert clauses[1]["parent_id"] == clauses[0]["id"]
 
 
 def test_build_tree_preserves_clause_source_metadata() -> None:
@@ -200,6 +200,85 @@ def test_build_tree_keeps_clause_hierarchy_when_entries_mix_nested_items_and_fla
     assert item["parent_id"] == section_1["id"]
 
 
+def test_build_tree_infers_parent_for_flat_entries_even_when_mixed_with_nested_entries() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "5.1",
+                "clause_title": "一般规定",
+                "clause_text": "",
+            },
+            {
+                "clause_no": "5.1.1",
+                "clause_text": "互感器在运输、保管期间应防止受潮。",
+            },
+            {
+                "clause_no": "5.1.3",
+                "clause_text": "互感器到达现场后安装前的保管，应作下列外观检查：",
+                "children": [
+                    {
+                        "node_type": "item",
+                        "node_label": "1",
+                        "clause_text": "互感器外观应完整。",
+                    }
+                ],
+            },
+        ],
+        standard_id,
+    )
+
+    clause_5_1 = next(clause for clause in clauses if clause["node_key"] == "5.1")
+    clause_5_1_1 = next(clause for clause in clauses if clause["node_key"] == "5.1.1")
+    clause_5_1_3 = next(clause for clause in clauses if clause["node_key"] == "5.1.3")
+
+    assert clause_5_1["parent_id"] is None
+    assert clause_5_1_1["parent_id"] == clause_5_1["id"]
+    assert clause_5_1_3["parent_id"] == clause_5_1["id"]
+
+
+def test_build_tree_deduplicates_flat_and_nested_clause_entries_with_same_clause_no() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "4.10",
+                "clause_title": "热油循环",
+                "clause_text": "",
+                "children": [
+                    {
+                        "clause_no": "4.10.1",
+                        "clause_text": "330kV及以上变压器、电抗器真空注油后应进行热油循环。",
+                        "children": [
+                            {
+                                "node_type": "item",
+                                "node_label": "1",
+                                "clause_text": "热油循环前，应对油管抽真空。",
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "clause_no": "4.10.1",
+                "clause_text": "330kV及以上变压器、电抗器真空注油后应进行热油循环。",
+            },
+        ],
+        standard_id,
+    )
+
+    clause_4_10 = next(clause for clause in clauses if clause["node_key"] == "4.10")
+    clause_4_10_1 = [clause for clause in clauses if clause["clause_no"] == "4.10.1" and clause["node_type"] == "clause"]
+    item = next(clause for clause in clauses if clause["node_type"] == "item")
+
+    assert len(clause_4_10_1) == 1
+    assert clause_4_10_1[0]["node_key"] == "4.10.1"
+    assert clause_4_10_1[0]["parent_id"] == clause_4_10["id"]
+    assert item["parent_id"] == clause_4_10_1[0]["id"]
+
+
 def test_build_tree_promotes_term_items_that_embed_real_clause_numbers() -> None:
     standard_id = uuid4()
 
@@ -239,6 +318,39 @@ def test_build_tree_promotes_term_items_that_embed_real_clause_numbers() -> None
     assert term_1["clause_text"].startswith("具有两个或多个绕组")
     assert term_2["node_type"] == "clause"
     assert term_2["parent_id"] == chapter["id"]
+
+
+def test_build_tree_reattaches_clause_to_nearest_existing_ancestor_when_intermediate_outline_missing() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "5",
+                "clause_text": "互感器",
+            },
+            {
+                "clause_no": "5.3.6",
+                "clause_text": "互感器的下列各部位应可靠接地：",
+                "children": [
+                    {
+                        "node_type": "item",
+                        "node_label": "1",
+                        "clause_text": "互感器的外壳。",
+                    }
+                ],
+            },
+        ],
+        standard_id,
+    )
+
+    clause_5 = next(clause for clause in clauses if clause["node_key"] == "5")
+    clause_5_3_6 = next(clause for clause in clauses if clause["node_key"] == "5.3.6")
+    item = next(clause for clause in clauses if clause["node_key"] == "5.3.6#1")
+
+    assert clause_5["parent_id"] is None
+    assert clause_5_3_6["parent_id"] == clause_5["id"]
+    assert item["parent_id"] == clause_5_3_6["id"]
 
 
 def test_build_tree_promotes_numbered_items_when_text_embeds_child_clause_number() -> None:

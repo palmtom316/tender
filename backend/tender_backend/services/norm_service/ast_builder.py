@@ -14,6 +14,9 @@ logger = structlog.stdlib.get_logger(__name__)
 _CLAUSE_NO_STRIP = re.compile(r"^[第]?\s*|[条款]$")
 _CLAUSE_NO_NORMALIZE = re.compile(r"^(\d+(?:[.\-]\d+)*)")
 _EMBEDDED_CLAUSE_LEAD = re.compile(r"^(?P<clause_no>\d+(?:\.\d+)+)\s+(?P<body>\S.*)$", re.S)
+_ALLOWED_CLAUSE_TYPES = {"normative", "commentary"}
+_ALLOWED_SOURCE_TYPES = {"text", "table"}
+_ALLOWED_NODE_TYPES = {"clause", "commentary", "item", "subitem"}
 
 
 def normalize_clause_no(raw: str | None) -> str:
@@ -31,19 +34,19 @@ def _parent_no(clause_no: str) -> str:
     return ".".join(parts[:-1]) if len(parts) > 1 else ""
 
 
-def _candidate_parent_nos(clause_no: str) -> list[str]:
-    candidates: list[str] = []
-    direct_parent = _parent_no(clause_no)
-    if direct_parent:
-        candidates.append(direct_parent)
-
-    parts = clause_no.split(".")
-    if len(parts) >= 3 and parts[1] == "0":
-        chapter_parent = parts[0]
-        if chapter_parent not in candidates:
-            candidates.append(chapter_parent)
-
-    return candidates
+def _nearest_parent_id(
+    clause_no: str,
+    *,
+    clause_type: str,
+    clause_id_map: dict[str, UUID],
+) -> UUID | None:
+    parent_no = _parent_no(clause_no)
+    while parent_no:
+        parent_id = clause_id_map.get(f"{clause_type}:{parent_no}")
+        if parent_id is not None:
+            return parent_id
+        parent_no = _parent_no(parent_no)
+    return None
 
 
 def deduplicate_entries(entries: list[dict]) -> list[dict]:
@@ -51,8 +54,10 @@ def deduplicate_entries(entries: list[dict]) -> list[dict]:
     seen: set[str] = set()
     result: list[dict] = []
     for entry in entries:
-        ctype = entry.get("clause_type", "normative")
-        node_type = entry.get("node_type") or ("commentary" if ctype == "commentary" else "clause")
+        ctype = _normalize_clause_type(entry.get("clause_type", "normative"))
+        node_type = str(entry.get("node_type") or "").strip()
+        if node_type not in _ALLOWED_NODE_TYPES:
+            node_type = "commentary" if ctype == "commentary" else "clause"
         node_key = entry.get("node_key")
         if not node_key:
             cno = entry.get("clause_no", "")
@@ -83,9 +88,24 @@ def _normalize_node_label(raw: str | None) -> str | None:
     return label.replace("）", ")")
 
 
+def _normalize_clause_type(raw: object) -> str:
+    value = str(raw or "").strip()
+    if value in _ALLOWED_CLAUSE_TYPES:
+        return value
+    return "normative"
+
+
+def _normalize_source_type(raw: object) -> str:
+    value = str(raw or "").strip()
+    if value in _ALLOWED_SOURCE_TYPES:
+        return value
+    return "text"
+
+
 def _default_node_type(entry: dict, *, clause_type: str) -> str:
-    if entry.get("node_type"):
-        return str(entry["node_type"]).strip()
+    raw_value = str(entry.get("node_type") or "").strip()
+    if raw_value in _ALLOWED_NODE_TYPES:
+        return raw_value
     if clause_type == "commentary":
         return "commentary"
     return "clause"
@@ -126,6 +146,8 @@ def _build_node_key(
     parent_key: str | None,
     sibling_index: int,
 ) -> str:
+    if node_type == "clause" and clause_no:
+        return clause_no
     if parent_key and node_label:
         return f"{parent_key}#{node_label}"
     if parent_key:
@@ -184,13 +206,16 @@ def _build_nested_ast(
     parent_id: UUID | None = None,
     parent_key: str | None = None,
     inherited_clause_no: str | None = None,
+    clause_id_map: dict[str, UUID] | None = None,
+    seen_node_keys: set[str] | None = None,
 ) -> list[ClauseASTNode]:
     nodes: list[ClauseASTNode] = []
-    seen_node_keys: set[str] = set()
+    clause_id_map = clause_id_map if clause_id_map is not None else {}
+    seen_node_keys = seen_node_keys if seen_node_keys is not None else set()
 
     for sibling_index, entry in enumerate(entries):
         current_entry = _promote_embedded_clause_child(entry, inherited_clause_no=inherited_clause_no)
-        clause_type = str(entry.get("clause_type", "normative")).strip() or "normative"
+        clause_type = _normalize_clause_type(entry.get("clause_type", "normative"))
         node_type = _default_node_type(current_entry, clause_type=clause_type)
         raw_clause_no = current_entry.get("clause_no")
         clause_no = normalize_clause_no(raw_clause_no) if raw_clause_no else (inherited_clause_no or "")
@@ -210,11 +235,18 @@ def _build_nested_ast(
         if dedupe_key:
             seen_node_keys.add(dedupe_key)
         node_id = uuid4()
+        resolved_parent_id = parent_id
+        if resolved_parent_id is None and node_type == "clause" and clause_no:
+            resolved_parent_id = _nearest_parent_id(
+                clause_no,
+                clause_type=clause_type,
+                clause_id_map=clause_id_map,
+            )
 
         node = ClauseASTNode(
             id=node_id,
             standard_id=standard_id,
-            parent_id=parent_id,
+            parent_id=resolved_parent_id,
             clause_no=clause_no or None,
             node_type=node_type,
             node_key=node_key,
@@ -226,11 +258,13 @@ def _build_nested_ast(
             page_start=current_entry.get("page_start"),
             page_end=current_entry.get("page_end"),
             clause_type=clause_type,
-            source_type=current_entry.get("source_type", "text"),
+            source_type=_normalize_source_type(current_entry.get("source_type", "text")),
             source_label=current_entry.get("source_label"),
             source_ref=current_entry.get("source_ref"),
             source_refs=_normalize_source_refs(current_entry.get("source_refs")),
         )
+        if node_type == "clause" and clause_no:
+            clause_id_map[f"{clause_type}:{clause_no}"] = node_id
 
         children = current_entry.get("children")
         if isinstance(children, list) and children:
@@ -240,6 +274,8 @@ def _build_nested_ast(
                 parent_id=node_id,
                 parent_key=node_key,
                 inherited_clause_no=clause_no or inherited_clause_no,
+                clause_id_map=clause_id_map,
+                seen_node_keys=seen_node_keys,
             )
 
         nodes.append(node)
@@ -259,7 +295,7 @@ def _build_flat_ast(entries: list[dict], *, standard_id: UUID) -> list[ClauseAST
     prepared: list[tuple[dict, UUID, str, str, str | None, str]] = []
 
     for sibling_index, entry in enumerate(deduped):
-        clause_type = str(entry.get("clause_type", "normative")).strip() or "normative"
+        clause_type = _normalize_clause_type(entry.get("clause_type", "normative"))
         node_type = _default_node_type(entry, clause_type=clause_type)
         clause_no = entry.get("clause_no") or ""
         node_label = _normalize_node_label(entry.get("node_label"))
@@ -283,10 +319,11 @@ def _build_flat_ast(entries: list[dict], *, standard_id: UUID) -> list[ClauseAST
         clause_no = entry.get("clause_no") or ""
         parent_id = None
         if node_type == "clause" and clause_no:
-            for parent_no in _candidate_parent_nos(clause_no):
-                parent_id = clause_id_map.get(f"{clause_type}:{parent_no}")
-                if parent_id:
-                    break
+            parent_id = _nearest_parent_id(
+                clause_no,
+                clause_type=clause_type,
+                clause_id_map=clause_id_map,
+            )
 
         node = ClauseASTNode(
             id=node_id,
@@ -303,7 +340,7 @@ def _build_flat_ast(entries: list[dict], *, standard_id: UUID) -> list[ClauseAST
             page_start=entry.get("page_start"),
             page_end=entry.get("page_end"),
             clause_type=clause_type,
-            source_type=entry.get("source_type", "text"),
+            source_type=_normalize_source_type(entry.get("source_type", "text")),
             source_label=entry.get("source_label"),
             source_ref=entry.get("source_ref"),
             source_refs=_normalize_source_refs(entry.get("source_refs")),
@@ -334,6 +371,7 @@ def _iter_ast_nodes(nodes: list[ClauseASTNode]) -> list[ClauseASTNode]:
 
 def _attach_clause_hierarchy(roots: list[ClauseASTNode]) -> list[ClauseASTNode]:
     all_nodes = _iter_ast_nodes(roots)
+    node_by_id = {node.id: node for node in all_nodes}
     clause_by_key = {
         f"{node.clause_type}:{node.clause_no}": node
         for node in all_nodes
@@ -342,15 +380,24 @@ def _attach_clause_hierarchy(roots: list[ClauseASTNode]) -> list[ClauseASTNode]:
     root_ids = {node.id for node in roots}
 
     for node in all_nodes:
-        if node.node_type != "clause" or not node.clause_no or node.parent_id is not None:
+        if node.node_type != "clause" or not node.clause_no:
             continue
-        for parent_no in _candidate_parent_nos(node.clause_no):
-            parent = clause_by_key.get(f"{node.clause_type}:{parent_no}")
-            if parent is None:
+
+        parent_id = node.parent_id
+        if parent_id is None:
+            parent_id = _nearest_parent_id(
+                node.clause_no,
+                clause_type=node.clause_type,
+                clause_id_map={key: value.id for key, value in clause_by_key.items()},
+            )
+        if parent_id is not None:
+            parent = node_by_id.get(parent_id)
+            if parent is None or parent.id == node.id:
                 continue
-            node.parent_id = parent.id
+            node.parent_id = parent_id
+            if any(child.id == node.id for child in parent.children):
+                continue
             parent.children.append(node)
-            break
 
     return [node for node in roots if node.id in root_ids and node.parent_id is None]
 
