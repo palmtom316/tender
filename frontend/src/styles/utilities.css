@@ -453,7 +453,7 @@
 
 .standard-viewer-modal__aside {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 0.95fr) minmax(0, 1.05fr);
 }
 
 .standard-viewer-modal__tree {

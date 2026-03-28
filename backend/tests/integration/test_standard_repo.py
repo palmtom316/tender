@@ -807,3 +807,147 @@ def test_get_viewer_tree_prefers_rebuilt_outline_from_page_text_when_sections_ar
 
     assert section["clause_title"] == "本体及附件安装"
     assert section["children"][0]["id"] == str(clause_id)
+
+
+def test_get_viewer_tree_omits_unlinked_commentary_roots(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    standard_id, document_id = _create_standard(conn, code="GB COMMENTARY")
+    chapter_id = uuid4()
+    commentary_id = uuid4()
+
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, sort_order)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            uuid4(), document_id, "1", "总则", 1, 10, 10, None, 0,
+            uuid4(), document_id, "1.1", "一般规定", 2, 10, 10, None, 1,
+        ),
+    )
+    conn.commit()
+
+    repo.bulk_create_clauses(conn, [
+        {
+            "id": chapter_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "1.1",
+            "clause_title": "一般规定",
+            "clause_text": "应满足一般要求。",
+            "summary": None,
+            "tags": [],
+            "page_start": 10,
+            "page_end": 10,
+            "sort_order": 0,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "1.1",
+            "node_label": None,
+            "source_type": "text",
+            "source_label": "1.1 一般规定",
+        },
+        {
+            "id": commentary_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "1",
+            "clause_title": "本规范用词说明",
+            "clause_text": "本规范的用词说明如下。",
+            "summary": None,
+            "tags": [],
+            "page_start": 40,
+            "page_end": 40,
+            "sort_order": 1,
+            "clause_type": "commentary",
+            "commentary_clause_id": None,
+            "node_type": "commentary",
+            "node_key": "1#commentary",
+            "node_label": None,
+            "source_type": "text",
+            "source_label": "前言",
+        },
+    ])
+
+    tree = repo.get_viewer_tree(conn, standard_id)
+
+    assert [node["clause_no"] for node in tree] == ["1"]
+    assert all(node["id"] != str(commentary_id) for node in tree)
+
+
+def test_get_viewer_tree_omits_detached_table_fragment_roots(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    standard_id, document_id = _create_standard(conn, code="GB TABLE")
+    chapter_id = uuid4()
+    table_fragment_id = uuid4()
+
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, sort_order)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            uuid4(), document_id, "4", "电力变压器、油浸电抗器", 1, 15, 15, None, 0,
+            uuid4(), document_id, "4.2", "交接与保管", 2, 17, 17, None, 1,
+        ),
+    )
+    conn.commit()
+
+    repo.bulk_create_clauses(conn, [
+        {
+            "id": chapter_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "4.2",
+            "clause_title": "交接与保管",
+            "clause_text": "设备到达现场后应及时检查。",
+            "summary": None,
+            "tags": [],
+            "page_start": 17,
+            "page_end": 17,
+            "sort_order": 0,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "4.2",
+            "node_label": None,
+            "source_type": "text",
+            "source_label": "4.2 交接与保管",
+        },
+        {
+            "id": table_fragment_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": None,
+            "clause_title": "变压器内油样性能-电气强度",
+            "clause_text": "表格要求片段",
+            "summary": None,
+            "tags": [],
+            "page_start": 18,
+            "page_end": 18,
+            "sort_order": 1,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "table:frag-1",
+            "node_label": None,
+            "source_type": "table",
+            "source_label": "表 4.2.4",
+        },
+    ])
+
+    tree = repo.get_viewer_tree(conn, standard_id)
+
+    assert [node["clause_no"] for node in tree] == ["4"]
+    assert all(node["id"] != str(table_fragment_id) for node in tree)

@@ -717,6 +717,49 @@ def test_standard_search_batches_db_fallback_for_multiple_hits(
     assert payload[1]["clause_no"] == "3.2.2"
 
 
+def test_standard_search_drops_stale_index_hits_without_live_db_clause(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+
+    import tender_backend.api.standards as standards_api
+
+    stale_clause_id = str(uuid4())
+
+    async def fake_search_clauses(query: str, *, specialty: str | None = None, top_k: int = 5) -> list[dict]:
+        assert query == "变压器"
+        return [
+            {
+                "standard_id": str(uuid4()),
+                "standard_name": "已删除的旧规范",
+                "clause_id": stale_clause_id,
+                "clause_no": "9.9.9",
+                "summary": "陈旧索引命中",
+                "page_start": 99,
+                "page_end": 99,
+                "tags": ["脏数据"],
+            },
+            {
+                "clause_id": seeded["child_clause_id"],
+                "summary": "有效命中",
+            },
+        ]
+
+    monkeypatch.setattr(standards_api, "search_standard_clauses", fake_search_clauses, raising=False)
+
+    response = client.get("/api/standards/search", params={"q": "变压器"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["clause_id"] == seeded["child_clause_id"]
+    assert payload[0]["standard_id"] == seeded["standard_id"]
+
+
 def test_delete_standard_removes_completed_standard(client: TestClient, tmp_path: Path) -> None:
     db_url = _db_url()
     assert db_url is not None

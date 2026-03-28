@@ -270,6 +270,25 @@ def _find_outline_host(outline_by_code: dict[str, dict], clause_no: str | None) 
     return _find_outline_parent_by_code(outline_by_code, clause_no)
 
 
+def _should_include_detached_root(node: dict) -> bool:
+    clause_type = node.get("clause_type") or "normative"
+    clause_no = node.get("clause_no")
+    node_type = node.get("node_type") or "clause"
+    source_type = node.get("source_type") or "text"
+
+    # Commentary should render under a matched normative clause or outline host,
+    # not as a standalone top-level viewer root.
+    if clause_type == "commentary":
+        return False
+
+    # Table-derived fragments without a stable clause number are provenance data,
+    # not navigable viewer roots.
+    if node_type == "clause" and not clause_no and source_type == "table":
+        return False
+
+    return True
+
+
 def _merge_clause_into_outline_node(target: dict, clause: dict) -> None:
     target["id"] = str(clause["id"])
     target["summary"] = clause.get("summary")
@@ -559,7 +578,8 @@ class StandardRepository:
                 outline_host["children"].append(node)
                 continue
 
-            detached_roots.append(node)
+            if _should_include_detached_root(node):
+                detached_roots.append(node)
 
         return [*_prune_outline_noise(outline_roots), *detached_roots]
 
