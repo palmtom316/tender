@@ -11,6 +11,8 @@ import os
 import random
 import re
 import time
+from html import unescape
+from html.parser import HTMLParser
 from dataclasses import replace
 from io import BytesIO
 from uuid import UUID
@@ -631,7 +633,7 @@ def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
             page_number = normalized_pages[page_index]["page_number"]
             page_payload = normalized_pages[page_index]["raw_page"]
 
-        sections.append({
+        sections.append(_coerce_inline_clause_text({
             "section_code": code,
             "title": title,
             "level": level,
@@ -641,7 +643,7 @@ def _mineru_to_sections(content: str, pages: list[dict]) -> list[dict]:
             "text_source": "mineru_markdown",
             "sort_order": i,
             "raw_json": page_payload,
-        })
+        }))
 
     return sections
 
@@ -779,17 +781,417 @@ def _build_block_processing_scopes(blocks: list[BlockSegment]) -> list[Processin
     return scopes
 
 
+def _serialize_asset_tables_for_block_path(document_asset) -> list[dict]:
+    serialized: list[dict] = []
+    for table in document_asset.tables:
+        table_id: str | None = None
+        if table.source_ref.startswith("table:"):
+            table_id = table.source_ref.split(":", 1)[1]
+        serialized.append({
+            "id": table_id,
+            "page_start": table.page_start,
+            "page_end": table.page_end,
+            "table_title": table.table_title,
+            "table_html": table.table_html,
+            "raw_json": table.raw_json,
+        })
+    return serialized
+
+
+def _resolved_block_clause_no(block: BlockSegment) -> str | None:
+    candidates = [
+        block.clause_no,
+        block.chapter_label,
+    ]
+    if block.text:
+        candidates.append(block.text.splitlines()[0])
+
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text:
+            continue
+        match = _BLOCK_CLAUSE_NO_RE.match(text)
+        if match:
+            return match.group(1)
+    return None
+
+
+class _TableHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[dict[str, object]]] = []
+        self._current_row: list[dict[str, object]] | None = None
+        self._current_cell: dict[str, object] | None = None
+        self._text_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._current_row = []
+            return
+        if tag in {"td", "th"} and self._current_row is not None:
+            attr_map = dict(attrs)
+            self._current_cell = {
+                "rowspan": int(attr_map.get("rowspan") or 1),
+                "colspan": int(attr_map.get("colspan") or 1),
+            }
+            self._text_parts = []
+            return
+        if tag == "br" and self._current_cell is not None:
+            self._text_parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"td", "th"} and self._current_cell is not None and self._current_row is not None:
+            text = " ".join(unescape("".join(self._text_parts)).split())
+            self._current_cell["text"] = text
+            self._current_row.append(self._current_cell)
+            self._current_cell = None
+            self._text_parts = []
+            return
+        if tag == "tr" and self._current_row is not None:
+            if self._current_row:
+                self.rows.append(self._current_row)
+            self._current_row = None
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._text_parts.append(data)
+
+
+def _expand_table_rows(table_html: str) -> list[list[str]]:
+    parser = _TableHTMLParser()
+    parser.feed(table_html)
+
+    expanded_rows: list[list[str]] = []
+    pending: dict[int, tuple[int, str]] = {}
+
+    for row in parser.rows:
+        expanded: list[str] = []
+        col_index = 0
+
+        def _consume_pending() -> None:
+            nonlocal col_index
+            while col_index in pending:
+                remaining, text = pending[col_index]
+                expanded.append(text)
+                if remaining <= 1:
+                    del pending[col_index]
+                else:
+                    pending[col_index] = (remaining - 1, text)
+                col_index += 1
+
+        _consume_pending()
+        for cell in row:
+            _consume_pending()
+            text = str(cell.get("text") or "").strip()
+            rowspan = max(1, int(cell.get("rowspan") or 1))
+            colspan = max(1, int(cell.get("colspan") or 1))
+            for _ in range(colspan):
+                expanded.append(text)
+                if rowspan > 1:
+                    pending[col_index] = (rowspan - 1, text)
+                col_index += 1
+        _consume_pending()
+        if any(value.strip() for value in expanded):
+            expanded_rows.append(expanded)
+
+    return expanded_rows
+
+
+def _deterministic_table_entries_from_block(block: BlockSegment) -> list[dict]:
+    table_html = str(block.table_html or "").strip()
+    table_title = str(block.table_title or "").strip()
+    if not table_html or not table_title:
+        return []
+
+    rows = _expand_table_rows(table_html)
+    if len(rows) < 2:
+        return []
+
+    header = [cell.strip() for cell in rows[0]]
+    width = max(len(header), *(len(row) for row in rows[1:]))
+    if width < 2:
+        return []
+    header += [""] * (width - len(header))
+
+    grouped_rows: dict[str, list[str]] = {}
+    grouped_remarks: dict[str, list[str]] = {}
+
+    for raw_row in rows[1:]:
+        row = list(raw_row) + [""] * (width - len(raw_row))
+        primary = row[0].strip()
+        if not primary:
+            continue
+
+        row_parts: list[str] = []
+        remark_parts = grouped_remarks.setdefault(primary, [])
+        for index, cell in enumerate(row[1:], start=1):
+            cell_text = cell.strip()
+            if not cell_text or cell_text == "-":
+                continue
+            column_name = header[index].strip() or f"列{index + 1}"
+            if column_name == "备注":
+                if cell_text not in remark_parts:
+                    remark_parts.append(cell_text)
+                continue
+            row_parts.append(f"{column_name}{cell_text}")
+
+        if row_parts:
+            grouped_rows.setdefault(primary, []).append("，".join(row_parts))
+
+    entries: list[dict] = []
+    for primary, row_parts in grouped_rows.items():
+        sentence_parts = list(row_parts)
+        remarks = grouped_remarks.get(primary, [])
+        if remarks:
+            sentence_parts.append(f"备注：{'；'.join(remarks)}")
+        clause_text = f"{primary}：" + "；".join(sentence_parts) + "。"
+        entries.append({
+            "clause_no": None,
+            "clause_title": table_title,
+            "clause_text": clause_text,
+            "summary": None,
+            "tags": [],
+            "page_start": block.page_start,
+            "page_end": block.page_end,
+            "clause_type": "normative",
+            "source_type": "table",
+            "source_ref": block.source_refs[0] if block.source_refs else None,
+            "source_refs": list(block.source_refs),
+            "source_label": block.chapter_label,
+        })
+
+    return entries
+
+
+def _should_extract_normative_block_deterministically(clause_no: str, text: str) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    if clause_no.startswith("2.0."):
+        return True
+    if len(normalized) > 140:
+        return False
+    if _DETERMINISTIC_LIST_SIGNAL_RE.search(normalized):
+        return False
+    if normalized.endswith("："):
+        return False
+    return True
+
+
+def _deterministic_entries_from_block(block: BlockSegment) -> list[dict]:
+    if block.segment_type == "table_requirement_block":
+        return _deterministic_table_entries_from_block(block)
+    text = block.text.strip()
+    if not text:
+        return []
+    clause_no = _resolved_block_clause_no(block)
+
+    if block.segment_type == "commentary_block":
+        clause_type = "commentary"
+    else:
+        if block.segment_type not in {"normative_clause_block", "appendix_block"}:
+            return []
+        if not clause_no:
+            return []
+        if not _should_extract_normative_block_deterministically(clause_no, text):
+            return []
+        clause_type = "normative"
+
+    return [{
+        "clause_no": clause_no,
+        "clause_title": None,
+        "clause_text": text,
+        "summary": None,
+        "tags": [],
+        "page_start": block.page_start,
+        "page_end": block.page_end,
+        "clause_type": clause_type,
+        "source_type": "text",
+        "source_ref": block.source_refs[0] if block.source_refs else None,
+        "source_refs": list(block.source_refs),
+        "source_label": block.chapter_label,
+    }]
+
+
+def _deterministic_entries_from_scope(scope: ProcessingScope) -> list[dict]:
+    if scope.scope_type != "table":
+        return []
+    table_title = ""
+    if isinstance(scope.context, dict):
+        table_title = str(scope.context.get("table_title") or "").strip()
+    block = BlockSegment(
+        segment_type="table_requirement_block",
+        chapter_label=scope.chapter_label,
+        text=scope.text,
+        page_start=scope.page_start,
+        page_end=scope.page_end,
+        table_title=table_title or None,
+        table_html=scope.text,
+        source_refs=list(scope.source_refs),
+        confidence="high",
+    )
+    return _deterministic_table_entries_from_block(block)
+
+
+def _should_skip_block_for_ai(block: BlockSegment) -> bool:
+    if block.segment_type in {"heading_only_block", "non_clause_block"}:
+        return True
+    if block.segment_type in {"commentary_block", "appendix_block"} and not block.text.strip():
+        return True
+    if block.segment_type != "table_requirement_block" and _resolved_block_clause_no(block) is None:
+        return True
+    return False
+
+
 _ACTUAL_CHAPTER_TITLE = re.compile(r"^\d{1,2}\s+\S")
 _ACTUAL_CLAUSE_TITLE = re.compile(r"^\d+(?:\.\d+)+\s+\S")
 _TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
 _TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
+_BLOCK_CLAUSE_NO_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b")
+_DETERMINISTIC_LIST_SIGNAL_RE = re.compile(r"(?:下列|如下|；|\n\s*[（(]?\d+[)）]|[一二三四五六七八九十]+、)")
+_CLAUSE_LIKE_SECTION_CODE = re.compile(r"^(?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)*)$")
 _NUMERIC_SECTION_CODE = re.compile(r"^\d+(?:\.\d+)*$")
+_SECTION_TITLE_SENTENCE_SIGNAL_RE = re.compile(r"[，。；：]|应|不得|必须|严禁|禁止|宜|可")
 
 
 def _section_heading_text(section: dict) -> str:
     code = str(section.get("section_code") or "").strip()
     title = str(section.get("title") or "").strip()
     return f"{code} {title}".strip()
+
+
+def _is_clause_like_section_code(code: str) -> bool:
+    return bool(code and _CLAUSE_LIKE_SECTION_CODE.match(code) and code.count(".") >= 2)
+
+
+def _section_title_carries_clause_text(section: dict) -> bool:
+    code = str(section.get("section_code") or "").strip()
+    if not _is_clause_like_section_code(code):
+        return False
+    title = str(section.get("title") or "").strip()
+    if not title or _TOC_PAGE_REF.search(title) or _TOC_DOT_LEADERS.search(title):
+        return False
+    if str(section.get("text") or "").strip():
+        return False
+    return bool(_SECTION_TITLE_SENTENCE_SIGNAL_RE.search(title))
+
+
+def _coerce_inline_clause_text(section: dict) -> dict:
+    if not _section_title_carries_clause_text(section):
+        return dict(section)
+    normalized = dict(section)
+    normalized["text"] = str(section.get("title") or "").strip()
+    return normalized
+
+
+def _should_seed_section_title_as_clause(section: dict) -> bool:
+    code = str(section.get("section_code") or "").strip()
+    if not _is_clause_like_section_code(code):
+        return False
+    title = str(section.get("title") or "").strip()
+    if not title or _TOC_PAGE_REF.search(title) or _TOC_DOT_LEADERS.search(title):
+        return False
+    if str(section.get("text") or "").strip():
+        return False
+    return bool(_SECTION_TITLE_SENTENCE_SIGNAL_RE.search(title))
+
+
+def _seed_section_title_entries(sections: list[dict]) -> list[dict]:
+    seeded_entries: list[dict] = []
+    seen_clause_nos: set[str] = set()
+
+    for section in sections:
+        if not _should_seed_section_title_as_clause(section):
+            continue
+        clause_no = str(section.get("section_code") or "").strip()
+        if clause_no in seen_clause_nos:
+            continue
+        seen_clause_nos.add(clause_no)
+        section_id = str(section.get("id") or "").strip()
+        source_ref = f"document_section:{section_id}" if section_id else None
+        seeded_entries.append({
+            "clause_no": clause_no,
+            "clause_title": None,
+            "clause_text": str(section.get("title") or "").strip(),
+            "summary": None,
+            "tags": [],
+            "page_start": section.get("page_start"),
+            "page_end": section.get("page_end"),
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": source_ref,
+            "source_refs": [source_ref] if source_ref else [],
+            "source_label": _section_heading_text(section),
+        })
+
+    return seeded_entries
+
+
+def _is_heading_only_outline_text(clause_no: str, clause_text: str) -> bool:
+    normalized_text = " ".join(str(clause_text or "").split())
+    if not normalized_text:
+        return True
+    if normalized_text == clause_no:
+        return True
+    remainder = normalized_text
+    if clause_no:
+        prefix = f"{clause_no} "
+        if normalized_text.startswith(prefix):
+            remainder = normalized_text[len(prefix):].strip()
+    if not remainder:
+        return True
+    return not bool(_SECTION_TITLE_SENTENCE_SIGNAL_RE.search(remainder))
+
+
+def _prune_empty_outline_hosts(
+    clauses: list[dict],
+    *,
+    outline_clause_nos: set[str] | None = None,
+) -> list[dict]:
+    if not clauses or not outline_clause_nos:
+        return clauses
+
+    children_by_parent: dict[UUID, list[dict]] = {}
+    for clause in clauses:
+        parent_id = clause.get("parent_id")
+        if parent_id is None:
+            continue
+        children_by_parent.setdefault(parent_id, []).append(clause)
+
+    removed_parent_ids: dict[UUID, UUID | None] = {}
+    kept: list[dict] = []
+    for clause in clauses:
+        clause_id = clause.get("id")
+        clause_no = str(clause.get("clause_no") or "").strip()
+        child_clauses = [
+            child
+            for child in children_by_parent.get(clause_id, [])
+            if child.get("node_type", "clause") == "clause"
+        ]
+        should_drop = (
+            clause.get("clause_type") == "normative"
+            and clause.get("node_type", "clause") == "clause"
+            and clause.get("source_type", "text") == "text"
+            and clause_no in outline_clause_nos
+            and "." in clause_no
+            and _is_heading_only_outline_text(clause_no, str(clause.get("clause_text") or ""))
+            and bool(child_clauses)
+        )
+        if should_drop:
+            removed_parent_ids[clause_id] = clause.get("parent_id")
+            continue
+        kept.append(clause)
+
+    if not removed_parent_ids:
+        return clauses
+
+    for clause in kept:
+        parent_id = clause.get("parent_id")
+        while parent_id in removed_parent_ids:
+            parent_id = removed_parent_ids[parent_id]
+        clause["parent_id"] = parent_id
+
+    return kept
 
 
 def _is_toc_heading(section: dict) -> bool:
@@ -819,7 +1221,7 @@ def _normalize_sections_for_processing(sections: list[dict]) -> list[dict]:
             break
 
     normalized = [
-        section
+        _coerce_inline_clause_text(section)
         for section in sections[start_idx:]
         if not _is_toc_heading(section)
     ]
@@ -934,17 +1336,7 @@ def _parse_llm_json(raw: str) -> list[dict]:
 
 def _is_retryable_ai_gateway_status(exc: httpx.HTTPStatusError) -> bool:
     response = exc.response
-    if response.status_code not in {502, 504}:
-        return False
-
-    payload = ""
-    try:
-        payload = json.dumps(response.json(), ensure_ascii=False)
-    except Exception:
-        payload = response.text
-
-    haystack = f"{str(exc)} {payload}".lower()
-    return "timed out" in haystack or "timeout" in haystack
+    return response.status_code in {502, 504}
 
 
 def _process_scope_with_retries(
@@ -1068,39 +1460,61 @@ def process_standard_ai(
         if not sections:
             raise ValueError("No normalized sections available for processing")
         outline_clause_nos = _collect_outline_clause_nos(raw_sections)
-        tables = _fetch_tables(conn, document_id)
         document = _fetch_document(conn, document_id)
-        blocks = build_single_standard_blocks(sections, tables)
-
-        logger.info(
-            "processing_started",
-            standard_id=str(standard_id),
-            section_count=len(sections),
-            block_count=len(blocks),
-            block_types=dict.fromkeys(sorted({block.segment_type for block in blocks}), 0),
-        )
-        if blocks:
+        tables = _fetch_tables(conn, document_id)
+        if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+            logger.info("single_standard_block_path_enabled", standard_id=str(standard_id))
+            blocks = build_single_standard_blocks(sections, tables)
             block_type_counts: dict[str, int] = {}
             for block in blocks:
                 block_type_counts[block.segment_type] = block_type_counts.get(block.segment_type, 0) + 1
             logger.info("single_standard_blocks_built", counts=block_type_counts)
 
-        if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
-            logger.info("single_standard_block_path_enabled", standard_id=str(standard_id))
+            deterministic_entries = []
             scopes = _build_block_processing_scopes(blocks)
         else:
+            blocks = []
+            deterministic_entries = []
             scopes = _build_processing_scopes(
                 sections,
                 tables,
                 document=document,
                 document_id=document_id,
             )
-        scopes = rebalance_scopes(scopes)
-        if not scopes:
+            scopes = rebalance_scopes(scopes)
+        if not scopes and not deterministic_entries:
             raise ValueError("No processing scopes generated")
 
-        all_entries: list[dict] = []
+        all_entries: list[dict] = list(deterministic_entries)
         for i, scope in enumerate(scopes):
+            current_block = blocks[i] if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS else None
+            if current_block is not None and _should_skip_block_for_ai(current_block):
+                logger.info(
+                    "processing_scope_skipped",
+                    index=i + 1,
+                    total=len(scopes),
+                    chapter=scope.chapter_label,
+                    scope_type=scope.scope_type,
+                    reason=current_block.segment_type,
+                )
+                continue
+
+            direct_entries = (
+                _deterministic_entries_from_block(current_block)
+                if current_block is not None
+                else _deterministic_entries_from_scope(scope)
+            )
+            if direct_entries:
+                all_entries.extend(direct_entries)
+                logger.info(
+                    "processing_scope_deterministic",
+                    index=i + 1,
+                    total=len(scopes),
+                    scope_type=scope.scope_type,
+                    chapter=scope.chapter_label,
+                    entry_count=len(direct_entries),
+                )
+                continue
             logger.info(
                 "processing_scope",
                 index=i + 1,
@@ -1117,9 +1531,13 @@ def process_standard_ai(
                 if delay_seconds > 0:
                     time.sleep(delay_seconds)
 
+        if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+            all_entries.extend(_seed_section_title_entries(sections))
+
         logger.info("all_scopes_processed", total_entries=len(all_entries))
 
         clauses = build_tree(all_entries, standard_id)
+        clauses = _prune_empty_outline_hosts(clauses, outline_clause_nos=outline_clause_nos)
         clauses = link_commentary(clauses)
         structured_validation = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         repair_tasks = build_repair_tasks(clauses, structured_validation.issues)

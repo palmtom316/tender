@@ -481,3 +481,80 @@ def test_get_viewer_tree_falls_back_to_ai_tree_without_outline(
     assert len(tree) == 1
     assert tree[0]["id"] == str(clause_id)
     assert tree[0]["clause_no"] == "4.5.5"
+
+
+def test_get_viewer_tree_skips_toc_and_front_matter_outline_noise(
+    conn: psycopg.Connection,
+) -> None:
+    repo = StandardRepository()
+    standard_id, document_id = _create_standard(conn, code="GB 5")
+    chapter_id = uuid4()
+    clause_id = uuid4()
+
+    conn.execute(
+        """
+        INSERT INTO document_section
+          (id, document_id, section_code, title, level, page_start, page_end, text, sort_order)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s),
+          (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            uuid4(), document_id, "2010", "北京", 1, 2, 2, "封面信息", 0,
+            uuid4(), document_id, None, "前言", 1, 5, 5, "前言内容", 1,
+            uuid4(), document_id, "5.4", "工程交接验收 (28)", 2, 7, 7, "附录A ...(29)\n本规范用词说明 (30)", 2,
+            uuid4(), document_id, "5", "互感器", 1, 35, 35, None, 3,
+            uuid4(), document_id, "5.4", "工程交接验收", 2, 37, 37, None, 4,
+        ),
+    )
+    conn.commit()
+
+    repo.bulk_create_clauses(conn, [
+        {
+            "id": chapter_id,
+            "standard_id": standard_id,
+            "parent_id": None,
+            "clause_no": "5.4",
+            "clause_title": "AI 工程交接验收",
+            "clause_text": "应按要求完成交接验收。",
+            "summary": "5.4 摘要",
+            "tags": [],
+            "page_start": 37,
+            "page_end": 37,
+            "sort_order": 0,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "5.4",
+            "node_label": None,
+        },
+        {
+            "id": clause_id,
+            "standard_id": standard_id,
+            "parent_id": chapter_id,
+            "clause_no": "5.4.1",
+            "clause_title": "检查项目",
+            "clause_text": "验收时应检查外观。",
+            "summary": None,
+            "tags": [],
+            "page_start": 37,
+            "page_end": 37,
+            "sort_order": 1,
+            "clause_type": "normative",
+            "commentary_clause_id": None,
+            "node_type": "clause",
+            "node_key": "5.4.1",
+            "node_label": None,
+        },
+    ])
+
+    tree = repo.get_viewer_tree(conn, standard_id)
+
+    assert [node["clause_no"] for node in tree] == ["5"]
+    assert tree[0]["children"][0]["id"] == str(chapter_id)
+    assert tree[0]["children"][0]["clause_no"] == "5.4"
+    assert tree[0]["children"][0]["clause_title"] == "工程交接验收"
+    assert tree[0]["children"][0]["children"][0]["id"] == str(clause_id)

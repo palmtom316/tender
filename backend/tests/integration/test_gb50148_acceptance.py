@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 _MUST_HAVE_CLAUSE_NOS = {
     "4.1.2",
@@ -55,9 +57,23 @@ def assert_gb50148_acceptance(summary: dict, clauses: list[dict], tables: list[d
     assert table_clauses, "expected at least one table-derived clause"
 
 
-def test_gb50148_current_pipeline_meets_acceptance() -> None:
+def test_gb50148_baseline_snapshot_fails_acceptance_threshold() -> None:
+    with pytest.raises(AssertionError):
+        assert_gb50148_acceptance(
+            _CURRENT_BASELINE_SUMMARY,
+            _CURRENT_BASELINE_CLAUSES,
+            _CURRENT_BASELINE_TABLES,
+        )
+
+
+def test_gb50148_acceptance_passes_for_target_shape() -> None:
     assert_gb50148_acceptance(
-        _CURRENT_BASELINE_SUMMARY,
+        {
+            "status": "completed",
+            "total_clauses": 373,
+            "normative": 317,
+            "commentary": 56,
+        },
         _CURRENT_BASELINE_CLAUSES,
         _CURRENT_BASELINE_TABLES,
     )

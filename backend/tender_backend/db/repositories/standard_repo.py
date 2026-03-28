@@ -100,11 +100,14 @@ def _is_toc_section(section: dict) -> bool:
     text = (section.get("text") or "").strip()
     if not title:
         return True
-    if text:
-        return False
     if _TOC_PAGE_REF.search(title):
         return True
     if _TOC_DOT_LEADERS.search(title):
+        return True
+    if text and (
+        _TOC_DOT_LEADERS.search(text)
+        or sum(1 for line in text.splitlines() if _TOC_PAGE_REF.search(line.strip())) >= 2
+    ):
         return True
     return False
 
@@ -183,6 +186,16 @@ def _clear_outline_levels(node: dict) -> None:
     node.pop("_level", None)
     for child in node["children"]:
         _clear_outline_levels(child)
+
+
+def _prune_outline_noise(nodes: list[dict]) -> list[dict]:
+    pruned: list[dict] = []
+    for node in nodes:
+        children = _prune_outline_noise(node["children"])
+        node["children"] = children
+        if node.get("clause_type") != "outline" or children:
+            pruned.append(node)
+    return pruned
 
 
 def _find_outline_host(outline_by_code: dict[str, dict], clause_no: str | None) -> dict | None:
@@ -458,7 +471,7 @@ class StandardRepository:
 
             detached_roots.append(node)
 
-        return [*outline_roots, *detached_roots]
+        return [*_prune_outline_noise(outline_roots), *detached_roots]
 
     # ── Write helpers ──
 

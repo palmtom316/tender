@@ -65,11 +65,34 @@ def test_build_clause_ast_normalizes_legacy_flat_clause_numbers() -> None:
         standard_id,
     )
 
-    assert len(roots) == 2
+    assert len(roots) == 1
     assert roots[0].clause_no == "3"
     assert roots[0].node_key == "3"
     assert roots[0].parent_id is None
 
-    assert roots[1].clause_no == "3.2.1"
-    assert roots[1].node_key == "3.2.1"
-    assert roots[1].parent_id is None
+    child = roots[0].children[0]
+    assert child.clause_no == "3.2.1"
+    assert child.node_key == "3.2.1"
+    assert child.parent_id == roots[0].id
+
+
+def test_build_clause_ast_normalizes_untrusted_enum_fields_to_safe_values() -> None:
+    standard_id = uuid4()
+
+    roots = build_clause_ast(
+        [
+            {
+                "clause_no": "4.1.2",
+                "clause_text": "正文",
+                "clause_type": "normative_clause_block_from_ai",
+                "source_type": "document_section:s1:derived",
+                "node_type": "numbered_list_item_from_model",
+            },
+        ],
+        standard_id,
+    )
+
+    assert len(roots) == 1
+    assert roots[0].clause_type == "normative"
+    assert roots[0].source_type == "text"
+    assert roots[0].node_type == "clause"
