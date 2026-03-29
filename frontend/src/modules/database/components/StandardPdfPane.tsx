@@ -23,31 +23,48 @@ export function StandardPdfPane({ pdfUrl, targetPage }: StandardPdfPaneProps) {
 
   useEffect(() => {
     let disposed = false;
+    const controller = new AbortController();
+    let task: ReturnType<typeof getDocument> | null = null;
+
     setLoading(true);
     setError("");
+    setPdfDoc(null);
+    setPageCount(0);
 
-    const task = getDocument({
-      url: buildApiUrl(pdfUrl),
-      httpHeaders: getAuthHeaders(),
-    });
-    task.promise
-      .then((doc: PDFDocumentProxy) => {
+    void (async () => {
+      try {
+        // Fetch the protected PDF through the app's auth layer, then let pdf.js
+        // read the bytes directly instead of issuing its own network requests.
+        const response = await fetch(buildApiUrl(pdfUrl), {
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const pdfBytes = new Uint8Array(await response.arrayBuffer());
         if (disposed) return;
+
+        task = getDocument({ data: pdfBytes });
+        const doc = await task.promise;
+        if (disposed) return;
+
         setPdfDoc(doc);
         setPageCount(doc.numPages);
         setPageNumber(1);
-      })
-      .catch((err: unknown) => {
-        if (disposed) return;
+      } catch (err: unknown) {
+        if (disposed || (err instanceof DOMException && err.name === "AbortError")) return;
         setError(err instanceof Error ? err.message : "PDF 加载失败");
-      })
-      .finally(() => {
+      } finally {
         if (!disposed) setLoading(false);
-      });
+      }
+    })();
 
     return () => {
       disposed = true;
-      void task.destroy();
+      controller.abort();
+      void task?.destroy();
     };
   }, [pdfUrl]);
 
