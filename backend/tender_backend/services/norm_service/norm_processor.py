@@ -48,6 +48,9 @@ _MAX_SCOPE_RETRY_ATTEMPTS = 2
 _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS = {
     UUID("ff2ddb6c-ba8e-4e42-862f-e75d5824437a"),
 }
+_SINGLE_STANDARD_BLOCK_EXPERIMENT_CODES = {
+    "GB50148-2010",
+}
 
 _std_repo = StandardRepository()
 _agent_repo = AgentConfigRepository()
@@ -106,6 +109,19 @@ def _scope_delay_seconds() -> float:
     if jitter:
         delay += random.uniform(0.0, jitter)
     return delay
+
+
+def _normalize_standard_code(value: object) -> str:
+    return "".join(str(value or "").upper().split())
+
+
+def _should_use_single_standard_block_path(
+    standard_id: UUID,
+    standard: dict | None,
+) -> bool:
+    if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+        return True
+    return _normalize_standard_code((standard or {}).get("standard_code")) in _SINGLE_STANDARD_BLOCK_EXPERIMENT_CODES
 
 
 def _extract_markdown_from_zip(content: bytes) -> str:
@@ -903,6 +919,8 @@ def _deterministic_table_entries_from_block(block: BlockSegment) -> list[dict]:
     table_title = str(block.table_title or "").strip()
     if not table_html or not table_title:
         return []
+    page_start = block.page_start
+    page_end = block.page_end if block.page_end is not None else block.page_start
 
     rows = _expand_table_rows(table_html)
     if len(rows) < 2:
@@ -952,8 +970,8 @@ def _deterministic_table_entries_from_block(block: BlockSegment) -> list[dict]:
             "clause_text": clause_text,
             "summary": None,
             "tags": [],
-            "page_start": block.page_start,
-            "page_end": block.page_end,
+            "page_start": page_start,
+            "page_end": page_end,
             "clause_type": "normative",
             "source_type": "table",
             "source_ref": block.source_refs[0] if block.source_refs else None,
@@ -985,6 +1003,8 @@ def _deterministic_entries_from_block(block: BlockSegment) -> list[dict]:
     text = block.text.strip()
     if not text:
         return []
+    page_start = block.page_start
+    page_end = block.page_end if block.page_end is not None else block.page_start
     clause_no = _resolved_block_clause_no(block)
 
     if block.segment_type == "commentary_block":
@@ -1004,8 +1024,8 @@ def _deterministic_entries_from_block(block: BlockSegment) -> list[dict]:
         "clause_text": text,
         "summary": None,
         "tags": [],
-        "page_start": block.page_start,
-        "page_end": block.page_end,
+        "page_start": page_start,
+        "page_end": page_end,
         "clause_type": clause_type,
         "source_type": "text",
         "source_ref": block.source_refs[0] if block.source_refs else None,
@@ -1039,7 +1059,11 @@ def _should_skip_block_for_ai(block: BlockSegment) -> bool:
         return True
     if block.segment_type in {"commentary_block", "appendix_block"} and not block.text.strip():
         return True
-    if block.segment_type != "table_requirement_block" and _resolved_block_clause_no(block) is None:
+    if (
+        block.segment_type != "table_requirement_block"
+        and _resolved_block_clause_no(block) is None
+        and not str(block.clause_no or "").strip()
+    ):
         return True
     return False
 
@@ -1049,7 +1073,12 @@ _ACTUAL_CLAUSE_TITLE = re.compile(r"^\d+(?:\.\d+)+\s+\S")
 _TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
 _TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
 _BLOCK_CLAUSE_NO_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b")
-_DETERMINISTIC_LIST_SIGNAL_RE = re.compile(r"(?:下列|如下|；|\n\s*[（(]?\d+[)）]|[一二三四五六七八九十]+、)")
+_EMBEDDED_SECTION_HEADING_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\s+(\S.*)$")
+_NUMBERED_ITEM_HEADING_RE = re.compile(r"^\s*(\d+)(?:[)）]\s*|\s+)(.*)$")
+_LAYOUT_MARKER_RE = re.compile(r"^(?:text|text_list)$")
+_PAGE_ARTIFACT_RE = re.compile(r"^[·•]?\d+[·•]?$")
+_WATERMARK_RE = re.compile(r"(?:标准分享网|www\.bzfxw\.com|免费下载)")
+_DETERMINISTIC_LIST_SIGNAL_RE = re.compile(r"(?:下列|如下|；|\n\s*(?:[（(]?\d+[)）]|\d+\s)|[一二三四五六七八九十]+、)")
 _CLAUSE_LIKE_SECTION_CODE = re.compile(r"^(?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)*)$")
 _NUMERIC_SECTION_CODE = re.compile(r"^\d+(?:\.\d+)*$")
 _SECTION_TITLE_SENTENCE_SIGNAL_RE = re.compile(r"[，。；：]|应|不得|必须|严禁|禁止|宜|可")
@@ -1083,6 +1112,198 @@ def _coerce_inline_clause_text(section: dict) -> dict:
     normalized = dict(section)
     normalized["text"] = str(section.get("title") or "").strip()
     return normalized
+
+
+def _section_level_from_code(code: str, fallback_level: object = None) -> int | object:
+    normalized = str(code or "").strip()
+    if not normalized:
+        return fallback_level
+    return normalized.count(".") + 1
+
+
+def _clean_section_text_lines(text: str) -> list[str]:
+    filtered: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or _LAYOUT_MARKER_RE.match(line):
+            continue
+        if _WATERMARK_RE.search(line):
+            continue
+        filtered.append(line)
+
+    cleaned: list[str] = []
+    for index, line in enumerate(filtered):
+        if _PAGE_ARTIFACT_RE.match(line):
+            next_line = filtered[index + 1] if index + 1 < len(filtered) else ""
+            if not next_line or _WATERMARK_RE.search(next_line):
+                continue
+        cleaned.append(line)
+    return cleaned
+
+
+def _parse_numbered_item_heading(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    match = _NUMBERED_ITEM_HEADING_RE.match(stripped)
+    if not match:
+        return None
+    return match.group(1), match.group(2).strip()
+
+
+def _text_invites_numbered_items(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    return normalized.endswith(("：", ":")) or "下列" in normalized or "如下" in normalized
+
+
+def _is_related_embedded_clause(parent_code: str, heading_code: str) -> bool:
+    parent = str(parent_code or "").strip()
+    heading = str(heading_code or "").strip()
+    if not heading:
+        return False
+    if not parent:
+        return True
+    if heading.startswith(f"{parent}."):
+        return True
+    if heading.count(".") != parent.count("."):
+        return False
+    if "." not in parent or "." not in heading:
+        return False
+    return heading.rsplit(".", 1)[0] == parent.rsplit(".", 1)[0]
+
+
+def _split_embedded_sections(section: dict) -> list[dict]:
+    normalized = _coerce_inline_clause_text(section)
+    text_lines = _clean_section_text_lines(str(normalized.get("text") or ""))
+    if not text_lines:
+        normalized_without_markers = dict(normalized)
+        normalized_without_markers["text"] = ""
+        return [_coerce_inline_clause_text(normalized_without_markers)]
+
+    parent_code = str(normalized.get("section_code") or "").strip()
+    parent_title = str(normalized.get("title") or "").strip()
+    parent_level = normalized.get("level")
+    source_id = str(normalized.get("id") or "").strip()
+    expanded: list[dict] = []
+    synthetic_index = 0
+    leading_lines: list[str] = []
+
+    def _next_id() -> str | None:
+        nonlocal synthetic_index
+        if not source_id:
+            return None
+        synthetic_index += 1
+        return f"{source_id}#{synthetic_index}"
+
+    def _append_section(
+        payload: dict,
+        body_lines: list[str],
+        *,
+        combine_title_into_text: bool = False,
+    ) -> None:
+        candidate = dict(payload)
+        body_text = "\n".join(line for line in body_lines if line).strip()
+        if combine_title_into_text and body_text:
+            title = str(candidate.get("title") or "").strip()
+            candidate["text"] = "\n".join(part for part in (title, body_text) if part).strip()
+        else:
+            candidate["text"] = body_text
+        if (
+            not str(candidate.get("section_code") or "").strip()
+            and not str(candidate.get("title") or "").strip()
+            and not str(candidate.get("text") or "").strip()
+        ):
+            return
+        expanded.append(_coerce_inline_clause_text(candidate))
+
+    active_payload: dict | None = dict(normalized) if parent_code else None
+    active_body: list[str] = []
+    active_kind = "section" if active_payload is not None else None
+    active_invites_items = _text_invites_numbered_items(parent_title)
+    active_combine_title = False
+
+    for line in text_lines:
+        clause_match = _EMBEDDED_SECTION_HEADING_RE.match(line)
+        heading_code = clause_match.group(1) if clause_match else None
+        heading_title = clause_match.group(2).strip() if clause_match else None
+        if heading_code and _is_related_embedded_clause(parent_code, heading_code):
+            if active_payload is not None:
+                _append_section(
+                    active_payload,
+                    active_body,
+                    combine_title_into_text=active_combine_title,
+                )
+            elif leading_lines:
+                preamble_payload = dict(normalized)
+                _append_section(preamble_payload, leading_lines)
+                leading_lines = []
+
+            active_payload = dict(normalized)
+            synthetic_id = _next_id()
+            if synthetic_id:
+                active_payload["id"] = synthetic_id
+            active_payload["section_code"] = heading_code
+            active_payload["title"] = heading_title
+            active_payload["level"] = _section_level_from_code(heading_code, parent_level)
+            active_body = []
+            active_kind = "section"
+            active_invites_items = _text_invites_numbered_items(heading_title)
+            active_combine_title = True
+            continue
+
+        item_heading = _parse_numbered_item_heading(line)
+        if item_heading and (
+            active_payload is None
+            or active_kind == "item"
+            or active_invites_items
+        ):
+            if active_payload is not None:
+                _append_section(
+                    active_payload,
+                    active_body,
+                    combine_title_into_text=active_combine_title,
+                )
+            elif leading_lines:
+                preamble_payload = dict(normalized)
+                _append_section(preamble_payload, leading_lines)
+                leading_lines = []
+
+            item_code, item_title = item_heading
+            active_payload = dict(normalized)
+            synthetic_id = _next_id()
+            if synthetic_id:
+                active_payload["id"] = synthetic_id
+            active_payload["section_code"] = item_code
+            active_payload["title"] = item_title
+            active_payload["level"] = (
+                parent_level + 1
+                if isinstance(parent_level, int)
+                else parent_level
+            )
+            active_body = []
+            active_kind = "item"
+            active_invites_items = False
+            active_combine_title = False
+            continue
+
+        if active_payload is not None:
+            active_body.append(line)
+        else:
+            leading_lines.append(line)
+
+    if active_payload is not None:
+        _append_section(
+            active_payload,
+            active_body,
+            combine_title_into_text=active_combine_title,
+        )
+    elif leading_lines:
+        preamble_payload = dict(normalized)
+        _append_section(preamble_payload, leading_lines)
+
+    if not expanded:
+        return [normalized]
+    return expanded
 
 
 def _should_seed_section_title_as_clause(section: dict) -> bool:
@@ -1221,10 +1442,15 @@ def _normalize_sections_for_processing(sections: list[dict]) -> list[dict]:
             start_idx = idx
             break
 
+    normalized: list[dict] = []
+    for section in sections[start_idx:]:
+        if _is_toc_heading(section):
+            continue
+        normalized.extend(_split_embedded_sections(section))
+
     normalized = [
-        _coerce_inline_clause_text(section)
-        for section in sections[start_idx:]
-        if not _is_toc_heading(section)
+        {**section, "sort_order": index}
+        for index, section in enumerate(normalized)
     ]
 
     logger.info(
@@ -1465,6 +1691,8 @@ def process_standard_ai(
     started_at = time.time()
 
     try:
+        standard = _std_repo.get_standard(conn, standard_id)
+        use_single_standard_block_path = _should_use_single_standard_block_path(standard_id, standard)
         raw_sections = _fetch_sections(conn, document_id)
         if not raw_sections:
             raise ValueError(f"No OCR sections available for document {document_id}")
@@ -1483,9 +1711,10 @@ def process_standard_ai(
             collect_outline_clause_nos_from_pages(document_asset.pages)
             | _collect_outline_clause_nos(raw_sections)
         )
-        if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+        if use_single_standard_block_path:
             logger.info("single_standard_block_path_enabled", standard_id=str(standard_id))
-            blocks = build_single_standard_blocks(sections, tables)
+            block_tables = _serialize_asset_tables_for_block_path(document_asset)
+            blocks = build_single_standard_blocks(sections, block_tables)
             block_type_counts: dict[str, int] = {}
             for block in blocks:
                 block_type_counts[block.segment_type] = block_type_counts.get(block.segment_type, 0) + 1
@@ -1508,7 +1737,7 @@ def process_standard_ai(
 
         all_entries: list[dict] = list(deterministic_entries)
         for i, scope in enumerate(scopes):
-            current_block = blocks[i] if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS else None
+            current_block = blocks[i] if use_single_standard_block_path else None
             if current_block is not None and _should_skip_block_for_ai(current_block):
                 logger.info(
                     "processing_scope_skipped",
@@ -1552,7 +1781,7 @@ def process_standard_ai(
                 if delay_seconds > 0:
                     time.sleep(delay_seconds)
 
-        if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+        if use_single_standard_block_path:
             all_entries.extend(_seed_section_title_entries(sections))
 
         logger.info("all_scopes_processed", total_entries=len(all_entries))
@@ -1586,7 +1815,6 @@ def process_standard_ai(
         _std_repo.delete_clauses(conn, standard_id)
         inserted = _std_repo.bulk_create_clauses(conn, clauses)
 
-        standard = _std_repo.get_standard(conn, standard_id)
         _index_clauses(standard, clauses)
 
         elapsed = time.time() - started_at

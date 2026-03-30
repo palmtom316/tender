@@ -93,13 +93,30 @@ def _is_numbered_list_item_section(section: dict) -> bool:
     return bool(text or _SECTION_TITLE_SENTENCE_SIGNAL_RE.search(title))
 
 
+def _text_invites_numbered_list_items(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    return normalized.endswith(("：", ":")) or "下列" in normalized or "如下" in normalized
+
+
+def _label_invites_numbered_list_items(label: str) -> bool:
+    normalized = str(label or "").strip()
+    if not normalized:
+        return False
+    clause_no = _extract_clause_no(normalized)
+    if clause_no:
+        normalized = normalized[len(clause_no):].strip()
+    return _text_invites_numbered_list_items(normalized)
+
+
 def _block_invites_numbered_list_items(block: BlockSegment) -> bool:
-    if block.segment_type not in {"normative_clause_block", "commentary_block", "appendix_block"}:
+    if block.segment_type not in {"normative_clause_block", "commentary_block", "appendix_block", "non_clause_block"}:
         return False
-    text = block.text.strip()
-    if not text:
-        return False
-    return text.endswith(("：", ":")) or "下列" in text or "如下" in text
+    return (
+        _text_invites_numbered_list_items(block.text)
+        or _label_invites_numbered_list_items(block.chapter_label)
+    )
 
 
 def _merge_numbered_list_item_into_block(block: BlockSegment, section: dict, *, text: str) -> None:

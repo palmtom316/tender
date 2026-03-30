@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from tender_backend.services.norm_service import norm_processor
-from tender_backend.services.norm_service.block_segments import BlockSegment
+from tender_backend.services.norm_service.block_segments import BlockSegment, build_single_standard_blocks
 from tender_backend.services.norm_service.layout_compressor import PageWindow, compress_sections
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
@@ -1410,6 +1410,214 @@ def test_normalize_sections_for_processing_promotes_inline_clause_title_to_text(
     assert normalized[2]["text"] == ""
 
 
+def test_normalize_sections_for_processing_splits_embedded_subclauses_from_chapter_body() -> None:
+    sections = [
+        {
+            "id": "s4",
+            "section_code": "4",
+            "title": "电力变压器、油浸电抗器",
+            "text": (
+                "4.1 装卸、运输与就位\n"
+                "4.1.1 31.5MV·A及以上变压器和40MVar及以上的电抗器的装卸及运输，应符合下列规定：\n"
+                "1 水路运输时，应做好准备工作。\n"
+                "4.1.2 变压器或电抗器的装卸应符合下列规定：\n"
+                "1 装卸站台、码头等地点的地面应坚实。\n"
+            ),
+            "level": 1,
+            "page_start": 15,
+            "page_end": 15,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("4", "电力变压器、油浸电抗器"),
+        ("4.1", "装卸、运输与就位"),
+        ("4.1.1", "31.5MV·A及以上变压器和40MVar及以上的电抗器的装卸及运输，应符合下列规定："),
+        ("1", "水路运输时，应做好准备工作。"),
+        ("4.1.2", "变压器或电抗器的装卸应符合下列规定："),
+        ("1", "装卸站台、码头等地点的地面应坚实。"),
+    ]
+    assert normalized[2]["text"] == "31.5MV·A及以上变压器和40MVar及以上的电抗器的装卸及运输，应符合下列规定："
+    assert normalized[4]["text"] == "变压器或电抗器的装卸应符合下列规定："
+
+
+def test_normalize_sections_for_processing_splits_embedded_subclauses_from_continuation_rows() -> None:
+    sections = [
+        {
+            "id": "s4b",
+            "section_code": None,
+            "title": "运输过程中，冲击加速度应符合制造厂及合同的规定。",
+            "text": (
+                "4.1.3 运输过程中，冲击加速度应符合制造厂及合同的规定。\n"
+                "4.1.4 当产品有特殊要求时，尚应符合产品技术文件的规定。\n"
+                "1 运输倾斜角不得超过15°。\n"
+            ),
+            "level": 2,
+            "page_start": 16,
+            "page_end": 16,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("4.1.3", "运输过程中，冲击加速度应符合制造厂及合同的规定。"),
+        ("4.1.4", "当产品有特殊要求时，尚应符合产品技术文件的规定。"),
+    ]
+    assert normalized[0]["text"] == "运输过程中，冲击加速度应符合制造厂及合同的规定。"
+    assert normalized[1]["text"] == "当产品有特殊要求时，尚应符合产品技术文件的规定。\n1 运输倾斜角不得超过15°。"
+
+
+def test_normalize_sections_for_processing_expands_text_list_body_into_numbered_item_sections() -> None:
+    sections = [
+        {
+            "id": "s412",
+            "section_code": "4.1.2",
+            "title": "变压器或电抗器的装卸应符合下列规定：",
+            "text": (
+                "text_list\n"
+                "text\n"
+                "1 装卸站台、码头等地点的地面应坚实。\n"
+                "text\n"
+                "2 装卸时应设专人观测车辆、平台的升降或船只的沉浮情况，防止超过允许范围的倾斜。\n"
+                "·6·\n"
+            ),
+            "level": 3,
+            "page_start": 15,
+            "page_end": 15,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("4.1.2", "变压器或电抗器的装卸应符合下列规定："),
+        ("1", "装卸站台、码头等地点的地面应坚实。"),
+        ("2", "装卸时应设专人观测车辆、平台的升降或船只的沉浮情况，防止超过允许范围的倾斜。"),
+    ]
+    assert normalized[0]["text"] == "变压器或电抗器的装卸应符合下列规定："
+    assert normalized[1]["text"] == ""
+    assert normalized[2]["text"] == ""
+
+
+def test_normalize_sections_for_processing_expands_text_list_continuations_and_following_clauses() -> None:
+    sections = [
+        {
+            "id": "s4121",
+            "section_code": "4.12.1",
+            "title": "变压器、电抗器在试运行前，应进行全面检查，确认其符合运行条件时，方可投入试运行。检查项目应包含以下内容和要求：",
+            "text": (
+                "text_list\n"
+                "text\n"
+                "1 本体、冷却装置及所有附件应无缺陷，且不渗油。\n"
+            ),
+            "level": 3,
+            "page_start": 33,
+            "page_end": 33,
+        },
+        {
+            "id": "s4121b",
+            "section_code": None,
+            "title": "text_list",
+            "text": (
+                "text\n"
+                "12 变压器、电抗器的全部电气试验应合格；保护装置整定值应符合规定；操作及联动试验应正确。\n"
+                "text\n"
+                "13 局部放电测量前、后本体绝缘油色谱试验比对结果应合格。\n"
+                "4.12.2 变压器、电抗器试运行时应按下列规定项目进行检查：\n"
+                "text_list\n"
+                "text\n"
+                "1 中性点接地系统的变压器，在进行冲击合闸时，其中性点必须接地。\n"
+            ),
+            "level": 3,
+            "page_start": 34,
+            "page_end": 34,
+        },
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("4.12.1", "变压器、电抗器在试运行前，应进行全面检查，确认其符合运行条件时，方可投入试运行。检查项目应包含以下内容和要求："),
+        ("1", "本体、冷却装置及所有附件应无缺陷，且不渗油。"),
+        ("12", "变压器、电抗器的全部电气试验应合格；保护装置整定值应符合规定；操作及联动试验应正确。"),
+        ("13", "局部放电测量前、后本体绝缘油色谱试验比对结果应合格。"),
+        ("4.12.2", "变压器、电抗器试运行时应按下列规定项目进行检查："),
+        ("1", "中性点接地系统的变压器，在进行冲击合闸时，其中性点必须接地。"),
+    ]
+    assert normalized[4]["text"] == "变压器、电抗器试运行时应按下列规定项目进行检查："
+
+
+def test_normalize_sections_for_processing_splits_sibling_clauses_after_numbered_items() -> None:
+    sections = [
+        {
+            "id": "s485",
+            "section_code": "4.8.5",
+            "title": "储油柜的安装应符合下列规定：",
+            "text": (
+                "得\n"
+                "text_list\n"
+                "1 储油柜应按照产品技术文件要求进行检查、安装。\n"
+                "2 油位表动作应灵活，指示应与储油柜内的真实油位对应。\n"
+                "3 储油柜安装方向正确并进行位置复核。\n"
+                "4.8.6 所有导气管应清拭干净，其连接应密封严密。\n"
+                "4.8.7 升高座的安装应符合下列规定：\n"
+                "text_list\n"
+                "1 安装前，应进行检查。\n"
+                "4.8.8 套管安装后，顶部结构应密封良好。\n"
+            ),
+            "level": 3,
+            "page_start": 28,
+            "page_end": 28,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("4.8.5", "储油柜的安装应符合下列规定："),
+        ("1", "储油柜应按照产品技术文件要求进行检查、安装。"),
+        ("2", "油位表动作应灵活，指示应与储油柜内的真实油位对应。"),
+        ("3", "储油柜安装方向正确并进行位置复核。"),
+        ("4.8.6", "所有导气管应清拭干净，其连接应密封严密。"),
+        ("4.8.7", "升高座的安装应符合下列规定："),
+        ("1", "安装前，应进行检查。"),
+        ("4.8.8", "套管安装后，顶部结构应密封良好。"),
+    ]
+    assert normalized[3]["text"] == ""
+    assert normalized[4]["text"] == "所有导气管应清拭干净，其连接应密封严密。"
+    assert normalized[5]["text"] == "升高座的安装应符合下列规定："
+
+
+def test_normalize_sections_for_processing_keeps_wrapped_embedded_clause_title_in_text() -> None:
+    sections = [
+        {
+            "id": "s3",
+            "section_code": "3",
+            "title": "基本规定",
+            "text": (
+                "3.0.8 变压器、电抗器、互感器的瓷件质量，应符合现行国家标准《高压绝缘子瓷件技术条件》GB/T772、《标称电压高于\n"
+                "1000\\\\mathrm{V}\n"
+                "系统用户内和户外支柱绝缘子第1部分：瓷或玻璃绝缘子的试验》GB/T8287.1的有关规定。\n"
+            ),
+            "level": 1,
+            "page_start": 14,
+            "page_end": 14,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("3", "基本规定"),
+        ("3.0.8", "变压器、电抗器、互感器的瓷件质量，应符合现行国家标准《高压绝缘子瓷件技术条件》GB/T772、《标称电压高于"),
+    ]
+    assert normalized[1]["text"].startswith("变压器、电抗器、互感器的瓷件质量，应符合现行国家标准")
+    assert "1000\\\\mathrm{V}" in normalized[1]["text"]
+
+
 def test_ensure_standard_ocr_reuses_existing_sections(monkeypatch) -> None:
     monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
         {"id": "s1", "title": "1 总则", "text": "正文", "level": 1},
@@ -2065,6 +2273,131 @@ def test_process_standard_ai_uses_block_scopes_for_single_standard_experiment(mo
     assert [entry["clause_no"] for entry in captured["entries"]] == ["4.1.2", "4.1.7"]
 
 
+def test_process_standard_ai_uses_block_scopes_for_gb50148_even_with_new_standard_id(monkeypatch) -> None:
+    standard_id = UUID("ad9e7b99-6c94-48cf-8bd3-269314090b6e")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "section_code": "4.1.2", "title": "变压器装卸", "text": "正文", "level": 1, "page_start": 6, "page_end": 6},
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 50148-2010",
+        "standard_name": "电气装置安装工程 电力变压器、油浸电抗器、互感器施工及验收规范",
+    })
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("legacy structural scope builder should not be used for GB50148 reruns")
+    ))
+    monkeypatch.setattr(norm_processor, "build_single_standard_blocks", lambda sections, tables: [
+        BlockSegment(
+            segment_type="normative_clause_block",
+            chapter_label="4.1.2 变压器装卸",
+            text="变压器装卸应符合规定。",
+            clause_no="4.1.2",
+            page_start=6,
+            page_end=6,
+            section_ids=["s1"],
+            source_refs=["document_section:s1"],
+            confidence="high",
+        ),
+    ])
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda *args, **kwargs: [])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="9491c69c-9ee7-4a5b-902e-16c3b2c82e9a",
+    )
+
+    assert summary["status"] == "completed"
+    assert [entry["clause_no"] for entry in captured["entries"]] == ["4.1.2"]
+
+
+def test_process_standard_ai_keeps_numbered_chapter_block_for_ai_in_single_standard_path(monkeypatch) -> None:
+    standard_id = UUID("ad9e7b99-6c94-48cf-8bd3-269314090b6e")
+    captured: dict[str, object] = {"processed_scopes": []}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "section_code": "1", "title": "总则", "text": "为保证施工安装质量，制定本规范。", "level": 1, "page_start": 10, "page_end": 10},
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 50148-2010",
+        "standard_name": "电气装置安装工程 电力变压器、油浸电抗器、互感器施工及验收规范",
+    })
+    monkeypatch.setattr(norm_processor, "build_single_standard_blocks", lambda sections, tables: [
+        BlockSegment(
+            segment_type="normative_clause_block",
+            chapter_label="1 总则",
+            text="为保证施工安装质量，制定本规范。",
+            clause_no="1",
+            page_start=10,
+            page_end=10,
+            section_ids=["s1"],
+            source_refs=["document_section:s1"],
+            confidence="medium",
+        ),
+    ])
+
+    def fake_process_scope_with_retries(conn, scope):
+        captured["processed_scopes"].append(scope.chapter_label)
+        return [{
+            "clause_no": "1.0.1",
+            "clause_text": "为保证施工安装质量，制定本规范。",
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s1",
+            "page_start": 10,
+            "page_end": 10,
+        }]
+
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", fake_process_scope_with_retries)
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="9491c69c-9ee7-4a5b-902e-16c3b2c82e9a",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["processed_scopes"] == ["1 总则"]
+    assert [entry["clause_no"] for entry in captured["entries"]] == ["1.0.1"]
+
+
 def test_prune_empty_outline_hosts_drops_empty_outline_clause_and_reparents_children() -> None:
     chapter_id = UUID("10000000-0000-0000-0000-000000000001")
     outline_host_id = UUID("10000000-0000-0000-0000-000000000002")
@@ -2373,6 +2706,103 @@ def test_process_standard_ai_uses_deterministic_entries_for_high_confidence_bloc
     assert captured["entries"][1]["source_ref"] == "table:t1"
 
 
+def test_process_standard_ai_single_standard_block_path_uses_reconciled_asset_tables(monkeypatch) -> None:
+    standard_id = UUID("ad9e7b99-6c94-48cf-8bd3-269314090b6e")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "section_code": "4.2.4", "title": "变压器内油样性能", "text": "正文", "level": 1, "page_start": 18, "page_end": 18},
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [
+        {"id": "t1", "page_start": None, "page_end": None, "table_title": None, "table_html": "<table><tr><td>含水量</td><td>≤10μL/L</td></tr></table>", "raw_json": {}},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 50148-2010",
+        "standard_name": "电气装置安装工程 电力变压器、油浸电抗器、互感器施工及验收规范",
+    })
+    monkeypatch.setattr(norm_processor, "build_document_asset", lambda **kwargs: SimpleNamespace(
+        pages=[],
+        tables=[
+            SimpleNamespace(
+                source_ref="table:t1",
+                page_start=18,
+                page_end=18,
+                table_title="表 4.2.4 变压器内油样性能",
+                table_html="<table><tr><td>含水量</td><td>≤10μL/L</td></tr></table>",
+                raw_json={"page": 18, "title": "表 4.2.4 变压器内油样性能"},
+            )
+        ],
+    ))
+
+    def fake_build_single_standard_blocks(sections, tables):
+        captured["tables"] = tables
+        return [
+            BlockSegment(
+                segment_type="table_requirement_block",
+                chapter_label="表格: 表 4.2.4 变压器内油样性能",
+                text="表 4.2.4 变压器内油样性能\n含水量 ≤10μL/L",
+                table_title=tables[0]["table_title"],
+                table_html=tables[0]["table_html"],
+                page_start=tables[0]["page_start"],
+                page_end=tables[0]["page_end"],
+                source_refs=["table:t1"],
+                confidence="medium",
+            ),
+        ]
+
+    monkeypatch.setattr(norm_processor, "build_single_standard_blocks", fake_build_single_standard_blocks)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda *args, **kwargs: [
+        {
+            "clause_no": None,
+            "clause_title": "表 4.2.4 变压器内油样性能",
+            "clause_text": "含水量：电压等级750kV，标准值≤10μL/L。",
+            "clause_type": "normative",
+            "source_type": "table",
+            "source_ref": "table:t1",
+            "page_start": 18,
+            "page_end": 18,
+        }
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="9491c69c-9ee7-4a5b-902e-16c3b2c82e9a",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["tables"] == [
+        {
+            "id": "t1",
+            "page_start": 18,
+            "page_end": 18,
+            "table_title": "表 4.2.4 变压器内油样性能",
+            "table_html": "<table><tr><td>含水量</td><td>≤10μL/L</td></tr></table>",
+            "raw_json": {"page": 18, "title": "表 4.2.4 变压器内油样性能"},
+        }
+    ]
+    assert captured["entries"][0]["clause_title"] == "表 4.2.4 变压器内油样性能"
+    assert captured["entries"][0]["page_start"] == 18
+    assert captured["entries"][0]["page_end"] == 18
+
+
 def test_process_standard_ai_single_standard_merges_numbered_list_items_into_clause_scope(monkeypatch) -> None:
     standard_id = UUID("ff2ddb6c-ba8e-4e42-862f-e75d5824437a")
     captured: dict[str, object] = {"scope_texts": [], "scope_refs": []}
@@ -2423,6 +2853,68 @@ def test_process_standard_ai_single_standard_merges_numbered_list_items_into_cla
         "document_section:s2",
         "document_section:s3",
     ]
+
+
+def test_build_single_standard_blocks_merges_numbered_items_into_clause_when_host_title_invites_items() -> None:
+    blocks = build_single_standard_blocks([
+        {"id": "s485", "section_code": "4.8.5", "title": "储油柜的安装应符合下列规定：", "text": "得", "page_start": 28, "page_end": 28},
+        {"id": "s485#1", "section_code": "1", "title": "储油柜应按照产品技术文件要求进行检查、安装。", "text": "", "page_start": 28, "page_end": 28},
+        {"id": "s485#2", "section_code": "2", "title": "油位表动作应灵活，指示应与储油柜内的真实油位对应。", "text": "", "page_start": 28, "page_end": 28},
+        {"id": "s485#3", "section_code": "3", "title": "储油柜安装方向正确并进行位置复核。", "text": "", "page_start": 28, "page_end": 28},
+        {"id": "s486", "section_code": "4.8.6", "title": "所有导气管应清拭干净，其连接应密封严密。", "text": "", "page_start": 28, "page_end": 28},
+    ], [])
+
+    assert [(block.segment_type, block.clause_no) for block in blocks] == [
+        ("normative_clause_block", "4.8.5"),
+        ("normative_clause_block", "4.8.6"),
+    ]
+    assert blocks[0].text == (
+        "得\n"
+        "1 储油柜应按照产品技术文件要求进行检查、安装。\n"
+        "2 油位表动作应灵活，指示应与储油柜内的真实油位对应。\n"
+        "3 储油柜安装方向正确并进行位置复核。"
+    )
+    assert blocks[0].source_refs == [
+        "document_section:s485",
+        "document_section:s485#1",
+        "document_section:s485#2",
+        "document_section:s485#3",
+    ]
+
+
+def test_build_single_standard_blocks_absorbs_numbered_items_under_non_clause_host() -> None:
+    blocks = build_single_standard_blocks([
+        {
+            "id": "s-terms",
+            "section_code": None,
+            "title": "本规范用词说明",
+            "text": "1 为便于在执行本规范条文时区别对待，对要求严格程度不同的用词说明如下：",
+            "page_start": 39,
+            "page_end": 39,
+        },
+        {
+            "id": "s-terms-1",
+            "section_code": "1",
+            "title": "表示很严格，非这样做不可的：",
+            "text": "正面词采用“必须”，反面词采用“严禁”。",
+            "page_start": 39,
+            "page_end": 39,
+        },
+        {
+            "id": "s-terms-2",
+            "section_code": "2",
+            "title": "表示严格，在正常情况下均应这样做的：",
+            "text": "正面词采用“应”，反面词采用“不应”或“不得”。",
+            "page_start": 39,
+            "page_end": 39,
+        },
+    ], [])
+
+    assert [(block.segment_type, block.clause_no) for block in blocks] == [
+        ("non_clause_block", None),
+    ]
+    assert "1 表示很严格，非这样做不可的：" in blocks[0].text
+    assert "2 表示严格，在正常情况下均应这样做的：" in blocks[0].text
 
 
 def test_process_standard_ai_uses_deterministic_table_scope_for_single_standard_experiment(monkeypatch) -> None:
@@ -2548,6 +3040,38 @@ def test_deterministic_entries_from_table_block_group_rows_by_primary_column() -
             "source_ref": "table:t1",
             "source_refs": ["table:t1"],
             "source_label": "表格: 表 4.2.4 变压器内油样性能",
+        },
+    ]
+
+
+def test_deterministic_entries_from_normative_block_default_page_end_to_page_start() -> None:
+    block = BlockSegment(
+        segment_type="normative_clause_block",
+        chapter_label="4.1.2 变压器装卸",
+        text="变压器装卸应符合规定。",
+        clause_no="4.1.2",
+        page_start=18,
+        page_end=None,
+        source_refs=["document_section:s1"],
+        confidence="high",
+    )
+
+    entries = norm_processor._deterministic_entries_from_block(block)
+
+    assert entries == [
+        {
+            "clause_no": "4.1.2",
+            "clause_title": None,
+            "clause_text": "变压器装卸应符合规定。",
+            "summary": None,
+            "tags": [],
+            "page_start": 18,
+            "page_end": 18,
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s1",
+            "source_refs": ["document_section:s1"],
+            "source_label": "4.1.2 变压器装卸",
         },
     ]
 
