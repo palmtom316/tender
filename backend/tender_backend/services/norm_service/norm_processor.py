@@ -1529,6 +1529,13 @@ def _call_ai_gateway(
 
 def _parse_llm_json(raw: str) -> list[dict]:
     """Extract JSON array from LLM response, handling markdown fences."""
+    def _coerce_entries(value: object) -> list[dict]:
+        if isinstance(value, dict):
+            return [value]
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        return []
+
     text = raw.strip()
     # Strip markdown code fences
     if text.startswith("```"):
@@ -1539,10 +1546,9 @@ def _parse_llm_json(raw: str) -> list[dict]:
 
     try:
         result = json.loads(text)
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict):
-            return [result]
+        entries = _coerce_entries(result)
+        if entries:
+            return entries
     except json.JSONDecodeError:
         decoder = json.JSONDecoder()
         for target in ("[", "{"):
@@ -1551,10 +1557,9 @@ def _parse_llm_json(raw: str) -> list[dict]:
                     continue
                 try:
                     result, _end = decoder.raw_decode(text[index:])
-                    if isinstance(result, list):
-                        return result
-                    if isinstance(result, dict):
-                        return [result]
+                    entries = _coerce_entries(result)
+                    if entries:
+                        return entries
                 except json.JSONDecodeError:
                     continue
     logger.warning("llm_json_parse_failed", raw_length=len(raw))

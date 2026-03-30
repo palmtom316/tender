@@ -710,6 +710,41 @@ def test_process_scope_with_retries_marks_table_entries_with_table_source(monkey
     ]
 
 
+def test_process_scope_with_retries_skips_non_dict_llm_entries(monkeypatch) -> None:
+    scope = ProcessingScope(
+        scope_type="normative",
+        chapter_label="3 基本规定",
+        text="3.0.1 条文正文",
+        page_start=5,
+        page_end=5,
+        section_ids=["s3"],
+        source_refs=["document_section:s3"],
+    )
+
+    monkeypatch.setattr(
+        norm_processor,
+        "_call_ai_gateway",
+        lambda conn, prompt, scope_label: '[{"clause_no":"3.0.1","clause_text":"有效条文"},"附加说明文本"]',
+    )
+    monkeypatch.setattr(norm_processor, "build_prompt", lambda current_scope: current_scope.text)
+
+    entries = norm_processor._process_scope_with_retries(object(), scope)
+
+    assert entries == [
+        {
+            "clause_no": "3.0.1",
+            "clause_text": "有效条文",
+            "clause_type": "normative",
+            "page_start": 5,
+            "page_end": 5,
+            "source_ref": "document_section:s3",
+            "source_refs": ["document_section:s3"],
+            "source_type": "text",
+            "source_label": "3 基本规定",
+        }
+    ]
+
+
 def test_process_scope_with_retries_backfills_scope_metadata_recursively(monkeypatch) -> None:
     scope = ProcessingScope(
         scope_type="normative",
