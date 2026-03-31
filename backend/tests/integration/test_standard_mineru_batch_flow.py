@@ -292,6 +292,21 @@ def test_parse_llm_json_prefers_array_over_leading_example_object() -> None:
     ]
 
 
+def test_parse_llm_json_accepts_empty_array_without_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    warnings: list[tuple[tuple, dict]] = []
+
+    monkeypatch.setattr(
+        norm_processor.logger,
+        "warning",
+        lambda *args, **kwargs: warnings.append((args, kwargs)),
+    )
+
+    parsed = norm_processor._parse_llm_json("[]")
+
+    assert parsed == []
+    assert warnings == []
+
+
 def test_extract_pages_from_payload_skips_layout_blocks_and_keeps_real_page_payloads() -> None:
     payload = {
         "pages": [
@@ -1533,6 +1548,37 @@ def test_normalize_sections_for_processing_expands_text_list_body_into_numbered_
         ("2", "装卸时应设专人观测车辆、平台的升降或船只的沉浮情况，防止超过允许范围的倾斜。"),
     ]
     assert normalized[0]["text"] == "变压器或电抗器的装卸应符合下列规定："
+    assert normalized[1]["text"] == ""
+    assert normalized[2]["text"] == ""
+
+
+def test_normalize_sections_for_processing_expands_parenthesized_text_list_items() -> None:
+    sections = [
+        {
+            "id": "s8013",
+            "section_code": "8.0.13",
+            "title": "局部放电测量应符合下列规定：",
+            "text": (
+                "text_list\n"
+                "text\n"
+                "（3）在施加试验电压的整个期间，应监测局部放电量。\n"
+                "text\n"
+                "(4) 在施加试验电压的前后，应测量所有测量通道上的背景噪声水平。\n"
+            ),
+            "level": 3,
+            "page_start": 95,
+            "page_end": 95,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("8.0.13", "局部放电测量应符合下列规定："),
+        ("3", "在施加试验电压的整个期间，应监测局部放电量。"),
+        ("4", "在施加试验电压的前后，应测量所有测量通道上的背景噪声水平。"),
+    ]
+    assert normalized[0]["text"] == "局部放电测量应符合下列规定："
     assert normalized[1]["text"] == ""
     assert normalized[2]["text"] == ""
 

@@ -403,6 +403,288 @@ def test_build_tree_promotes_numbered_items_when_text_embeds_child_clause_number
     )
 
 
+def test_build_tree_reclassifies_parenthesized_flat_entries_as_items_under_previous_clause() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "8.0.13",
+                "clause_text": "局部放电测量应符合下列规定：",
+            },
+            {
+                "clause_no": "（3）",
+                "clause_text": "在施加试验电压的整个期间，应监测局部放电量。",
+            },
+            {
+                "clause_no": "(4)",
+                "clause_text": "在施加试验电压的前后，应测量所有测量通道上的背景噪声水平。",
+            },
+        ],
+        standard_id,
+    )
+
+    clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "8.0.13")
+    items = [item for item in clauses if item["node_type"] == "item"]
+
+    assert [item["node_label"] for item in items] == ["(3)", "(4)"]
+    assert all(item["clause_no"] == "8.0.13" for item in items)
+    assert all(item["parent_id"] == clause["id"] for item in items)
+    assert not any(item["clause_no"] in {"（3）", "(4)"} and item["node_type"] == "clause" for item in clauses)
+
+
+def test_build_tree_reclassifies_unnumbered_flat_entries_as_items_when_parent_invites_list() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "4.1.2",
+                "clause_text": "变压器或电抗器的装卸应符合下列规定：",
+            },
+            {
+                "clause_no": None,
+                "clause_text": "断路器零部件应齐全、清洁、完好。",
+            },
+            {
+                "clause_no": None,
+                "clause_text": "灭弧室或罐体和绝缘支柱内预充的六氟化硫等气体的压力值应符合产品技术文件要求。",
+            },
+        ],
+        standard_id,
+    )
+
+    clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "4.1.2")
+    items = [item for item in clauses if item["node_type"] == "item"]
+
+    assert [item["node_label"] for item in items] == ["1", "2"]
+    assert all(item["clause_no"] == "4.1.2" for item in items)
+    assert all(item["parent_id"] == clause["id"] for item in items)
+    assert not any(item["clause_no"] is None and item["node_type"] == "clause" for item in clauses)
+
+
+def test_build_tree_keeps_auto_inferred_items_for_different_parents_with_same_labels() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "4.1.2",
+                "clause_text": "变压器或电抗器的装卸应符合下列规定：",
+            },
+            {
+                "clause_no": None,
+                "clause_text": "断路器零部件应齐全、清洁、完好。",
+            },
+            {
+                "clause_no": "4.1.3",
+                "clause_text": "设备检查应符合下列规定：",
+            },
+            {
+                "clause_no": None,
+                "clause_text": "各元件的紧固螺栓应齐全、无松动。",
+            },
+        ],
+        standard_id,
+    )
+
+    items = [item for item in clauses if item["node_type"] == "item"]
+
+    assert len(items) == 2
+    assert {(item["clause_no"], item["node_label"]) for item in items} == {
+        ("4.1.2", "1"),
+        ("4.1.3", "1"),
+    }
+
+
+def test_build_tree_attaches_explicit_item_nodes_without_clause_no_to_previous_clause() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "4.1.2",
+                "clause_text": "变压器或电抗器的装卸应符合下列规定：",
+            },
+            {
+                "node_type": "item",
+                "node_label": "1",
+                "clause_text": "断路器零部件应齐全、清洁、完好。",
+            },
+            {
+                "clause_no": "4.1.3",
+                "clause_text": "设备检查应符合下列规定：",
+            },
+            {
+                "node_type": "item",
+                "node_label": "1",
+                "clause_text": "各元件的紧固螺栓应齐全、无松动。",
+            },
+        ],
+        standard_id,
+    )
+
+    items = [item for item in clauses if item["node_type"] == "item"]
+
+    assert len(items) == 2
+    assert {(item["clause_no"], item["node_label"]) for item in items} == {
+        ("4.1.2", "1"),
+        ("4.1.3", "1"),
+    }
+
+
+def test_build_tree_attaches_explicit_item_without_clause_no_to_latest_clause_even_without_list_hint() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "5.2.1",
+                "clause_text": "GIS中的避雷器、电压互感器单元与主回路的连接程序应考虑设备交流耐压试验的影响。",
+            },
+            {
+                "node_type": "item",
+                "node_label": "8",
+                "clause_text": "GIS中的避雷器、电压互感器单元与主回路的连接程序应考虑设备交流耐压试验的影响。",
+            },
+        ],
+        standard_id,
+    )
+
+    clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "5.2.1")
+    item = next(item for item in clauses if item["node_type"] == "item")
+
+    assert item["clause_no"] == "5.2.1"
+    assert item["parent_id"] == clause["id"]
+
+
+def test_build_tree_repairs_top_level_orphan_items_even_when_other_entries_have_children() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "4.1.2",
+                "clause_text": "变压器或电抗器的装卸应符合下列规定：",
+                "children": [
+                    {
+                        "node_type": "item",
+                        "node_label": "1",
+                        "clause_text": "吊装器具应符合产品技术文件要求。",
+                    }
+                ],
+            },
+            {
+                "node_type": "item",
+                "node_label": "2",
+                "clause_text": "断路器零部件应齐全、清洁、完好。",
+            },
+        ],
+        standard_id,
+    )
+
+    clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "4.1.2")
+    orphan = next(item for item in clauses if item["node_type"] == "item" and item["node_label"] == "2")
+
+    assert orphan["clause_no"] == "4.1.2"
+    assert orphan["parent_id"] == clause["id"]
+
+
+def test_build_tree_promotes_clause_like_item_labels_into_child_clauses() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "13",
+                "clause_title": "六氟化硫封闭式组合电器",
+                "clause_text": "",
+            },
+            {
+                "node_type": "item",
+                "node_label": "13.0.4",
+                "clause_text": "密封性试验，应符合下列规定：",
+            },
+            {
+                "node_type": "item",
+                "node_label": "13.0.5",
+                "clause_text": "测量六氟化硫气体含水量，应符合下列规定：",
+            },
+        ],
+        standard_id,
+    )
+
+    chapter = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "13")
+    promoted = [item for item in clauses if item["clause_no"] in {"13.0.4", "13.0.5"}]
+
+    assert len(promoted) == 2
+    assert all(item["node_type"] == "clause" for item in promoted)
+    assert all(item["parent_id"] == chapter["id"] for item in promoted)
+    assert not any(item["node_type"] == "item" and item["node_label"] in {"13.0.4", "13.0.5"} for item in clauses)
+
+
+def test_build_tree_demotes_nested_children_of_parenthesized_items_to_subitems() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "8.0.14",
+                "clause_text": "绕组连同套管的长时感应电压试验带局部放电测量（ACLD），应符合下列规定：",
+                "children": [
+                    {
+                        "clause_no": "（3）",
+                        "clause_text": "施加电压方法应符合下列规定：",
+                        "children": [
+                            {
+                                "node_type": "item",
+                                "node_label": "1)",
+                                "clause_text": "应在不大于 U2 / 3 的电压下接通电源；",
+                            },
+                            {
+                                "node_type": "item",
+                                "node_label": "2)",
+                                "clause_text": "电压上升到 U2，应保持 5min；",
+                            },
+                        ],
+                    },
+                    {
+                        "clause_no": "(4)",
+                        "clause_text": "局部放电测量应符合下列规定：",
+                        "children": [
+                            {
+                                "node_type": "item",
+                                "node_label": "1)",
+                                "clause_text": "在施加试验电压的整个期间，应监测局部放电量；",
+                            }
+                        ],
+                    },
+                ],
+            }
+        ],
+        standard_id,
+    )
+
+    clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "8.0.14")
+    parent_items = {
+        item["node_label"]: item
+        for item in clauses
+        if item["node_type"] == "item" and item["parent_id"] == clause["id"]
+    }
+    subitems = [item for item in clauses if item["node_type"] == "subitem"]
+
+    assert set(parent_items) == {"(3)", "(4)"}
+    assert {(item["parent_id"], item["node_label"]) for item in subitems} == {
+        (parent_items["(3)"]["id"], "1)"),
+        (parent_items["(3)"]["id"], "2)"),
+        (parent_items["(4)"]["id"], "1)"),
+    }
+    assert not any(
+        item["node_type"] == "item" and item["parent_id"] == clause["id"] and item["node_label"] in {"1)", "2)"}
+        for item in clauses
+    )
+
+
 def test_link_commentary_links_promoted_numbered_child_clauses() -> None:
     standard_id = uuid4()
 

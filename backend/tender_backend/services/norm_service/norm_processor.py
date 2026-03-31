@@ -1074,7 +1074,9 @@ _TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
 _TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
 _BLOCK_CLAUSE_NO_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b")
 _EMBEDDED_SECTION_HEADING_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\s+(\S.*)$")
-_NUMBERED_ITEM_HEADING_RE = re.compile(r"^\s*(\d+)(?:[)）]\s*|\s+)(.*)$")
+_NUMBERED_ITEM_HEADING_RE = re.compile(
+    r"^\s*(?:[（(]\s*(\d+)\s*[）)]|(\d+))(?:[、.)）]\s*|\s+)?(.*)$"
+)
 _LAYOUT_MARKER_RE = re.compile(r"^(?:text|text_list)$")
 _PAGE_ARTIFACT_RE = re.compile(r"^[·•]?\d+[·•]?$")
 _WATERMARK_RE = re.compile(r"(?:标准分享网|www\.bzfxw\.com|免费下载)")
@@ -1146,7 +1148,11 @@ def _parse_numbered_item_heading(line: str) -> tuple[str, str] | None:
     match = _NUMBERED_ITEM_HEADING_RE.match(stripped)
     if not match:
         return None
-    return match.group(1), match.group(2).strip()
+    code = match.group(1) or match.group(2)
+    title = match.group(3).strip()
+    if not code or not title:
+        return None
+    return code, title
 
 
 def _text_invites_numbered_items(text: str) -> bool:
@@ -1529,12 +1535,17 @@ def _call_ai_gateway(
 
 def _parse_llm_json(raw: str) -> list[dict]:
     """Extract JSON array from LLM response, handling markdown fences."""
-    def _coerce_entries(value: object) -> list[dict]:
+    def _coerce_entries(value: object) -> tuple[list[dict], bool]:
         if isinstance(value, dict):
-            return [value]
+            return [value], False
         if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
-        return []
+            entries = [item for item in value if isinstance(item, dict)]
+            if entries:
+                return entries, False
+            if not value:
+                # Some appendix/table-only scopes legitimately have no clause entries.
+                return [], True
+        return [], False
 
     text = raw.strip()
     # Strip markdown code fences
@@ -1546,8 +1557,8 @@ def _parse_llm_json(raw: str) -> list[dict]:
 
     try:
         result = json.loads(text)
-        entries = _coerce_entries(result)
-        if entries:
+        entries, accepted_empty = _coerce_entries(result)
+        if entries or accepted_empty:
             return entries
     except json.JSONDecodeError:
         decoder = json.JSONDecoder()
@@ -1557,8 +1568,8 @@ def _parse_llm_json(raw: str) -> list[dict]:
                     continue
                 try:
                     result, _end = decoder.raw_decode(text[index:])
-                    entries = _coerce_entries(result)
-                    if entries:
+                    entries, accepted_empty = _coerce_entries(result)
+                    if entries or accepted_empty:
                         return entries
                 except json.JSONDecodeError:
                     continue

@@ -168,3 +168,60 @@ def test_rebuild_outline_sections_from_pages_ignores_dates_units_and_formula_lik
         ("4", "电力变压器、油浸电抗器"),
         ("4.1", "装卸、运输与就位"),
     ]
+
+
+def test_rebuild_outline_sections_from_pages_ignores_numbered_list_items_between_real_headings() -> None:
+    pages = [
+        PageAsset(
+            page_number=25,
+            normalized_text=(
+                "5 气体绝缘金属封闭开关设备\n"
+                "5.1 一般规定\n"
+                "5.1.4 GIS运到现场后的检查应符合下列规定：\n"
+                "list\n"
+                "6 制造厂所带支架应无变形、损伤、锈蚀和锌层脱落；\n"
+                "7 出厂证件及技术资料应齐全，且应符合设备订货合同的"
+            ),
+            raw_page=None,
+            source_ref="document_section:p25",
+        ),
+        PageAsset(
+            page_number=26,
+            normalized_text=(
+                "约定。\n"
+                "5.1.5 GIS运到现场后的保管应符合产品技术文件要求，且应符合下列规定：\n"
+                "5.2 安装与调整\n"
+                "5.2.1 GIS元件安装前及安装过程中的试验工作应满足安装需要。"
+            ),
+            raw_page=None,
+            source_ref="document_section:p26",
+        ),
+        PageAsset(
+            page_number=29,
+            normalized_text=(
+                "17 螺栓连接和紧固应对称均匀用力，其力矩值应符合产品技术文件要求。\n"
+                "18 伸缩节的安装长度应符合产品技术文件要求。\n"
+                "19 套管的安装、套管的导体插入深度均应符合产品技术文\n"
+            ),
+            raw_page=None,
+            source_ref="document_section:p29",
+        ),
+        PageAsset(
+            page_number=30,
+            normalized_text=(
+                "5.3 GIS中的六氟化硫断路器的安装\n"
+                "5.3.1 条文正文"
+            ),
+            raw_page=None,
+            source_ref="document_section:p30",
+        ),
+    ]
+
+    sections = rebuild_outline_sections_from_pages(pages)
+
+    assert [(section["section_code"], section["title"]) for section in sections] == [
+        ("5", "气体绝缘金属封闭开关设备"),
+        ("5.1", "一般规定"),
+        ("5.2", "安装与调整"),
+        ("5.3", "GIS中的六氟化硫断路器的安装"),
+    ]

@@ -25,6 +25,7 @@ _FOOTER_PATTERNS = (
 _IGNORE_LINES = {"text", "text_list", "title", "image", "table"}
 _OUTLINE_HEADING_RE = re.compile(r"^(?P<code>\d+(?:\.\d+)?)\s*(?P<title>\S.*)$")
 _APPENDIX_HEADING_RE = re.compile(r"^(?:附录)\s*(?P<code>[A-Z])\s*(?P<title>\S.*)$")
+_PLAIN_NUMBERED_ITEM_RE = re.compile(r"^\d+\s+\S")
 _TITLE_SENTENCE_PUNCT = ("。", "；", "：", "!", "?", "！", "？")
 _MAX_TITLE_LENGTH = 30
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -87,6 +88,20 @@ def _looks_like_outline_title(title: str) -> bool:
     if cjk_count * 2 < len(stripped):
         return False
     return True
+
+
+def _has_list_item_context(lines: list[str], line_index: int, code: str) -> bool:
+    if "." in code:
+        return False
+    if line_index <= 0:
+        return False
+
+    previous_line = lines[line_index - 1].strip()
+    if not previous_line:
+        return False
+    if previous_line == "list":
+        return True
+    return bool(_PLAIN_NUMBERED_ITEM_RE.match(previous_line))
 
 
 def rebuild_outline_sections_from_pages(pages: list[PageAsset]) -> list[dict]:
@@ -155,6 +170,8 @@ def collect_outline_markers_from_pages(pages: list[PageAsset]) -> list[OutlineMa
             if code in seen_codes:
                 continue
             if not _looks_like_outline_title(title):
+                continue
+            if _has_list_item_context(lines, line_index, code):
                 continue
 
             seen_codes.add(code)
