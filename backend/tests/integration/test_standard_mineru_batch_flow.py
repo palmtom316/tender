@@ -498,6 +498,7 @@ def test_call_ai_gateway_uses_api_prefix(monkeypatch) -> None:
     assert raw == "[]"
     assert called["url"] == "http://ai-gateway:8100/api/ai/chat"
     assert called["timeout"] == 120.0
+    assert called["json"]["temperature"] == 0.0
 
 
 def test_call_ai_gateway_uses_longer_timeout_for_reasoner(monkeypatch) -> None:
@@ -1045,6 +1046,27 @@ def test_build_prompt_uses_table_specific_prompt() -> None:
     ))
 
     assert "规范表格" in prompt
+
+
+def test_build_prompt_includes_clause_continuation_context() -> None:
+    prompt = build_prompt(ProcessingScope(
+        scope_type="normative",
+        chapter_label="5.2 安装与调整 (2/2)",
+        text="4 应按产品技术文件要求选用吊装器具及吊点。",
+        page_start=26,
+        page_end=30,
+        section_ids=["s1"],
+        source_refs=["document_section:s1"],
+        context={
+            "document_id": "doc-1",
+            "source_refs": ["document_section:s1"],
+            "continuation_clause_no": "5.2.7",
+            "continuation_clause_heading": "5.2.7 GIS元件的安装应在制造厂技术人员指导下按产品技术文件要求进行，并应符合下列要求：",
+        },
+    ))
+
+    assert "这是同一主条款的续段" in prompt
+    assert "5.2.7" in prompt
 
 
 def test_build_block_processing_scopes_routes_three_channels() -> None:
@@ -3096,6 +3118,7 @@ def test_deterministic_entries_from_table_block_group_rows_by_primary_column() -
     assert entries == [
         {
             "clause_no": None,
+            "node_label": "电气强度",
             "clause_title": "表 4.2.4 变压器内油样性能",
             "clause_text": "电气强度：电压等级750kV，标准值≥70kV；电压等级500kV，标准值≥60kV；备注：平板电极间隙。",
             "summary": None,
@@ -3110,6 +3133,7 @@ def test_deterministic_entries_from_table_block_group_rows_by_primary_column() -
         },
         {
             "clause_no": None,
+            "node_label": "含水量",
             "clause_title": "表 4.2.4 变压器内油样性能",
             "clause_text": "含水量：电压等级750kV，标准值≤10μL/L；电压等级500kV，标准值≤10μL/L。",
             "summary": None,
@@ -3520,6 +3544,41 @@ def test_rebalance_scopes_splits_clause_dense_scope_by_clause_blocks() -> None:
     assert "3.0.3 第三条正文" not in rebalanced[0].text
     assert rebalanced[1].chapter_label == "3 基本规定 (2/2)"
     assert rebalanced[1].text.startswith("3.0.3 第三条正文")
+
+
+def test_rebalance_scopes_marks_mid_clause_continuation_with_clause_context() -> None:
+    scopes = [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="5.2 安装与调整",
+            text=(
+                "5.2 安装与调整\n\n"
+                "5.2.7 GIS元件的安装应在制造厂技术人员指导下按产品技术文件要求进行，并应符合下列要求：\n\n"
+                "1 装配工作应在无风沙条件下进行。\n\n"
+                "2 产品技术文件要求搭建防尘室时，应符合要求。\n\n"
+                "3 应按产品技术文件要求进行内检。\n\n"
+                "4 应按产品技术文件要求选用吊装器具及吊点。\n\n"
+                "5 应按制造厂的编号和规定程序进行装配，不得混装。\n\n"
+                "5.2.8 GIS中的避雷器、电压互感器单元与主回路的连接程序应考虑设备交流耐压试验的影响。"
+            ),
+            page_start=26,
+            page_end=30,
+            section_ids=["s1"],
+            source_refs=["document_section:s1"],
+            context={"document_id": "doc-1", "source_refs": ["document_section:s1"]},
+        )
+    ]
+
+    rebalanced = rebalance_scopes(scopes, max_chars=140, max_clause_blocks=2)
+
+    assert len(rebalanced) > 1
+    assert rebalanced[1].context == {
+        "document_id": "doc-1",
+        "source_refs": ["document_section:s1"],
+        "continuation_clause_no": "5.2.7",
+        "continuation_clause_heading": "5.2.7 GIS元件的安装应在制造厂技术人员指导下按产品技术文件要求进行，并应符合下列要求：",
+    }
+    assert rebalanced[1].text.startswith("4 应按产品技术文件要求选用吊装器具及吊点。")
 
 
 def test_rebalance_scopes_uses_safer_default_clause_limit() -> None:

@@ -56,6 +56,18 @@ def test_validate_clauses_accepts_top_level_chapter_as_parent_for_x_zero_y_numbe
     assert "numbering.missing_parent" not in codes
 
 
+def test_validate_clauses_skips_top_level_chapter_gap_warnings() -> None:
+    result = validate_clauses([
+        _clause(clause_no="2", clause_text="2 术语"),
+        _clause(clause_no="4", clause_text="4 六氟化硫断路器"),
+        _clause(clause_no="4.2.1", clause_text="正文"),
+    ])
+
+    codes = {issue.code for issue in result.issues}
+
+    assert "numbering.gap" not in codes
+
+
 def test_validate_clauses_detects_page_anchor_and_table_attachment_issues() -> None:
     result = validate_clauses([
         _clause(page_start=None, page_end=None),

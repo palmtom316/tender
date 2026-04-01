@@ -30,6 +30,7 @@ _TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
 # full clause sentences as chapter boundaries.
 _CHAPTER_PATTERN = re.compile(r"^\d+[ \t]+.+$", re.MULTILINE)
 _CLAUSE_HEADING_PATTERN = re.compile(r"^\d+(?:\.\d+){2,}\s+\S")
+_CLAUSE_NO_AT_START_PATTERN = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b")
 _CLAUSE_PUNCTUATION = ("，", "。", "；", "：", ":", "!", "?", "！", "？")
 _MAX_HEADING_LENGTH = 60
 _DEFAULT_SCOPE_MAX_CHARS = 3000
@@ -385,6 +386,23 @@ def _split_into_clause_blocks(text: str) -> list[tuple[str, int]]:
     return blocks
 
 
+def _continuation_context_for_clause_block(text: str) -> dict[str, object] | None:
+    paragraphs = [paragraph.strip() for paragraph in text.split("\n\n") if paragraph.strip()]
+    if not paragraphs:
+        return None
+    heading = next(
+        (paragraph for paragraph in paragraphs if _CLAUSE_HEADING_PATTERN.match(paragraph)),
+        paragraphs[0],
+    )
+    match = _CLAUSE_NO_AT_START_PATTERN.match(heading)
+    if not match:
+        return None
+    return {
+        "continuation_clause_no": match.group(1),
+        "continuation_clause_heading": heading,
+    }
+
+
 def rebalance_scopes(
     scopes: list[ProcessingScope],
     *,
@@ -466,18 +484,25 @@ def rebalance_scopes(
             continue
 
         units = clause_blocks or [(scope.text.strip(), 0)]
-        expanded_units: list[tuple[str, int]] = []
+        expanded_units: list[tuple[str, int, dict[str, object] | None]] = []
         for text, block_id in units:
             if len(text) <= max_chars:
-                expanded_units.append((text, block_id))
+                expanded_units.append((text, block_id, None))
                 continue
-            for part in _split_block_by_paragraphs(text, max_chars):
-                expanded_units.append((part, block_id))
+            split_parts = _split_block_by_paragraphs(text, max_chars)
+            continuation_context = (
+                _continuation_context_for_clause_block(text)
+                if block_id > 0 and len(split_parts) > 1
+                else None
+            )
+            for index, part in enumerate(split_parts):
+                expanded_units.append((part, block_id, continuation_context if index > 0 else None))
 
-        parts: list[tuple[str, set[int]]] = []
+        parts: list[tuple[str, set[int], dict[str, object] | None]] = []
         current = ""
         current_clause_blocks: set[int] = set()
-        for text, block_id in expanded_units:
+        current_continuation_context: dict[str, object] | None = None
+        for text, block_id, continuation_context in expanded_units:
             candidate = text if not current else f"{current}\n\n{text}"
             candidate_clause_blocks = set(current_clause_blocks)
             if block_id > 0:
@@ -490,23 +515,30 @@ def rebalance_scopes(
                     or len(candidate_clause_blocks) > max_clause_blocks
                 )
             ):
-                parts.append((current, current_clause_blocks))
+                parts.append((current, current_clause_blocks, current_continuation_context))
                 current = text
                 current_clause_blocks = {block_id} if block_id > 0 else set()
+                current_continuation_context = continuation_context
             else:
                 current = candidate
                 current_clause_blocks = candidate_clause_blocks
+                if not current_continuation_context:
+                    current_continuation_context = continuation_context
 
         if current:
-            parts.append((current, current_clause_blocks))
+            parts.append((current, current_clause_blocks, current_continuation_context))
 
         if len(parts) <= 1:
             rebalanced.append(scope)
             continue
 
         total_parts = len(parts)
-        for idx, (part, _) in enumerate(parts, start=1):
+        for idx, (part, _, continuation_context) in enumerate(parts, start=1):
             child_source_refs, child_context, child_chunks = _derive_child_provenance(scope, part)
+            if continuation_context:
+                merged_context = dict(child_context) if isinstance(child_context, dict) else {}
+                merged_context.update(continuation_context)
+                child_context = merged_context
             rebalanced.append(ProcessingScope(
                 scope_type=scope.scope_type,
                 chapter_label=f"{scope.chapter_label} ({idx}/{total_parts})",

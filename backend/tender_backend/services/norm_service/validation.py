@@ -205,6 +205,9 @@ def _validate_numbering(
     for clause, parsed in parsed_sequence:
         parent_key = parsed[:-1]
         segment = parsed[-1]
+        if not parent_key:
+            last_segment_by_parent[parent_key] = segment
+            continue
         if parent_key not in last_segment_by_parent:
             if segment > 1:
                 _add_issue(

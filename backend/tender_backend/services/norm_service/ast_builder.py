@@ -71,7 +71,8 @@ def deduplicate_entries(entries: list[dict]) -> list[dict]:
                 node_key = f"{cno}#{node_label}" if cno else f"{node_type}:{node_label}"
             else:
                 node_key = cno
-        key = f"{ctype}:{node_key}" if node_key else ""
+        source_label = str(entry.get("source_label") or "").strip()
+        key = f"{ctype}:{node_key}:{source_label}" if node_key else ""
         if key and key in seen:
             logger.debug("duplicate_clause_removed", node_key=node_key, clause_type=ctype)
             continue
@@ -385,7 +386,8 @@ def _build_nested_ast(
             parent_key=parent_key,
             sibling_index=sibling_index,
         )
-        dedupe_key = f"{clause_type}:{node_key}" if node_key else ""
+        source_label = str(current_entry.get("source_label") or "").strip()
+        dedupe_key = f"{clause_type}:{node_key}:{source_label}" if node_key else ""
         if dedupe_key and dedupe_key in seen_node_keys:
             logger.debug("duplicate_clause_removed", node_key=node_key, clause_type=clause_type)
             continue

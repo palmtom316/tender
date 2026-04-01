@@ -114,6 +114,20 @@ TAG_SUMMARY_PROMPT = """\
 def build_prompt(scope: ProcessingScope) -> str:
     """Build the appropriate LLM prompt based on scope type."""
     context_parts: list[str] = []
+    continuation_clause_no = ""
+    continuation_clause_heading = ""
+    if isinstance(scope.context, dict):
+        continuation_clause_no = str(scope.context.get("continuation_clause_no") or "").strip()
+        continuation_clause_heading = str(scope.context.get("continuation_clause_heading") or "").strip()
+    if continuation_clause_no:
+        continuation_note = (
+            f"这是同一主条款的续段，主条款编号为 {continuation_clause_no}。"
+            "如果当前片段从子项中间开始，仍需将这些内容归属到该主条款，"
+            "不要把首个可见数字序号误判为新的主条款编号。"
+        )
+        if continuation_clause_heading:
+            continuation_note += f" 主条款标题：{continuation_clause_heading}"
+        context_parts.append(continuation_note)
     if scope.source_refs:
         context_parts.append(f"来源引用: {', '.join(scope.source_refs)}")
     if scope.context:

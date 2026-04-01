@@ -966,6 +966,7 @@ def _deterministic_table_entries_from_block(block: BlockSegment) -> list[dict]:
         clause_text = f"{primary}：" + "；".join(sentence_parts) + "。"
         entries.append({
             "clause_no": None,
+            "node_label": primary,
             "clause_title": table_title,
             "clause_text": clause_text,
             "summary": None,
@@ -1497,7 +1498,7 @@ def _call_ai_gateway(
             {"role": "system", "content": "你是一个专业的建筑工程规范条款提取助手。仅输出JSON，不要输出其他内容。"},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.1,
+        "temperature": 0.0,
         "max_tokens": 8192,
     }
 

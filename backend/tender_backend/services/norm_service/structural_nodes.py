@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from tender_backend.services.norm_service.document_assets import DocumentAsset
 from tender_backend.services.norm_service.layout_compressor import PageWindow
@@ -10,11 +11,17 @@ from tender_backend.services.norm_service.outline_rebuilder import (
     collect_outline_markers_from_pages,
     normalize_outline_page_lines,
 )
-from tender_backend.services.norm_service.scope_splitter import ProcessingScope, split_into_scopes
+from tender_backend.services.norm_service.scope_splitter import (
+    ProcessingScope,
+    _split_by_chapters,
+    split_into_scopes,
+)
 
 _COMMENTARY_BOUNDARY_LINES = ("附：条文说明", "附:条文说明", "条文说明")
 _COMMENTARY_APPENDIX_ONLY_LINES = ("附：条文说明", "附:条文说明")
 _NON_NORMATIVE_BACK_MATTER_LINES = ("本规范用词说明", "引用标准名录")
+_CLAUSE_HEADING_PREFIX_RE = re.compile(r"^(?:\d+(?:\.\d+)*|[A-Z](?:\.\d+)*)")
+_COMMENTARY_SCAN_MAX_LINES = 6
 
 
 @dataclass(frozen=True)
@@ -179,25 +186,34 @@ def _apply_page_scope_metadata(
 
 
 def _starts_commentary_appendix(lines: list[str]) -> bool:
-    normalized_lines = [line.strip().replace(" ", "") for line in lines if line.strip()]
-    if not normalized_lines:
-        return False
-    return normalized_lines[0] in _COMMENTARY_BOUNDARY_LINES
+    return _commentary_boundary_line_index(lines) is not None
+
+
+def _commentary_boundary_line_index(lines: list[str]) -> int | None:
+    scanned = 0
+    for index, line in enumerate(lines):
+        normalized = line.strip().replace(" ", "")
+        if not normalized:
+            continue
+        scanned += 1
+        if _is_commentary_boundary_heading(normalized):
+            return index
+        if scanned >= _COMMENTARY_SCAN_MAX_LINES:
+            break
+    return None
+
+
+def _is_commentary_boundary_heading(normalized_line: str) -> bool:
+    if normalized_line in _COMMENTARY_BOUNDARY_LINES:
+        return True
+    return normalized_line.endswith("条文说明") and not _CLAUSE_HEADING_PREFIX_RE.match(normalized_line)
 
 
 def _strip_commentary_appendix_heading(lines: list[str]) -> list[str]:
-    normalized_lines = [line.strip().replace(" ", "") for line in lines if line.strip()]
-    if not normalized_lines or normalized_lines[0] not in _COMMENTARY_APPENDIX_ONLY_LINES:
+    boundary_index = _commentary_boundary_line_index(lines)
+    if boundary_index is None:
         return lines
-    stripped: list[str] = []
-    heading_removed = False
-    for line in lines:
-        normalized = line.strip().replace(" ", "")
-        if not heading_removed and normalized in _COMMENTARY_APPENDIX_ONLY_LINES:
-            heading_removed = True
-            continue
-        stripped.append(line)
-    return stripped
+    return lines[boundary_index + 1:]
 
 
 def _is_non_normative_back_matter(lines: list[str]) -> bool:
@@ -317,12 +333,17 @@ def _build_commentary_scopes(document_asset: DocumentAsset) -> list[ProcessingSc
     if not commentary_pages:
         return []
 
-    scopes = split_into_scopes(commentary_pages)
-    commentary_scopes = [scope for scope in scopes if scope.scope_type == "commentary"]
-    if not commentary_scopes and scopes:
-        commentary_scopes = scopes
-        for scope in commentary_scopes:
-            scope.scope_type = "commentary"
+    commentary_text = "\n\n".join(page.text for page in commentary_pages if page.text.strip())
+    if not commentary_text.strip():
+        return []
+
+    commentary_scopes = _split_by_chapters(
+        commentary_text,
+        commentary_pages[0].page_start,
+        commentary_pages[-1].page_end,
+        [],
+        "commentary",
+    )
     document_id = str(document_asset.document_id)
     commentary_nodes = [
         StructuralNode(

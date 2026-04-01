@@ -96,3 +96,36 @@ def test_build_clause_ast_normalizes_untrusted_enum_fields_to_safe_values() -> N
     assert roots[0].clause_type == "normative"
     assert roots[0].source_type == "text"
     assert roots[0].node_type == "clause"
+
+
+def test_build_clause_ast_keeps_nested_items_with_same_node_key_from_different_source_labels() -> None:
+    standard_id = uuid4()
+
+    roots = build_clause_ast(
+        [
+            {
+                "clause_no": "A.0.1",
+                "clause_text": "父条文",
+                "children": [
+                    {
+                        "clause_no": "A.0.1",
+                        "node_type": "item",
+                        "node_label": "1",
+                        "clause_text": "附录范围内的第1项",
+                        "source_label": "附录A",
+                    },
+                    {
+                        "clause_no": "A.0.1",
+                        "node_type": "item",
+                        "node_label": "1",
+                        "clause_text": "正文引用里的第1项",
+                        "source_label": "正文引用",
+                    },
+                ],
+            }
+        ],
+        standard_id,
+    )
+
+    assert len(roots) == 1
+    assert [child.source_label for child in roots[0].children] == ["附录A", "正文引用"]

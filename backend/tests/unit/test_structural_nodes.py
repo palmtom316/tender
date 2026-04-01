@@ -405,3 +405,125 @@ def test_build_processing_scopes_starts_commentary_after_actual_provision_append
     assert scopes[1].source_refs == ["document.raw_payload.pages[42]"]
     assert "本规范用词说明" not in scopes[1].text
     assert "引用标准名录" not in scopes[1].text
+
+
+def test_build_processing_scopes_starts_commentary_after_full_title_commentary_heading() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("88888888-8888-8888-8888-888888888888"),
+        parser_name="mineru",
+        parser_version="v1",
+        raw_payload={},
+        pages=[
+            PageAsset(
+                page_number=38,
+                normalized_text=(
+                    "附录A 气体绝缘金属封闭开关设备基础及预埋件允许偏差\n"
+                    "A.0.1 附录正文"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[38]",
+            ),
+            PageAsset(
+                page_number=39,
+                normalized_text=(
+                    "本规范用词说明\n"
+                    "为便于在执行本规范条文时区别对待，对要求严格程度不同的用词说明如下："
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[39]",
+            ),
+            PageAsset(
+                page_number=40,
+                normalized_text=(
+                    "引用标准名录\n"
+                    "《高压电器标准》GB/T 11022"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[40]",
+            ),
+            PageAsset(
+                page_number=42,
+                normalized_text=(
+                    "电气装置安装工程高压电器施工及验收规范条文说明\n"
+                    "4 六氟化硫断路器的安装与调整\n"
+                    "4.2.1 条文说明正文"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[42]",
+            ),
+        ],
+        tables=[],
+        full_markdown="",
+    )
+
+    scopes = build_processing_scopes(asset)
+
+    assert [scope.scope_type for scope in scopes] == ["normative", "commentary"]
+    assert scopes[0].chapter_label == "附录A 气体绝缘金属封闭开关设备基础及预埋件允许偏差"
+    assert scopes[1].chapter_label == "4 六氟化硫断路器的安装与调整"
+    assert "条文说明正文" in scopes[1].text
+    assert "高压电器施工及验收规范条文说明" not in scopes[1].text
+
+
+def test_build_processing_scopes_starts_commentary_after_cover_lines_before_boundary() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("99999999-9999-9999-9999-999999999999"),
+        parser_name="mineru",
+        parser_version="v1",
+        raw_payload={},
+        pages=[
+            PageAsset(
+                page_number=64,
+                normalized_text=(
+                    "11 电容器\n"
+                    "11.5 工程交接验收\n"
+                    "11.5.1 电容器组采用差压保护时，差压保护的二次接线应与电容器组一次接线方式相一致。"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[64]",
+            ),
+            PageAsset(
+                page_number=65,
+                normalized_text=(
+                    "引用标准名录\n"
+                    "《电气装置安装工程 电气设备交接试验标准》GB50150"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[65]",
+            ),
+            PageAsset(
+                page_number=67,
+                normalized_text=(
+                    "中华人民共和国国家标准\n"
+                    "电气装置安装工程高压电器施工及验收规范\n"
+                    "GB 50147 - 2010\n"
+                    "条文说明"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[67]",
+            ),
+            PageAsset(
+                page_number=68,
+                normalized_text=(
+                    "制定说明\n"
+                    "本规范修订编写组于2005年2月成立。"
+                ),
+                raw_page=None,
+                source_ref="document.raw_payload.pages[68]",
+            ),
+        ],
+        tables=[],
+        full_markdown="",
+    )
+
+    scopes = build_processing_scopes(asset)
+
+    assert [scope.scope_type for scope in scopes] == ["normative", "commentary"]
+    assert scopes[0].chapter_label == "11.5 工程交接验收"
+    assert scopes[1].page_start == 68
+    assert scopes[1].page_end == 68
+    assert scopes[1].source_refs == ["document.raw_payload.pages[68]"]
+    assert "制定说明" in scopes[1].text
+    assert "中华人民共和国国家标准" not in scopes[1].text
+    assert "GB 50147 - 2010" not in scopes[1].text
+    assert "条文说明" not in scopes[1].text
