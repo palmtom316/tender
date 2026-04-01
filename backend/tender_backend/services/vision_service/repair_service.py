@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,7 +13,6 @@ import structlog
 from psycopg import Connection
 
 from tender_backend.core.config import get_settings
-from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.services.norm_service.repair_tasks import RepairTask
 from tender_backend.services.vision_service.pdf_renderer import render_pdf_page_range
 from tender_backend.services.vision_service.repair_prompt import build_repair_messages
@@ -23,7 +23,9 @@ AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "http://localhost:8001")
 _MAX_REPAIR_MODEL_ATTEMPTS = 3
 _RETRYABLE_REPAIR_STATUS_CODES = {502, 503, 504}
 
-_agent_repo = AgentConfigRepository()
+
+def _repair_retry_backoff_seconds(attempt: int) -> float:
+    return float(2 ** max(0, attempt - 1))
 
 
 @dataclass(slots=True)
@@ -105,20 +107,6 @@ def _call_repair_model(conn: Connection, task: RepairTask, document_id: str) -> 
         "max_tokens": 4096,
     }
 
-    config = _agent_repo.get_by_key(conn, "tag_clauses")
-    if config and config.base_url and config.api_key:
-        payload["primary_override"] = {
-            "base_url": config.base_url,
-            "api_key": config.api_key,
-            "model": "Qwen/Qwen3-VL-8B-Instruct",
-        }
-    if config and config.fallback_base_url and config.fallback_api_key:
-        payload["fallback_override"] = {
-            "base_url": config.fallback_base_url,
-            "api_key": config.fallback_api_key,
-            "model": "Qwen/Qwen3-VL-8B-Instruct",
-        }
-
     for attempt in range(1, _MAX_REPAIR_MODEL_ATTEMPTS + 1):
         try:
             response = httpx.post(
@@ -140,6 +128,7 @@ def _call_repair_model(conn: Connection, task: RepairTask, document_id: str) -> 
                 max_attempts=_MAX_REPAIR_MODEL_ATTEMPTS,
                 error=str(exc),
             )
+            time.sleep(_repair_retry_backoff_seconds(attempt))
 
     raise RuntimeError("unreachable")
 

@@ -10,7 +10,7 @@
   - latest `document_id`: `c7a3a96f-8f2b-4645-8262-f8aeddaec198`
   - latest verified rerun summary: `total=530`, `normative=435`, `commentary=95`, `scopes_processed=55`, `repair_task_count=1`, `issues_before_repair=3`, `issues_after_repair=3`
   - latest verified rerun repair status: repair 侧已发生 `2` 次 transient retry，但第 `3` 次仍返回 `502 Bad Gateway` on `http://127.0.0.1:8100/api/ai/chat`
-  - current code status on worktree: `repair retry + continuation-aware scope rebalance + top-level numbering noise suppression` 已落地并完成真实复跑验证
+  - current code status on worktree: `repair retry backoff + normal-path missing clause-host seeding + vision repair no longer inherits tag_clauses provider overrides` 已落地；fresh rerun 正在写入 `/tmp/gb50147-rerun-fix-6.log`
 - `GB 50150-2016`
   - latest `standard_id`: `35d2f2f0-da86-4b55-b125-d40f5e9d59d8`
   - latest `document_id`: `5be09b3f-3bd1-471a-8163-efcaf2b36347`
@@ -150,6 +150,7 @@ order by clause_no, node_type, node_label;
     - 顶层章节 host 噪声已由 `validation` 顶层 gap 抑制消掉。
     - mid-clause continuation 修复后，`8.2` 残留从 `8.2.10` 前移为 `8.2.6`，说明 scope continuation 丢失问题只解决了后半段一部分，仍有更早的 sibling extraction 缺口。
   - `repair_task_count=1` 仍然只落在 table repair；本轮 repair 侧已触发 `2` 次 retry，但网关第 `3` 次仍返回 `502`，所以 `repair_error` 仍未清零。
+  - 2026-04-01 新一轮代码审查已确认：repair 的 `502` 里至少有一类并非瞬时网关抖动，而是 `vision_repair` 误复用了 `tag_clauses` 的 text-only provider override，导致带 `image_url` 的多模态请求被上游按 `400 invalid_request_error` 拒绝后再由网关翻成 `502`；本轮已移除这层 override，并保留 `1s/2s` backoff。
   - `null_clause_no_count=3` 仍集中在 `表 5.2.2 GIS 设备基础及预埋件的允许偏差(mm)`，属于 table-derived 匿名条目。
 - `GB 50150-2016`
   - `844` 与 OCR section-heavy 形态一致，暂不按总数开 fix。
@@ -160,5 +161,5 @@ order by clause_no, node_type, node_label;
 
 - 优先复查最新 `standard` 行，不要混用旧 rerun 的 `standard_id`。
 - 每次真实复跑后，先回写本文件第 1 节和第 5 节，再决定是否更新 persisted acceptance snapshot。
-- 当前 worktree 已完成一轮新的 `GB 50147-2010` 真实复跑，结果见 `/tmp/gb50147-rerun-fix-4.log`。
+- 当前 worktree 已完成一轮新的 `GB 50147-2010` 真实复跑，结果见 `/tmp/gb50147-rerun-fix-4.log`；下一轮验证日志写入 `/tmp/gb50147-rerun-fix-6.log`。
 - 本清单当前依据 2026-04-01 已验证 rerun 与 worktree 代码状态整理；后续若样本再次复跑，必须以新结果重写第 1 节与第 5 节。

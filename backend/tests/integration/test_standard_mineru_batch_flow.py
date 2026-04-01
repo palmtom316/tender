@@ -2708,6 +2708,123 @@ def test_process_standard_ai_seeds_sentence_like_section_titles_for_single_stand
     ]
 
 
+def test_process_standard_ai_seeds_missing_sentence_like_section_titles_on_normal_path(monkeypatch) -> None:
+    standard_id = UUID("11111111-2222-3333-4444-555555555555")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {
+            "id": "s1",
+            "section_code": "8.2.1",
+            "title": "安装前的基础检查，应符合产品技术文件要求，并应符合本规范第4.2.1条的规定。",
+            "text": "安装前的基础检查，应符合产品技术文件要求，并应符合本规范第4.2.1条的规定。",
+            "level": 1,
+            "page_start": 47,
+            "page_end": 47,
+        },
+        {
+            "id": "s2",
+            "section_code": "8.2.6",
+            "title": "操动机构的安装调整，应符合下列要求：",
+            "text": "操动机构的安装调整，应符合下列要求：",
+            "level": 1,
+            "page_start": 49,
+            "page_end": 49,
+        },
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda *args, **kwargs: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="8.2 安装与调整 (2/3)",
+            text="8.2.6 操动机构的安装调整，应符合下列要求：",
+            page_start=47,
+            page_end=51,
+            section_ids=["s2"],
+            source_refs=["document_section:s2"],
+        ),
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [
+        {
+            "clause_no": "8.2.6",
+            "clause_title": None,
+            "clause_text": "操动机构的安装调整，应符合下列要求：",
+            "summary": None,
+            "tags": [],
+            "page_start": 49,
+            "page_end": 49,
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s2",
+            "source_refs": ["document_section:s2"],
+            "source_label": "8.2 安装与调整 (2/3)",
+        }
+    ])
+    monkeypatch.setattr(
+        norm_processor,
+        "build_tree",
+        lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or list(entries),
+    )
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: len(current_clauses))
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 50147-2010",
+        "specialty": "电气",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="c7a3a96f-8f2b-4645-8262-f8aeddaec198",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["entries"] == [
+        {
+            "clause_no": "8.2.6",
+            "clause_title": None,
+            "clause_text": "操动机构的安装调整，应符合下列要求：",
+            "summary": None,
+            "tags": [],
+            "page_start": 49,
+            "page_end": 49,
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s2",
+            "source_refs": ["document_section:s2"],
+            "source_label": "8.2 安装与调整 (2/3)",
+        },
+        {
+            "clause_no": "8.2.1",
+            "clause_title": None,
+            "clause_text": "安装前的基础检查，应符合产品技术文件要求，并应符合本规范第4.2.1条的规定。",
+            "summary": None,
+            "tags": [],
+            "page_start": 47,
+            "page_end": 47,
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s1",
+            "source_refs": ["document_section:s1"],
+            "source_label": "8.2.1 安装前的基础检查，应符合产品技术文件要求，并应符合本规范第4.2.1条的规定。",
+        },
+    ]
+
+
 def test_process_standard_ai_uses_deterministic_entries_for_high_confidence_blocks(monkeypatch) -> None:
     standard_id = UUID("ff2ddb6c-ba8e-4e42-862f-e75d5824437a")
     captured: dict[str, object] = {}

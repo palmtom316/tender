@@ -34,7 +34,12 @@ from tender_backend.services.norm_service.ast_merger import merge_repair_patches
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes
 from tender_backend.services.norm_service.structural_nodes import build_processing_scopes as build_structured_processing_scopes
-from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
+from tender_backend.services.norm_service.tree_builder import (
+    build_tree,
+    link_commentary,
+    normalize_clause_no,
+    validate_tree,
+)
 from tender_backend.services.norm_service.validation import validate_clauses
 from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
@@ -1356,6 +1361,58 @@ def _seed_section_title_entries(sections: list[dict]) -> list[dict]:
     return seeded_entries
 
 
+def _should_seed_missing_clause_host_from_section(section: dict) -> bool:
+    code = str(section.get("section_code") or "").strip()
+    if not _is_clause_like_section_code(code):
+        return False
+    title = str(section.get("title") or "").strip()
+    if not title or _TOC_PAGE_REF.search(title) or _TOC_DOT_LEADERS.search(title):
+        return False
+    text = str(section.get("text") or "").strip()
+    if text and text != title:
+        return False
+    return bool(_SECTION_TITLE_SENTENCE_SIGNAL_RE.search(title))
+
+
+def _seed_missing_clause_host_entries(sections: list[dict], existing_entries: list[dict]) -> list[dict]:
+    existing_clause_nos = {
+        normalize_clause_no(entry.get("clause_no"))
+        for entry in existing_entries
+        if str(entry.get("clause_type") or "normative").strip() != "commentary"
+        and str(entry.get("node_type") or "").strip() not in {"item", "subitem", "commentary"}
+        and normalize_clause_no(entry.get("clause_no"))
+    }
+
+    seeded_entries: list[dict] = []
+    for section in sections:
+        if not _should_seed_missing_clause_host_from_section(section):
+            continue
+
+        clause_no = normalize_clause_no(section.get("section_code"))
+        if not clause_no or clause_no in existing_clause_nos:
+            continue
+
+        existing_clause_nos.add(clause_no)
+        section_id = str(section.get("id") or "").strip()
+        source_ref = f"document_section:{section_id}" if section_id else None
+        seeded_entries.append({
+            "clause_no": clause_no,
+            "clause_title": None,
+            "clause_text": str(section.get("title") or "").strip(),
+            "summary": None,
+            "tags": [],
+            "page_start": section.get("page_start"),
+            "page_end": section.get("page_end"),
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": source_ref,
+            "source_refs": [source_ref] if source_ref else [],
+            "source_label": _section_heading_text(section),
+        })
+
+    return seeded_entries
+
+
 def _is_heading_only_outline_text(clause_no: str, clause_text: str) -> bool:
     normalized_text = " ".join(str(clause_text or "").split())
     if not normalized_text:
@@ -1800,6 +1857,8 @@ def process_standard_ai(
 
         if use_single_standard_block_path:
             all_entries.extend(_seed_section_title_entries(sections))
+        else:
+            all_entries.extend(_seed_missing_clause_host_entries(sections, all_entries))
 
         logger.info("all_scopes_processed", total_entries=len(all_entries))
 
