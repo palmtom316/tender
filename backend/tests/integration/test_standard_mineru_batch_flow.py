@@ -137,9 +137,12 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
         "POST",
         "https://mineru.net/api/v4/file-urls/batch",
         {
-            "files": [{"name": "spec.pdf", "data_id": "11111111-1111-1111-1111-111111111111"}],
+            "files": [{
+                "name": "spec.pdf",
+                "data_id": "11111111-1111-1111-1111-111111111111",
+                "is_ocr": True,
+            }],
             "model_version": "vlm",
-            "is_ocr": True,
             "enable_table": True,
             "language": "ch",
         },
@@ -179,6 +182,88 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
             },
         },
     ]
+
+
+def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "spec.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7 fake pdf")
+
+    calls: list[tuple[str, str, object | None, object | None]] = []
+
+    def fake_post(url: str, **kwargs):
+        calls.append(("POST", url, kwargs.get("json"), kwargs.get("headers")))
+        if url.endswith("/file-urls/batch"):
+            return _FakeResponse(json_data={
+                "code": 0,
+                "data": {
+                    "batch_id": "batch-123",
+                    "file_urls": ["https://upload.example.com/file-1"],
+                },
+            })
+        pytest.fail(f"unexpected POST {url}")
+
+    def fake_put(url: str, **kwargs):
+        calls.append(("PUT", url, kwargs.get("data"), kwargs.get("headers")))
+        return _FakeResponse(status_code=200)
+
+    def fake_get(url: str, **kwargs):
+        calls.append(("GET", url, None, kwargs.get("headers")))
+        if url.endswith("/extract-results/batch/batch-123"):
+            return _FakeResponse(json_data={
+                "code": 0,
+                "data": {
+                    "batch_id": "batch-123",
+                    "extract_result": [{
+                        "file_name": "spec.pdf",
+                        "state": "done",
+                        "err_msg": "",
+                        "full_zip_url": "https://download.example.com/result.zip",
+                    }],
+                },
+            })
+        if url == "https://download.example.com/result.zip":
+            return _FakeResponse(content=_zip_bytes(
+                "1 总则\n正文内容",
+                {"middle.json": '{"pages": [{"page_number": 1, "markdown": "1 总则\\n正文内容"}]}'},
+            ))
+        pytest.fail(f"unexpected GET {url}")
+
+    monkeypatch.setattr(norm_processor._agent_repo, "get_by_key", lambda conn, key: SimpleNamespace(
+        enabled=True,
+        api_key="token",
+        base_url="https://mineru.net/api/v4/extract/task",
+    ))
+    monkeypatch.setattr(norm_processor, "_get_pdf_path", lambda conn, document_id: str(pdf_path))
+    monkeypatch.setattr(norm_processor, "get_settings", lambda: SimpleNamespace(
+        standard_mineru_model_version="pipeline",
+        standard_mineru_language="en",
+        standard_mineru_enable_table=False,
+    ))
+    monkeypatch.setattr(norm_processor.httpx, "post", fake_post)
+    monkeypatch.setattr(norm_processor.httpx, "put", fake_put)
+    monkeypatch.setattr(norm_processor.httpx, "get", fake_get)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+    monkeypatch.setattr(parse_parser, "persist_sections", lambda conn, *, document_id, sections: len(sections))
+    monkeypatch.setattr(parse_parser, "persist_tables", lambda conn, *, document_id, tables: len(tables))
+    monkeypatch.setattr(parse_parser, "update_document_parse_assets", lambda *args, **kwargs: None)
+
+    norm_processor._parse_via_mineru(object(), "22222222-2222-2222-2222-222222222222")
+
+    assert calls[0] == (
+        "POST",
+        "https://mineru.net/api/v4/file-urls/batch",
+        {
+            "files": [{
+                "name": "spec.pdf",
+                "data_id": "22222222-2222-2222-2222-222222222222",
+                "is_ocr": True,
+            }],
+            "model_version": "pipeline",
+            "enable_table": False,
+            "language": "en",
+        },
+        {"Authorization": "Bearer token"},
+    )
 
 
 def test_mineru_to_sections_uses_page_markdown_to_anchor_headings() -> None:
@@ -3361,6 +3446,120 @@ def test_process_standard_ai_keeps_completed_result_when_repair_tasks_timeout(mo
     assert summary["issues_after_repair"] == 1
     assert summary["repair_error"] == "timed out"
     assert "repair tasks failed: timed out" in summary["warnings"]
+    assert inserted_clauses[0]["clause_text"] == "抗压强度不应小于30 MP"
+
+
+def test_process_standard_ai_skips_repair_when_disabled(monkeypatch) -> None:
+    standard_id = UUID("45454545-4545-4545-4545-454545454545")
+    inserted_clauses: list[dict] = []
+    clauses = [{
+        "id": uuid4(),
+        "standard_id": standard_id,
+        "parent_id": None,
+        "clause_no": "1",
+        "node_type": "clause",
+        "node_key": "1",
+        "node_label": None,
+        "clause_title": None,
+        "clause_text": "抗压强度不应小于30 MP",
+        "summary": None,
+        "tags": [],
+        "page_start": 1,
+        "page_end": 1,
+        "clause_type": "normative",
+        "source_type": "text",
+        "source_label": "1 总则",
+        "source_ref": "document_section:s1",
+        "source_refs": ["document_section:s1"],
+    }]
+    validation_issue = SimpleNamespace(
+        code="text.symbol_numeric",
+        severity="warning",
+        message="suspect unit",
+        clause_id=clauses[0]["id"],
+        clause_no="1",
+        page_start=1,
+        page_end=1,
+        source_ref="document_section:s1",
+        snippet="30 MP",
+        details={},
+    )
+    validation_result = SimpleNamespace(
+        issues=[validation_issue],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 1},
+    )
+
+    monkeypatch.setattr(norm_processor, "get_settings", lambda: SimpleNamespace(
+        standard_ai_gateway_timeout_seconds=120.0,
+        standard_ai_scope_delay_ms=0,
+        standard_ai_scope_delay_jitter_ms=0,
+        standard_repair_enabled=False,
+    ))
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "title": "1 总则", "text": "正文", "level": 1, "page_start": 1, "page_end": 1},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1 总则",
+            text="1 抗压强度不应小于30 MP",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: deepcopy(clauses))
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda current_clauses: current_clauses)
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda current_clauses, outline_clause_nos=None: validation_result)
+    monkeypatch.setattr(
+        norm_processor,
+        "build_repair_tasks",
+        lambda current_clauses, issues: [
+            SimpleNamespace(
+                task_type="symbol_numeric_repair",
+                source_ref="document_section:s1",
+                page_start=1,
+                page_end=1,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        norm_processor,
+        "run_repair_tasks",
+        lambda conn, document_id, tasks: pytest.fail("repair should be disabled"),
+    )
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda current_clauses: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(
+        norm_processor._std_repo,
+        "bulk_create_clauses",
+        lambda conn, current_clauses: inserted_clauses.extend(deepcopy(current_clauses)) or len(current_clauses),
+    )
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, current_clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="97979797-9797-9797-9797-979797979797",
+    )
+
+    assert summary["status"] == "completed"
+    assert summary["repair_task_count"] == 0
+    assert summary["issues_before_repair"] == 1
+    assert summary["issues_after_repair"] == 1
+    assert summary["repair_error"] is None
     assert inserted_clauses[0]["clause_text"] == "抗压强度不应小于30 MP"
 
 

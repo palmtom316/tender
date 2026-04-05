@@ -462,6 +462,7 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
     base_url = (config.base_url or "").rstrip("/")
     api_root = _mineru_api_root(base_url)
     headers = {"Authorization": f"Bearer {config.api_key}"}
+    settings = get_settings()
 
     # Step 1: Ask MinerU for a batch upload URL.
     logger.info("mineru_requesting_upload_url", document_id=document_id, url=api_root)
@@ -473,11 +474,11 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
         "files": [{
             "name": os.path.basename(pdf_path),
             "data_id": document_id,
+            "is_ocr": True,
         }],
-        "model_version": "vlm",
-        "is_ocr": True,
-        "enable_table": True,
-        "language": "ch",
+        "model_version": getattr(settings, "standard_mineru_model_version", "vlm"),
+        "enable_table": getattr(settings, "standard_mineru_enable_table", True),
+        "language": getattr(settings, "standard_mineru_language", "ch"),
     }
     try:
         resp = httpx.post(
@@ -1705,6 +1706,7 @@ def process_standard_ai(
 ) -> dict:
     """Run the AI extraction phase using existing OCR sections."""
     started_at = time.time()
+    settings = get_settings()
 
     try:
         standard = _std_repo.get_standard(conn, standard_id)
@@ -1806,7 +1808,11 @@ def process_standard_ai(
         clauses = _prune_empty_outline_hosts(clauses, outline_clause_nos=outline_clause_nos)
         clauses = link_commentary(clauses)
         structured_validation = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
-        repair_tasks = build_repair_tasks(clauses, structured_validation.issues)
+        repair_tasks = (
+            build_repair_tasks(clauses, structured_validation.issues)
+            if getattr(settings, "standard_repair_enabled", True)
+            else []
+        )
         repair_patches: list = []
         repair_error: str | None = None
         if repair_tasks:

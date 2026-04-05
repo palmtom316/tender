@@ -21,6 +21,12 @@ class _FakeResponse:
 
 
 def test_run_repair_tasks_uses_local_repair_task_type(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_post(url, json, timeout):
+        captured["payload"] = json
+        return _FakeResponse()
+
     monkeypatch.setattr(
         "tender_backend.services.vision_service.repair_service._get_pdf_path",
         lambda conn, document_id: "/tmp/test.pdf",
@@ -37,14 +43,16 @@ def test_run_repair_tasks_uses_local_repair_task_type(monkeypatch) -> None:
             get_by_key=lambda conn, key: SimpleNamespace(
                 base_url="https://example.com",
                 api_key="secret",
+                primary_model="vision-primary",
                 fallback_base_url=None,
                 fallback_api_key=None,
+                fallback_model="vision-fallback",
             )
         ),
     )
     monkeypatch.setattr(
         "tender_backend.services.vision_service.repair_service.httpx.post",
-        lambda url, json, timeout: _FakeResponse(),
+        fake_post,
     )
 
     result = run_repair_tasks(
@@ -65,3 +73,4 @@ def test_run_repair_tasks_uses_local_repair_task_type(monkeypatch) -> None:
     assert result[0].task_type == "table_repair"
     assert result[0].source_ref == "table:t1"
     assert result[0].patched_table_html == "<table></table>"
+    assert captured["payload"]["primary_override"]["model"] == "vision-primary"

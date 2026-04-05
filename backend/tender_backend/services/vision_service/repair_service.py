@@ -100,13 +100,13 @@ def _call_repair_model(conn: Connection, task: RepairTask, document_id: str) -> 
         payload["primary_override"] = {
             "base_url": config.base_url,
             "api_key": config.api_key,
-            "model": "Qwen/Qwen3-VL-8B-Instruct",
+            "model": config.primary_model or None,
         }
     if config and config.fallback_base_url and config.fallback_api_key:
         payload["fallback_override"] = {
             "base_url": config.fallback_base_url,
             "api_key": config.fallback_api_key,
-            "model": "Qwen/Qwen3-VL-8B-Instruct",
+            "model": config.fallback_model or None,
         }
 
     response = httpx.post(
