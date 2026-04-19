@@ -47,27 +47,38 @@ def _coerce_uuid(value: Any) -> UUID:
 
 
 def _pages_from_raw_payload(raw_payload: dict[str, Any]) -> list[PageAsset]:
+    """Return canonical PageAssets from a raw_payload.
+
+    Only dicts shaped like `{page_number: int, markdown: non-empty str}` are
+    accepted. Legacy layout blocks (`{type, content}`) and pipeline-backend
+    residue (`{preproc_blocks: [...]}`) are silently dropped so the caller can
+    decide whether to fall back to section-derived pages.
+    """
     raw_pages = raw_payload.get("pages")
     if not isinstance(raw_pages, list):
         return []
     pages: list[PageAsset] = []
     for index, item in enumerate(raw_pages):
-        raw_page = item if isinstance(item, dict) else None
-        page_number = raw_page.get("page_number") if raw_page else None
-        markdown = raw_page.get("markdown") if raw_page else None
+        if not isinstance(item, dict):
+            continue
+        page_number = item.get("page_number")
+        markdown = item.get("markdown")
+        if (
+            not isinstance(page_number, int)
+            or page_number <= 0
+            or not isinstance(markdown, str)
+            or not markdown.strip()
+        ):
+            continue
         pages.append(
             PageAsset(
                 page_number=page_number,
                 normalized_text=markdown,
-                raw_page=raw_page,
+                raw_page=item,
                 source_ref=f"document.raw_payload.pages[{index}]",
             )
         )
     return pages
-
-
-def _has_textual_page_assets(pages: list[PageAsset]) -> bool:
-    return any((page.normalized_text or "").strip() for page in pages)
 
 
 def _normalize_text(value: str | None) -> str:
@@ -380,7 +391,7 @@ def build_document_asset(
 
     page_assets = _pages_from_raw_payload(normalized_payload)
     section_page_assets = _build_pages_from_sections(sections)
-    if not page_assets or (section_page_assets and not _has_textual_page_assets(page_assets)):
+    if not page_assets:
         page_assets = section_page_assets
         normalized_payload["pages"] = [
             {"page_number": page.page_number, "markdown": page.normalized_text}

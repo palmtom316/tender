@@ -244,6 +244,95 @@ def test_build_document_asset_falls_back_to_sections_when_raw_pages_are_layout_b
     assert asset.pages[0].normalized_text == "1 总则\n1.0.1 条文正文"
 
 
+def test_build_document_asset_reads_canonical_pages_from_raw_payload() -> None:
+    """Canonical raw_payload pages (page_number + markdown) must be consumed
+    directly, without any section fallback dependency."""
+    document_id = uuid4()
+    document = {
+        "id": document_id,
+        "raw_payload": {
+            "pages": [{"page_number": 1, "markdown": "1 总则\n正文内容"}],
+            "tables": [],
+            "full_markdown": "1 总则\n正文内容",
+        },
+    }
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document=document,
+        sections=[],
+        tables=[],
+    )
+
+    assert len(asset.pages) == 1
+    assert asset.pages[0].page_number == 1
+    assert asset.pages[0].normalized_text == "1 总则\n正文内容"
+    assert asset.pages[0].source_ref == "document.raw_payload.pages[0]"
+
+
+def test_build_document_asset_ignores_noncanonical_page_entries_without_section_fallback() -> None:
+    """Legacy-shape page entries (e.g. `{type, content}` layout blocks) must be
+    discarded. When no sections exist to fall back to, pages must be empty —
+    never a list of PageAssets with None page_number/text."""
+    document_id = uuid4()
+    document = {
+        "id": document_id,
+        "raw_payload": {
+            "pages": [{"type": "title", "content": "旧 shape"}],
+            "tables": [],
+            "full_markdown": "",
+        },
+    }
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document=document,
+        sections=[],
+        tables=[],
+    )
+
+    assert asset.pages == []
+
+
+def test_build_document_asset_rejects_pipeline_backend_raw_payload() -> None:
+    """Pipeline-backend residue (`preproc_blocks`) in raw_payload.pages is not
+    a canonical page shape — it must be rejected and section fallback must
+    take over."""
+    document_id = uuid4()
+    section_id = uuid4()
+    document = {
+        "id": document_id,
+        "raw_payload": {
+            "pages": [
+                {"preproc_blocks": [{"type": "text", "content": "legacy content"}]},
+            ],
+        },
+    }
+    sections = [
+        {
+            "id": section_id,
+            "section_code": "1",
+            "title": "总则",
+            "page_start": 1,
+            "page_end": 1,
+            "text": "正文",
+            "raw_json": {"page_number": 1},
+        }
+    ]
+
+    asset = build_document_asset(
+        document_id=document_id,
+        document=document,
+        sections=sections,
+        tables=[],
+    )
+
+    assert len(asset.pages) == 1
+    assert asset.pages[0].page_number == 1
+    assert asset.pages[0].source_ref == f"document_section:{section_id}"
+    assert asset.pages[0].normalized_text == "1 总则\n正文"
+
+
 def test_update_document_parse_assets_serializes_document_asset_with_uuid_values() -> None:
     class _FakeCursor:
         def __init__(self) -> None:
