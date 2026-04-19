@@ -36,6 +36,7 @@ from tender_backend.services.norm_service.scope_splitter import ProcessingScope,
 from tender_backend.services.norm_service.structural_nodes import build_processing_scopes as build_structured_processing_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.services.norm_service.validation import validate_clauses
+from tender_backend.services.parse_service.mineru_normalizer import normalize_mineru_payload
 from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
 from tender_backend.services.vision_service.repair_service import run_repair_tasks
@@ -137,6 +138,29 @@ def _extract_markdown_from_zip(content: bytes) -> str:
                 return zf.read(name).decode("utf-8")
 
     raise RuntimeError("MinerU result zip does not contain a markdown file")
+
+
+def _extract_middle_json_from_zip(content: bytes) -> dict | None:
+    """Read the `*_middle.json` structured payload from a MinerU result zip.
+
+    Returns None if the zip does not carry a middle.json (legacy / failure).
+    Prefers filenames ending in `_middle.json`; falls back to any JSON whose
+    top-level object contains a `pdf_info` array.
+    """
+    with ZipFile(BytesIO(content)) as zf:
+        names = zf.namelist()
+        candidates = [name for name in names if name.endswith("_middle.json")]
+        if not candidates:
+            candidates = [name for name in names if name.endswith(".json")]
+
+        for name in candidates:
+            try:
+                payload = json.loads(zf.read(name).decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict) and isinstance(payload.get("pdf_info"), list):
+                return payload
+    return None
 
 
 def _extract_pages_from_payload(payload: object) -> list[dict]:
@@ -313,6 +337,8 @@ def _normalize_tables(tables: list[dict]) -> list[dict]:
         page = table.get("page")
         if not isinstance(page, int):
             page = table.get("page_number")
+        if not isinstance(page, int):
+            page = table.get("page_start")
         normalized.append({
             "page": page,
             "page_start": table.get("page_start", page),
@@ -554,26 +580,30 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
             except httpx.HTTPStatusError as exc:
                 _raise_mineru_http_error(exc)
             raw_content = _extract_markdown_from_zip(zip_resp.content)
-            pages = (
-                _extract_pages_from_zip(zip_resp.content)
-                or _extract_pages_from_payload(item.get("pages") or [])
-            )
-            tables = (
-                _extract_tables_from_zip(zip_resp.content)
-                or _extract_tables_from_payload(item.get("tables") or [])
-            )
+            middle_json = _extract_middle_json_from_zip(zip_resp.content)
+            if middle_json is None:
+                raise RuntimeError(
+                    "MinerU result zip does not contain a *_middle.json payload; "
+                    "the normalizer requires the canonical pdf_info structure."
+                )
 
-            sections = _mineru_to_sections(raw_content, pages)
+            middle_json.setdefault("full_markdown", raw_content)
+            normalized = normalize_mineru_payload(middle_json)
+            pages = normalized["pages"]
+            tables = normalized["tables"]
+            full_markdown = normalized["full_markdown"]
+
+            sections = _mineru_to_sections(full_markdown, pages)
             update_document_parse_assets(
                 conn,
                 document_id=UUID(document_id),
                 parser_name="mineru",
+                parser_version=normalized.get("parser_version"),
                 raw_payload={
+                    "parser_version": normalized.get("parser_version"),
                     "pages": pages,
                     "tables": tables,
-                    "full_markdown": raw_content,
-                    "batch_id": batch_id,
-                    "result_item": item,
+                    "full_markdown": full_markdown,
                 },
             )
             normalized_tables = _normalize_tables(tables)
@@ -1498,7 +1528,7 @@ def _call_ai_gateway(
             {"role": "system", "content": "你是一个专业的建筑工程规范条款提取助手。仅输出JSON，不要输出其他内容。"},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.1,
+        "temperature": 0.0,
         "max_tokens": 8192,
     }
 

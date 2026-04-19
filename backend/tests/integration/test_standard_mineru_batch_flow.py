@@ -101,10 +101,16 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
             return _FakeResponse(content=_zip_bytes(
                 "1 总则\n正文内容\n\n2 术语\n术语正文",
                 {
-                    "middle.json": (
-                        '{"pages": ['
-                        '{"page_number": 7, "markdown": "1 总则\\n正文内容"},'
-                        '{"page_number": 8, "markdown": "2 术语\\n术语正文"}'
+                    "spec_middle.json": (
+                        '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
+                        '{"page_idx": 6, "para_blocks": ['
+                        '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
+                        '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
+                        "]},"
+                        '{"page_idx": 7, "para_blocks": ['
+                        '{"type": "title", "lines": [{"spans": [{"content": "2 术语", "type": "text"}]}]},'
+                        '{"type": "text", "lines": [{"spans": [{"content": "术语正文", "type": "text"}]}]}'
+                        "]}"
                         "]}"),
                 },
             ))
@@ -184,6 +190,91 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
     ]
 
 
+def test_parse_via_mineru_persists_canonical_payload_from_pdf_info(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """`_parse_via_mineru` must ship only the canonical `{parser_version, pages,
+    tables, full_markdown}` payload to `update_document_parse_assets`.
+
+    Legacy keys such as `batch_id` or `result_item` must not leak into
+    `raw_payload`, and the pages/tables must come straight from the normalizer.
+    """
+    pdf_path = tmp_path / "spec.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7 fake pdf")
+
+    def fake_post(url: str, **kwargs):
+        if url.endswith("/file-urls/batch"):
+            return _FakeResponse(json_data={
+                "data": {
+                    "batch_id": "batch-canonical",
+                    "file_urls": ["https://upload.example.com/file-canonical"],
+                },
+            })
+        pytest.fail(f"unexpected POST {url}")
+
+    def fake_put(url: str, **kwargs):
+        return _FakeResponse(status_code=200)
+
+    def fake_get(url: str, **kwargs):
+        if url.endswith("/extract-results/batch/batch-canonical"):
+            return _FakeResponse(json_data={
+                "data": {
+                    "extract_result": [{
+                        "state": "done",
+                        "full_zip_url": "https://download.example.com/result-canonical.zip",
+                    }],
+                },
+            })
+        if url == "https://download.example.com/result-canonical.zip":
+            return _FakeResponse(content=_zip_bytes(
+                "1 总则\n正文内容",
+                {
+                    "spec_middle.json": (
+                        '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
+                        '{"page_idx": 0, "para_blocks": ['
+                        '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
+                        '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
+                        "]}"
+                        "]}"
+                    ),
+                },
+            ))
+        pytest.fail(f"unexpected GET {url}")
+
+    captured: dict[str, object] = {}
+
+    def fake_update_document_parse_assets(conn, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(norm_processor._agent_repo, "get_by_key", lambda conn, key: SimpleNamespace(
+        enabled=True,
+        api_key="token",
+        base_url="https://mineru.net/api/v4/extract/task",
+    ))
+    monkeypatch.setattr(norm_processor, "_get_pdf_path", lambda conn, document_id: str(pdf_path))
+    monkeypatch.setattr(norm_processor.httpx, "post", fake_post)
+    monkeypatch.setattr(norm_processor.httpx, "put", fake_put)
+    monkeypatch.setattr(norm_processor.httpx, "get", fake_get)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+    monkeypatch.setattr(parse_parser, "persist_sections", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(parse_parser, "persist_tables", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(parse_parser, "update_document_parse_assets", fake_update_document_parse_assets)
+
+    norm_processor._parse_via_mineru(object(), "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+    assert captured["parser_name"] == "mineru"
+    assert captured["parser_version"] == "2.7.6"
+    assert captured["raw_payload"] == {
+        "parser_version": "2.7.6",
+        "pages": [{"page_number": 1, "markdown": "1 总则\n正文内容"}],
+        "tables": [],
+        "full_markdown": "1 总则\n正文内容",
+    }
+    # Legacy keys must not leak into raw_payload.
+    assert "batch_id" not in captured["raw_payload"]
+    assert "result_item" not in captured["raw_payload"]
+
+
 def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: Path) -> None:
     pdf_path = tmp_path / "spec.pdf"
     pdf_path.write_bytes(b"%PDF-1.7 fake pdf")
@@ -224,7 +315,14 @@ def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: P
         if url == "https://download.example.com/result.zip":
             return _FakeResponse(content=_zip_bytes(
                 "1 总则\n正文内容",
-                {"middle.json": '{"pages": [{"page_number": 1, "markdown": "1 总则\\n正文内容"}]}'},
+                {"spec_middle.json": (
+                    '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
+                    '{"page_idx": 0, "para_blocks": ['
+                    '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
+                    '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
+                    "]}"
+                    "]}"
+                )},
             ))
         pytest.fail(f"unexpected GET {url}")
 
@@ -499,11 +597,18 @@ def test_parse_via_mineru_persists_tables_from_structured_payload(monkeypatch, t
             return _FakeResponse(content=_zip_bytes(
                 "1 总则\n正文内容",
                 {
-                    "middle.json": (
-                        '{"pages": ['
-                        '{"page_number": 7, "markdown": "1 总则\\n正文内容"}'
-                        '], "tables": ['
-                        '{"page": 8, "title": "主要参数", "html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>"}'
+                    "spec_middle.json": (
+                        '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
+                        '{"page_idx": 6, "para_blocks": ['
+                        '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
+                        '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
+                        "]},"
+                        '{"page_idx": 7, "para_blocks": [{'
+                        '"type": "table", "bbox": [0, 0, 10, 10], "blocks": ['
+                        '{"type": "table_caption", "lines": [{"spans": [{"content": "主要参数", "type": "text"}]}]},'
+                        '{"type": "table_body", "lines": [{"spans": [{'
+                        '"type": "table", "html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>"}]}]}'
+                        "]}]}"
                         "]}"
                     ),
                 },
@@ -536,9 +641,28 @@ def test_parse_via_mineru_persists_tables_from_structured_payload(monkeypatch, t
             "table_title": "主要参数",
             "table_html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
             "data": {
-                "page": 8,
-                "title": "主要参数",
-                "html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+                "page_start": 8,
+                "page_end": 8,
+                "table_title": "主要参数",
+                "table_html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+                "table_image_path": None,
+                "raw_json": {
+                    "type": "table",
+                    "bbox": [0, 0, 10, 10],
+                    "blocks": [
+                        {
+                            "type": "table_caption",
+                            "lines": [{"spans": [{"content": "主要参数", "type": "text"}]}],
+                        },
+                        {
+                            "type": "table_body",
+                            "lines": [{"spans": [{
+                                "type": "table",
+                                "html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+                            }]}],
+                        },
+                    ],
+                },
             },
         }
     ]
