@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from tender_backend.services.norm_service.document_assets import DocumentAsset
@@ -10,11 +11,23 @@ from tender_backend.services.norm_service.outline_rebuilder import (
     collect_outline_markers_from_pages,
     normalize_outline_page_lines,
 )
+from tender_backend.services.norm_service.parse_profiles import (
+    CN_GB_PROFILE,
+    ParseProfile,
+)
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, split_into_scopes
 
-_COMMENTARY_BOUNDARY_LINES = ("附：条文说明", "附:条文说明", "条文说明")
-_COMMENTARY_APPENDIX_ONLY_LINES = ("附：条文说明", "附:条文说明")
-_NON_NORMATIVE_BACK_MATTER_LINES = ("本规范用词说明", "引用标准名录")
+_active_profile: ContextVar[ParseProfile] = ContextVar(
+    "structural_nodes_profile", default=CN_GB_PROFILE
+)
+
+
+def _profile() -> ParseProfile:
+    return _active_profile.get()
+
+_COMMENTARY_BOUNDARY_LINES_DEFAULT = CN_GB_PROFILE.commentary_boundary_lines
+_COMMENTARY_APPENDIX_ONLY_LINES_DEFAULT = CN_GB_PROFILE.commentary_appendix_only_lines
+_NON_NORMATIVE_BACK_MATTER_LINES_DEFAULT = CN_GB_PROFILE.non_normative_back_matter_lines
 
 
 @dataclass(frozen=True)
@@ -182,18 +195,19 @@ def _starts_commentary_appendix(lines: list[str]) -> bool:
     normalized_lines = [line.strip().replace(" ", "") for line in lines if line.strip()]
     if not normalized_lines:
         return False
-    return normalized_lines[0] in _COMMENTARY_BOUNDARY_LINES
+    return normalized_lines[0] in _profile().commentary_boundary_lines
 
 
 def _strip_commentary_appendix_heading(lines: list[str]) -> list[str]:
+    appendix_only = _profile().commentary_appendix_only_lines
     normalized_lines = [line.strip().replace(" ", "") for line in lines if line.strip()]
-    if not normalized_lines or normalized_lines[0] not in _COMMENTARY_APPENDIX_ONLY_LINES:
+    if not normalized_lines or normalized_lines[0] not in appendix_only:
         return lines
     stripped: list[str] = []
     heading_removed = False
     for line in lines:
         normalized = line.strip().replace(" ", "")
-        if not heading_removed and normalized in _COMMENTARY_APPENDIX_ONLY_LINES:
+        if not heading_removed and normalized in appendix_only:
             heading_removed = True
             continue
         stripped.append(line)
@@ -204,7 +218,7 @@ def _is_non_normative_back_matter(lines: list[str]) -> bool:
     normalized_lines = [line.strip().replace(" ", "") for line in lines if line.strip()]
     if not normalized_lines:
         return False
-    return normalized_lines[0] in _NON_NORMATIVE_BACK_MATTER_LINES
+    return normalized_lines[0] in _profile().non_normative_back_matter_lines
 
 
 def _partition_pages(document_asset: DocumentAsset) -> tuple[list, list]:
@@ -346,7 +360,19 @@ def _build_commentary_scopes(document_asset: DocumentAsset) -> list[ProcessingSc
     return commentary_scopes
 
 
-def build_processing_scopes(document_asset: DocumentAsset) -> list[ProcessingScope]:
+def build_processing_scopes(
+    document_asset: DocumentAsset,
+    *,
+    profile: ParseProfile = CN_GB_PROFILE,
+) -> list[ProcessingScope]:
+    token = _active_profile.set(profile)
+    try:
+        return _build_processing_scopes_inner(document_asset)
+    finally:
+        _active_profile.reset(token)
+
+
+def _build_processing_scopes_inner(document_asset: DocumentAsset) -> list[ProcessingScope]:
     nodes = build_structural_nodes(document_asset)
     page_nodes = [node for node in nodes if node.node_type == "page"]
     table_nodes = [node for node in nodes if node.node_type == "table"]

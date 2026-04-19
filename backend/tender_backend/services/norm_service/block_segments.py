@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 import json
 import re
 
+from tender_backend.services.norm_service.parse_profiles import (
+    CN_GB_PROFILE,
+    ParseProfile,
+    non_clause_text_pattern,
+    non_clause_title_pattern,
+)
 
-_APPENDIX_CODE_RE = re.compile(r"^[A-Z](?:\.\d+)*$")
-_LEADING_CLAUSE_NO_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b")
-_LIST_ITEM_CODE_RE = re.compile(r"^\d+$")
-_NON_CLAUSE_TITLE_RE = re.compile(r"^(本规范用词说明|引用标准名录|修订说明|目次|前言)$")
-_NON_CLAUSE_TEXT_RE = re.compile(r"(为便于在执行本规范条文时区别对待|条文中指明应按其他有关标准执行)")
-_TOC_PAGE_REF_RE = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
-_TOC_DOT_LEADERS_RE = re.compile(r"[.…]{2,}")
-_SECTION_TITLE_SENTENCE_SIGNAL_RE = re.compile(r"[，。；：]|应|不得|必须|严禁|禁止|宜|可")
+
+_active_profile: ContextVar[ParseProfile] = ContextVar(
+    "block_segments_profile", default=CN_GB_PROFILE
+)
+
+
+def _profile() -> ParseProfile:
+    return _active_profile.get()
+
+
+_APPENDIX_CODE_RE_DEFAULT = CN_GB_PROFILE.appendix_code_pattern
+_LEADING_CLAUSE_NO_RE_DEFAULT = CN_GB_PROFILE.leading_clause_no_pattern
+_LIST_ITEM_CODE_RE_DEFAULT = CN_GB_PROFILE.list_item_code_pattern
+_TOC_PAGE_REF_RE_DEFAULT = CN_GB_PROFILE.toc_page_ref_pattern
+_TOC_DOT_LEADERS_RE_DEFAULT = CN_GB_PROFILE.toc_dot_leaders_pattern
+_SECTION_TITLE_SENTENCE_SIGNAL_RE_DEFAULT = CN_GB_PROFILE.sentence_signal_pattern
 
 
 @dataclass(slots=True)
@@ -48,7 +63,7 @@ def _extract_clause_no(value: str | None) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    match = _LEADING_CLAUSE_NO_RE.match(text)
+    match = _profile().leading_clause_no_pattern.match(text)
     if not match:
         return None
     return match.group(1)
@@ -62,35 +77,40 @@ def _section_clause_no(section: dict) -> str | None:
 
 
 def _section_effective_text(section: dict) -> str:
+    profile = _profile()
     title = str(section.get("title") or "").strip()
     text = str(section.get("text") or "").strip()
     clause_no = _section_clause_no(section)
     if text:
-        if title and clause_no and _LIST_ITEM_CODE_RE.match(clause_no):
+        if title and clause_no and profile.list_item_code_pattern.match(clause_no):
             if title.endswith(("：", ":", "。", "；")):
                 return f"{title}\n{text}".strip()
             return f"{title}{text}".strip()
         return text
     if not title or not clause_no or clause_no.count(".") < 2:
         return ""
-    if _TOC_PAGE_REF_RE.search(title) or _TOC_DOT_LEADERS_RE.search(title):
+    if profile.toc_page_ref_pattern.search(title) or profile.toc_dot_leaders_pattern.search(title):
         return ""
-    if not _SECTION_TITLE_SENTENCE_SIGNAL_RE.search(title):
+    if not profile.sentence_signal_pattern.search(title):
         return ""
     return title
 
 
 def _is_numbered_list_item_section(section: dict) -> bool:
+    profile = _profile()
     code = str(section.get("section_code") or "").strip()
-    if not code or not _LIST_ITEM_CODE_RE.match(code):
+    if not code or not profile.list_item_code_pattern.match(code):
         return False
     title = str(section.get("title") or "").strip()
     text = str(section.get("text") or "").strip()
     if not title and not text:
         return False
-    if title and (_TOC_PAGE_REF_RE.search(title) or _TOC_DOT_LEADERS_RE.search(title)):
+    if title and (
+        profile.toc_page_ref_pattern.search(title)
+        or profile.toc_dot_leaders_pattern.search(title)
+    ):
         return False
-    return bool(text or _SECTION_TITLE_SENTENCE_SIGNAL_RE.search(title))
+    return bool(text or profile.sentence_signal_pattern.search(title))
 
 
 def _text_invites_numbered_list_items(text: str) -> bool:
@@ -134,21 +154,25 @@ def _merge_numbered_list_item_into_block(block: BlockSegment, section: dict, *, 
 def _is_appendix(section: dict) -> bool:
     code = _section_clause_no(section)
     title = str(section.get("title") or "").strip()
-    return bool((code and _APPENDIX_CODE_RE.match(code)) or title.startswith("附录"))
+    return bool(
+        (code and _profile().appendix_code_pattern.match(code))
+        or title.startswith("附录")
+    )
 
 
 def _is_commentary(section: dict) -> bool:
     title = str(section.get("title") or "").strip()
-    return "条文说明" in title
+    return any(hint in title for hint in _profile().commentary_title_hints)
 
 
 def _is_non_clause_section(section: dict) -> bool:
+    profile = _profile()
     title = str(section.get("title") or "").strip()
-    if _NON_CLAUSE_TITLE_RE.match(title):
+    if non_clause_title_pattern(profile).match(title):
         return True
     text = str(section.get("text") or "").strip()
     combined = "\n".join(part for part in (title, text) if part)
-    return bool(combined and _NON_CLAUSE_TEXT_RE.search(combined))
+    return bool(combined and non_clause_text_pattern(profile).search(combined))
 
 
 def _looks_like_commentary_clause(section: dict) -> bool:
@@ -188,7 +212,20 @@ def _block_confidence(*, segment_type: str, clause_no: str | None, text: str, so
     return "medium"
 
 
-def build_single_standard_blocks(sections: list[dict], tables: list[dict]) -> list[BlockSegment]:
+def build_single_standard_blocks(
+    sections: list[dict],
+    tables: list[dict],
+    *,
+    profile: ParseProfile = CN_GB_PROFILE,
+) -> list[BlockSegment]:
+    token = _active_profile.set(profile)
+    try:
+        return _build_blocks(sections, tables)
+    finally:
+        _active_profile.reset(token)
+
+
+def _build_blocks(sections: list[dict], tables: list[dict]) -> list[BlockSegment]:
     blocks: list[BlockSegment] = []
     in_commentary_tail = False
     list_host_block: BlockSegment | None = None

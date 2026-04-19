@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from uuid import UUID, uuid4
 
@@ -55,22 +56,24 @@ def deduplicate_entries(entries: list[dict]) -> list[dict]:
     """Remove duplicate entries based on node identity, keeping first occurrence."""
     seen: set[str] = set()
     result: list[dict] = []
-    for entry in entries:
+    for sibling_index, entry in enumerate(entries):
         ctype = _normalize_clause_type(entry.get("clause_type", "normative"))
         node_type = str(entry.get("node_type") or "").strip()
         if node_type not in _ALLOWED_NODE_TYPES:
             node_type = "commentary" if ctype == "commentary" else "clause"
         node_key = entry.get("node_key")
         if not node_key:
-            cno = entry.get("clause_no", "")
             raw_label = entry.get("node_label")
             node_label = raw_label.strip().replace("）", ")") if isinstance(raw_label, str) else None
-            if node_type == "commentary" and cno:
-                node_key = f"{cno}#commentary"
-            elif node_label:
-                node_key = f"{cno}#{node_label}" if cno else f"{node_type}:{node_label}"
-            else:
-                node_key = cno
+            node_key = _build_node_key(
+                clause_type=ctype,
+                node_type=node_type,
+                clause_no=str(entry.get("clause_no") or ""),
+                node_label=node_label,
+                parent_key=None,
+                sibling_index=sibling_index,
+                source_label=entry.get("source_label"),
+            )
         key = f"{ctype}:{node_key}" if node_key else ""
         if key and key in seen:
             logger.debug("duplicate_clause_removed", node_key=node_key, clause_type=ctype)
@@ -260,6 +263,13 @@ def _normalize_source_refs(raw: object) -> list[str]:
     return [value] if value else []
 
 
+def _source_label_fingerprint(source_label: object) -> str:
+    text = str(source_label or "").strip()
+    if not text:
+        return ""
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+
+
 def _build_node_key(
     *,
     clause_type: str,
@@ -268,22 +278,26 @@ def _build_node_key(
     node_label: str | None,
     parent_key: str | None,
     sibling_index: int,
+    source_label: object = None,
 ) -> str:
+    fingerprint = _source_label_fingerprint(source_label)
+    suffix = f"@{fingerprint}" if fingerprint else ""
+
     if node_type == "clause" and clause_no:
-        return clause_no
+        return f"{clause_no}{suffix}"
     if parent_key and node_label:
         return f"{parent_key}#{node_label}"
     if clause_no and node_label:
-        return f"{clause_no}#{node_label}"
+        return f"{clause_no}#{node_label}{suffix}"
     if parent_key:
         return f"{parent_key}#{node_type}{sibling_index + 1}"
     if node_type == "commentary" and clause_no:
-        return f"{clause_no}#commentary"
+        return f"{clause_no}#commentary{suffix}"
     if clause_no:
-        return clause_no
+        return f"{clause_no}{suffix}"
     if node_label:
-        return f"{clause_type}:{node_type}:{node_label}"
-    return f"{clause_type}:{node_type}:{sibling_index + 1}"
+        return f"{clause_type}:{node_type}:{node_label}{suffix}"
+    return f"{clause_type}:{node_type}:{sibling_index + 1}{suffix}"
 
 
 def _promote_embedded_clause_child(entry: dict, *, inherited_clause_no: str | None) -> dict:
@@ -384,6 +398,7 @@ def _build_nested_ast(
             node_label=node_label,
             parent_key=parent_key,
             sibling_index=sibling_index,
+            source_label=current_entry.get("source_label"),
         )
         dedupe_key = f"{clause_type}:{node_key}" if node_key else ""
         if dedupe_key and dedupe_key in seen_node_keys:
@@ -472,11 +487,17 @@ def _build_flat_ast(entries: list[dict], *, standard_id: UUID) -> list[ClauseAST
             node_label=node_label,
             parent_key=None,
             sibling_index=sibling_index,
+            source_label=entry.get("source_label"),
         )
         node_id = uuid4()
         key = f"{clause_type}:{node_key}" if node_key else ""
         if key:
             clause_id_map[key] = node_id
+        # Also register under the canonical (unsuffixed) clause key so parent
+        # lookups via clause_no still find the first clause for each number.
+        if node_type == "clause" and clause_no:
+            canonical_key = f"{clause_type}:{clause_no}"
+            clause_id_map.setdefault(canonical_key, node_id)
         prepared.append((entry, node_id, clause_type, node_type, node_label, node_key))
 
     all_nodes: list[ClauseASTNode] = []
