@@ -20,7 +20,6 @@ def test_mineru_defaults_cover_current_provider_options() -> None:
     without redeploying code."""
     settings = Settings()
 
-    assert settings.standard_mineru_backend == "hybrid"
     assert settings.standard_mineru_model_version == "vlm"
     assert settings.standard_mineru_language == "ch"
     assert settings.standard_mineru_enable_table is True

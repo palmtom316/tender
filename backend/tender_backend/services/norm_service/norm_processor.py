@@ -496,16 +496,20 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
     with open(pdf_path, "rb") as f:
         pdf_bytes = f.read()
 
-    request_payload = {
+    request_payload: dict[str, object] = {
         "files": [{
             "name": os.path.basename(pdf_path),
             "data_id": document_id,
-            "is_ocr": True,
+            "is_ocr": getattr(settings, "standard_mineru_is_ocr", True),
         }],
         "model_version": getattr(settings, "standard_mineru_model_version", "vlm"),
-        "enable_table": getattr(settings, "standard_mineru_enable_table", True),
         "language": getattr(settings, "standard_mineru_language", "ch"),
+        "enable_table": getattr(settings, "standard_mineru_enable_table", True),
+        "enable_formula": getattr(settings, "standard_mineru_enable_formula", False),
     }
+    page_ranges = getattr(settings, "standard_mineru_page_ranges", None)
+    if page_ranges:
+        request_payload["files"][0]["page_ranges"] = page_ranges
     try:
         resp = httpx.post(
             f"{api_root}/file-urls/batch",

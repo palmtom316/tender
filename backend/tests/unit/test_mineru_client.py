@@ -16,15 +16,32 @@ import pytest
 from tender_backend.services.parse_service.mineru_client import (
     MineruClient,
     MineruParseResult,
+    MineruRequestOptions,
     MineruUploadInfo,
 )
 from tests.unit._mineru_fixtures import make_result_zip, make_simple_middle_json
 
 
-def _build_client(handler) -> MineruClient:
+_DEFAULT_OPTIONS = MineruRequestOptions(
+    model_version="vlm",
+    language="ch",
+    enable_table=True,
+    enable_formula=False,
+    is_ocr=True,
+    page_ranges=None,
+)
+
+
+def _build_client(handler, *, options: MineruRequestOptions | None = None) -> MineruClient:
+    """Build a MockTransport-backed client with deterministic options.
+
+    Passing explicit `options` keeps tests from depending on the app settings
+    singleton: the body they assert on only reflects the per-test knobs.
+    """
     return MineruClient(
         base_url="https://mineru.net/api/v4/extract/task",
         api_key="token",
+        options=options or _DEFAULT_OPTIONS,
         transport=httpx.MockTransport(handler),
     )
 
@@ -53,7 +70,11 @@ def test_request_upload_url_posts_to_file_urls_batch_and_returns_info() -> None:
     assert captured["method"] == "POST"
     assert captured["url"] == "https://mineru.net/api/v4/file-urls/batch"
     assert captured["body"] == {
-        "files": [{"name": "spec.pdf", "data_id": "doc-1", "is_ocr": True}]
+        "files": [{"name": "spec.pdf", "data_id": "doc-1", "is_ocr": True}],
+        "model_version": "vlm",
+        "language": "ch",
+        "enable_table": True,
+        "enable_formula": False,
     }
     assert captured["auth"] == "Bearer token"
     assert isinstance(info, MineruUploadInfo)
@@ -168,8 +189,99 @@ def test_client_normalizes_base_url_with_legacy_parse_suffix() -> None:
     client = MineruClient(
         base_url="https://mineru.net/api/v4/parse",
         api_key="token",
+        options=_DEFAULT_OPTIONS,
         transport=httpx.MockTransport(handler),
     )
     asyncio.run(client.request_upload_url("spec.pdf", data_id="doc-legacy"))
 
     assert captured["url"] == "https://mineru.net/api/v4/file-urls/batch"
+
+
+def test_request_upload_url_honours_custom_options() -> None:
+    """MineruRequestOptions flows through to the body: model_version, language,
+    enable_table/formula at top-level; is_ocr + page_ranges on the file."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={
+            "data": {
+                "batch_id": "batch-opts",
+                "file_urls": ["https://upload.example.com/file-opts"],
+            },
+        })
+
+    custom = MineruRequestOptions(
+        model_version="pipeline",
+        language="en",
+        enable_table=False,
+        enable_formula=True,
+        is_ocr=False,
+        page_ranges="1-5,10",
+    )
+    client = _build_client(handler, options=custom)
+    asyncio.run(client.request_upload_url("report.pdf", data_id="doc-42"))
+
+    assert captured["body"] == {
+        "files": [{
+            "name": "report.pdf",
+            "data_id": "doc-42",
+            "is_ocr": False,
+            "page_ranges": "1-5,10",
+        }],
+        "model_version": "pipeline",
+        "language": "en",
+        "enable_table": False,
+        "enable_formula": True,
+    }
+
+
+def test_request_upload_url_omits_page_ranges_when_unset() -> None:
+    """`page_ranges` must not appear in the file object when the option is None."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, json={
+            "data": {"batch_id": "b", "file_urls": ["u"]},
+        })
+
+    client = _build_client(handler)
+    asyncio.run(client.request_upload_url("spec.pdf", data_id="d"))
+
+    assert "page_ranges" not in captured["body"]["files"][0]
+
+
+def test_get_parse_status_surfaces_extract_progress_on_running() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "data": {"extract_result": [{
+                "state": "running",
+                "extract_progress": {
+                    "extracted_pages": 42,
+                    "total_pages": 107,
+                    "start_time": "2026-04-19T10:00:00Z",
+                },
+            }]},
+        })
+
+    client = _build_client(handler)
+    result = asyncio.run(client.get_parse_status("batch-running"))
+
+    assert result.status == "processing"
+    assert result.extracted_pages == 42
+    assert result.total_pages == 107
+
+
+def test_get_parse_status_extract_progress_defaults_to_none_when_absent() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "data": {"extract_result": [{"state": "pending"}]},
+        })
+
+    client = _build_client(handler)
+    result = asyncio.run(client.get_parse_status("batch-pending"))
+
+    assert result.status == "processing"
+    assert result.extracted_pages is None
+    assert result.total_pages is None

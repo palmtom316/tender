@@ -142,8 +142,9 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
                 "is_ocr": True,
             }],
             "model_version": "vlm",
-            "enable_table": True,
             "language": "ch",
+            "enable_table": True,
+            "enable_formula": False,
         },
         {"Authorization": "Bearer token"},
     )
@@ -323,6 +324,9 @@ def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: P
         standard_mineru_model_version="pipeline",
         standard_mineru_language="en",
         standard_mineru_enable_table=False,
+        standard_mineru_enable_formula=True,
+        standard_mineru_is_ocr=False,
+        standard_mineru_page_ranges="1-10",
     ))
     monkeypatch.setattr(norm_processor.httpx, "post", fake_post)
     monkeypatch.setattr(norm_processor.httpx, "put", fake_put)
@@ -341,11 +345,13 @@ def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: P
             "files": [{
                 "name": "spec.pdf",
                 "data_id": "22222222-2222-2222-2222-222222222222",
-                "is_ocr": True,
+                "is_ocr": False,
+                "page_ranges": "1-10",
             }],
             "model_version": "pipeline",
-            "enable_table": False,
             "language": "en",
+            "enable_table": False,
+            "enable_formula": True,
         },
         {"Authorization": "Bearer token"},
     )

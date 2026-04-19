@@ -43,6 +43,23 @@ class MineruUploadInfo:
 
 
 @dataclass(frozen=True)
+class MineruRequestOptions:
+    """v4 batch-request knobs exposed through `/file-urls/batch`.
+
+    Maps 1:1 to the documented request body:
+    - `model_version`, `language`, `enable_table`, `enable_formula` → top-level
+    - `is_ocr`, `page_ranges` → per-file fields (inside `files[]`)
+    """
+
+    model_version: str = "vlm"
+    language: str = "ch"
+    enable_table: bool = True
+    enable_formula: bool = False
+    is_ocr: bool = True
+    page_ranges: str | None = None
+
+
+@dataclass(frozen=True)
 class MineruParseResult:
     job_id: str  # == batch_id in v4
     status: str  # processing | completed | failed
@@ -50,6 +67,8 @@ class MineruParseResult:
     tables: list[dict[str, Any]]
     sections: list[dict[str, Any]]
     raw_payload: dict[str, Any]
+    extracted_pages: int | None = None
+    total_pages: int | None = None
 
 
 def _api_root(base_url: str) -> str:
@@ -58,6 +77,43 @@ def _api_root(base_url: str) -> str:
         if normalized.endswith(suffix):
             return normalized[: -len(suffix)].rstrip("/")
     return normalized
+
+
+def _default_options() -> MineruRequestOptions:
+    """Build a `MineruRequestOptions` from application settings.
+
+    Imported lazily so the client module doesn't pin a settings singleton at
+    import time — handy for tests that construct the client before settings
+    are finalised.
+    """
+    from tender_backend.core.config import get_settings
+
+    settings = get_settings()
+    return MineruRequestOptions(
+        model_version=settings.standard_mineru_model_version,
+        language=settings.standard_mineru_language,
+        enable_table=settings.standard_mineru_enable_table,
+        enable_formula=settings.standard_mineru_enable_formula,
+        is_ocr=settings.standard_mineru_is_ocr,
+        page_ranges=settings.standard_mineru_page_ranges,
+    )
+
+
+def _progress_from_item(item: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Return (extracted_pages, total_pages) from a running extract_result item.
+
+    The v4 API exposes progress on `item.extract_progress` when the task is
+    in `state=running`; silently absent for other states.
+    """
+    progress = item.get("extract_progress")
+    if not isinstance(progress, dict):
+        return None, None
+    extracted = progress.get("extracted_pages")
+    total = progress.get("total_pages")
+    return (
+        extracted if isinstance(extracted, int) else None,
+        total if isinstance(total, int) else None,
+    )
 
 
 def _normalize_from_zip(content: bytes) -> dict[str, Any]:
@@ -109,11 +165,13 @@ class MineruClient:
         *,
         base_url: str = MINERU_BASE_URL,
         api_key: str = MINERU_API_KEY,
+        options: MineruRequestOptions | None = None,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._api_root = _api_root(base_url)
         self._headers = {"Authorization": f"Bearer {api_key}"}
+        self._options = options if options is not None else _default_options()
         self._timeout = timeout
         self._transport = transport
 
@@ -128,17 +186,22 @@ class MineruClient:
         filename: str,
         *,
         data_id: str,
-        is_ocr: bool = True,
     ) -> MineruUploadInfo:
         """POST `/file-urls/batch` — returns `batch_id` + a single signed URL."""
-        body = {
-            "files": [
-                {
-                    "name": filename,
-                    "data_id": data_id,
-                    "is_ocr": is_ocr,
-                }
-            ],
+        opts = self._options
+        file_obj: dict[str, Any] = {
+            "name": filename,
+            "data_id": data_id,
+            "is_ocr": opts.is_ocr,
+        }
+        if opts.page_ranges:
+            file_obj["page_ranges"] = opts.page_ranges
+        body: dict[str, Any] = {
+            "files": [file_obj],
+            "model_version": opts.model_version,
+            "language": opts.language,
+            "enable_table": opts.enable_table,
+            "enable_formula": opts.enable_formula,
         }
         async with self._async_client() as client:
             resp = await client.post(
@@ -228,6 +291,10 @@ class MineruClient:
                 raw_payload={"error": item.get("err_msg") or item.get("error")},
             )
 
+        # Still queued/uploading/running — surface any progress counters the
+        # server reports (`extract_progress.{extracted_pages, total_pages}`)
+        # so callers can render "N/M pages" without a second API call.
+        extracted_pages, total_pages = _progress_from_item(item)
         return MineruParseResult(
             job_id=batch_id,
             status="processing",
@@ -235,4 +302,6 @@ class MineruClient:
             tables=[],
             sections=[],
             raw_payload={},
+            extracted_pages=extracted_pages,
+            total_pages=total_pages,
         )
