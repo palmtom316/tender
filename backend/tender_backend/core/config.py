@@ -9,9 +9,14 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     database_url: str | None = None
     standard_ocr_worker_count: int = 1
+    standard_mineru_backend: str = "hybrid"
     standard_mineru_model_version: str = "vlm"
     standard_mineru_language: str = "ch"
     standard_mineru_enable_table: bool = True
+    standard_mineru_enable_formula: bool = False
+    standard_mineru_is_ocr: bool = True
+    standard_mineru_page_ranges: str | None = None
+    standard_mineru_timeout_seconds: float = 600.0
     standard_ai_worker_count: int = 4
     standard_ai_scope_delay_ms: int = 200
     standard_ai_scope_delay_jitter_ms: int = 200
