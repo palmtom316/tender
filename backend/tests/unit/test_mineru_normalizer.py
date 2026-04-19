@@ -295,4 +295,10 @@ def test_normalize_against_real_gb50147_sample() -> None:
     for table in normalized["tables"]:
         assert table["table_html"].startswith("<table"), table
         assert isinstance(table["page_start"], int) and table["page_start"] >= 1
+    # Threshold sits below the revision §5 target of 60_000 because here we
+    # only feed `middle.json` to the normalizer, so `full_markdown` is
+    # reassembled from `para_blocks` (discarded blocks like page numbers and
+    # footers are dropped). In the standards pipeline `_parse_via_mineru`
+    # injects the zip's `full.md` (~64k chars) into `middle_json["full_markdown"]`,
+    # which preserves the original content end-to-end.
     assert len(normalized["full_markdown"]) > 50_000

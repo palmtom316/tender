@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from io import BytesIO
-from zipfile import ZipFile
 
 import httpx
 import pytest
@@ -20,36 +18,7 @@ from tender_backend.services.parse_service.mineru_client import (
     MineruParseResult,
     MineruUploadInfo,
 )
-
-
-def _make_middle_json() -> dict:
-    return {
-        "_backend": "hybrid",
-        "_version_name": "2.7.6",
-        "pdf_info": [
-            {
-                "page_idx": 0,
-                "para_blocks": [
-                    {
-                        "type": "title",
-                        "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}],
-                    },
-                    {
-                        "type": "text",
-                        "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}],
-                    },
-                ],
-            }
-        ],
-    }
-
-
-def _make_result_zip(full_md: str = "1 总则\n正文内容") -> bytes:
-    buf = BytesIO()
-    with ZipFile(buf, "w") as zf:
-        zf.writestr("full.md", full_md)
-        zf.writestr("spec_middle.json", json.dumps(_make_middle_json()))
-    return buf.getvalue()
+from tests.unit._mineru_fixtures import make_result_zip, make_simple_middle_json
 
 
 def _build_client(handler) -> MineruClient:
@@ -142,7 +111,7 @@ def test_get_parse_status_returns_processing_while_running() -> None:
 
 
 def test_get_parse_status_downloads_and_normalizes_zip_when_done() -> None:
-    zip_bytes = _make_result_zip()
+    zip_bytes = make_result_zip(make_simple_middle_json(), full_md="1 总则\n正文内容")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url).endswith("/extract-results/batch/batch-123"):

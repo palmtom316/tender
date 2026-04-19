@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
-from zipfile import ZipFile
 
 import httpx
 import pytest
@@ -17,6 +15,13 @@ from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
 from tender_backend.services.norm_service.tree_builder import validate_tree
 from tender_backend.services.parse_service import parser as parse_parser
+from tests.unit._mineru_fixtures import (
+    make_middle_json,
+    make_pdf_info_page,
+    make_result_zip,
+    make_table_block,
+    make_text_block,
+)
 
 
 class _FakeResponse:
@@ -33,15 +38,6 @@ class _FakeResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise RuntimeError(f"HTTP {self.status_code}")
-
-
-def _zip_bytes(full_md: str, extra_files: dict[str, str] | None = None) -> bytes:
-    buf = BytesIO()
-    with ZipFile(buf, "w") as zf:
-        zf.writestr("full.md", full_md)
-        for name, content in (extra_files or {}).items():
-            zf.writestr(name, content)
-    return buf.getvalue()
 
 
 def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) -> None:
@@ -98,21 +94,18 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
                 },
             })
         if url == "https://download.example.com/result.zip":
-            return _FakeResponse(content=_zip_bytes(
-                "1 总则\n正文内容\n\n2 术语\n术语正文",
-                {
-                    "spec_middle.json": (
-                        '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
-                        '{"page_idx": 6, "para_blocks": ['
-                        '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
-                        '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
-                        "]},"
-                        '{"page_idx": 7, "para_blocks": ['
-                        '{"type": "title", "lines": [{"spans": [{"content": "2 术语", "type": "text"}]}]},'
-                        '{"type": "text", "lines": [{"spans": [{"content": "术语正文", "type": "text"}]}]}'
-                        "]}"
-                        "]}"),
-                },
+            return _FakeResponse(content=make_result_zip(
+                make_middle_json([
+                    make_pdf_info_page(6, [
+                        make_text_block("1 总则", block_type="title"),
+                        make_text_block("正文内容"),
+                    ]),
+                    make_pdf_info_page(7, [
+                        make_text_block("2 术语", block_type="title"),
+                        make_text_block("术语正文"),
+                    ]),
+                ]),
+                full_md="1 总则\n正文内容\n\n2 术语\n术语正文",
             ))
         pytest.fail(f"unexpected GET {url}")
 
@@ -226,18 +219,14 @@ def test_parse_via_mineru_persists_canonical_payload_from_pdf_info(
                 },
             })
         if url == "https://download.example.com/result-canonical.zip":
-            return _FakeResponse(content=_zip_bytes(
-                "1 总则\n正文内容",
-                {
-                    "spec_middle.json": (
-                        '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
-                        '{"page_idx": 0, "para_blocks": ['
-                        '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
-                        '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
-                        "]}"
-                        "]}"
-                    ),
-                },
+            return _FakeResponse(content=make_result_zip(
+                make_middle_json([
+                    make_pdf_info_page(0, [
+                        make_text_block("1 总则", block_type="title"),
+                        make_text_block("正文内容"),
+                    ]),
+                ]),
+                full_md="1 总则\n正文内容",
             ))
         pytest.fail(f"unexpected GET {url}")
 
@@ -313,16 +302,14 @@ def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: P
                 },
             })
         if url == "https://download.example.com/result.zip":
-            return _FakeResponse(content=_zip_bytes(
-                "1 总则\n正文内容",
-                {"spec_middle.json": (
-                    '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
-                    '{"page_idx": 0, "para_blocks": ['
-                    '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
-                    '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
-                    "]}"
-                    "]}"
-                )},
+            return _FakeResponse(content=make_result_zip(
+                make_middle_json([
+                    make_pdf_info_page(0, [
+                        make_text_block("1 总则", block_type="title"),
+                        make_text_block("正文内容"),
+                    ]),
+                ]),
+                full_md="1 总则\n正文内容",
             ))
         pytest.fail(f"unexpected GET {url}")
 
@@ -594,24 +581,21 @@ def test_parse_via_mineru_persists_tables_from_structured_payload(monkeypatch, t
                 },
             })
         if url == "https://download.example.com/result-table.zip":
-            return _FakeResponse(content=_zip_bytes(
-                "1 总则\n正文内容",
-                {
-                    "spec_middle.json": (
-                        '{"_backend": "hybrid", "_version_name": "2.7.6", "pdf_info": ['
-                        '{"page_idx": 6, "para_blocks": ['
-                        '{"type": "title", "lines": [{"spans": [{"content": "1 总则", "type": "text"}]}]},'
-                        '{"type": "text", "lines": [{"spans": [{"content": "正文内容", "type": "text"}]}]}'
-                        "]},"
-                        '{"page_idx": 7, "para_blocks": [{'
-                        '"type": "table", "bbox": [0, 0, 10, 10], "blocks": ['
-                        '{"type": "table_caption", "lines": [{"spans": [{"content": "主要参数", "type": "text"}]}]},'
-                        '{"type": "table_body", "lines": [{"spans": [{'
-                        '"type": "table", "html": "<table><tr><td>额定电压</td><td>10kV</td></tr></table>"}]}]}'
-                        "]}]}"
-                        "]}"
-                    ),
-                },
+            return _FakeResponse(content=make_result_zip(
+                make_middle_json([
+                    make_pdf_info_page(6, [
+                        make_text_block("1 总则", block_type="title"),
+                        make_text_block("正文内容"),
+                    ]),
+                    make_pdf_info_page(7, [
+                        make_table_block(
+                            caption="主要参数",
+                            html="<table><tr><td>额定电压</td><td>10kV</td></tr></table>",
+                            bbox=[0, 0, 10, 10],
+                        ),
+                    ]),
+                ]),
+                full_md="1 总则\n正文内容",
             ))
         pytest.fail(f"unexpected GET {url}")
 
