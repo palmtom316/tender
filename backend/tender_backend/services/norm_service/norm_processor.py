@@ -36,6 +36,7 @@ from tender_backend.services.norm_service.scope_splitter import ProcessingScope,
 from tender_backend.services.norm_service.structural_nodes import build_processing_scopes as build_structured_processing_scopes
 from tender_backend.services.norm_service.tree_builder import build_tree, link_commentary, validate_tree
 from tender_backend.services.norm_service.validation import validate_clauses
+from tender_backend.services.parse_service.mineru_client import build_mineru_auth_headers
 from tender_backend.services.parse_service.mineru_normalizer import normalize_mineru_payload
 from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
@@ -487,7 +488,7 @@ def _parse_via_mineru(conn: Connection, document_id: str) -> int:
 
     base_url = (config.base_url or "").rstrip("/")
     api_root = _mineru_api_root(base_url)
-    headers = {"Authorization": f"Bearer {config.api_key}"}
+    headers = build_mineru_auth_headers(config.api_key)
     settings = get_settings()
 
     # Step 1: Ask MinerU for a batch upload URL.
@@ -1028,7 +1029,9 @@ def _should_extract_normative_block_deterministically(clause_no: str, text: str)
     if _DETERMINISTIC_LIST_SIGNAL_RE.search(normalized):
         return False
     if normalized.endswith("："):
-        return False
+        compact_text = re.sub(r"\s+", "", normalized)
+        compact_clause_no = re.sub(r"\s+", "", clause_no)
+        return bool(compact_clause_no and f"表{compact_clause_no}" in compact_text)
     return True
 
 
@@ -1710,6 +1713,209 @@ def _apply_scope_defaults(entry: dict, scope: ProcessingScope) -> None:
             _apply_scope_defaults(child, scope)
 
 
+def _iter_clause_source_refs(clause: dict) -> list[str]:
+    refs: list[str] = []
+    source_ref = clause.get("source_ref")
+    if isinstance(source_ref, str) and source_ref.strip():
+        refs.append(source_ref.strip())
+    source_refs = clause.get("source_refs")
+    if isinstance(source_refs, list):
+        for value in source_refs:
+            if isinstance(value, str) and value.strip():
+                refs.append(value.strip())
+    return refs
+
+
+def _normalize_page_anchor(value: object) -> int | None:
+    if isinstance(value, int):
+        return value if value > 0 else None
+    return None
+
+
+def _normalize_source_ref_for_page_lookup(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    if normalized.startswith("document_section:"):
+        return normalized.split("#", 1)[0]
+    return normalized
+
+
+def _compact_anchor_text(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"<[^>]+>", "", text)
+    return re.sub(r"\s+", "", text)
+
+
+def _is_toc_like_anchor_page(text: object) -> bool:
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return False
+    lowered = raw_text.lower()
+    if "目次" in raw_text or "contents" in lowered:
+        return True
+    toc_marker_count = sum(
+        1
+        for line in raw_text.splitlines()
+        if _TOC_PAGE_REF.search(line.strip()) or _TOC_DOT_LEADERS.search(line.strip())
+    )
+    return toc_marker_count >= 2
+
+
+def _candidate_anchor_snippets(clause: dict) -> list[str]:
+    candidates: list[str] = []
+
+    def _add(value: object, *, min_len: int = 8, max_len: int = 120) -> None:
+        compact = _compact_anchor_text(value)
+        if len(compact) < min_len:
+            return
+        compact = compact[:max_len]
+        if compact not in candidates:
+            candidates.append(compact)
+
+    _add(clause.get("source_label"), min_len=10, max_len=160)
+    _add(clause.get("clause_title"), min_len=6, max_len=80)
+
+    clause_text = str(clause.get("clause_text") or "").strip()
+    if clause_text:
+        first_line = clause_text.splitlines()[0].strip()
+        _add(first_line, min_len=6, max_len=100)
+        first_sentence = re.split(r"[。；：!?！？\n]", clause_text, maxsplit=1)[0].strip()
+        _add(first_sentence, min_len=6, max_len=80)
+
+    clause_no = _compact_anchor_text(clause.get("clause_no"))
+    if clause_no and clause_no not in candidates:
+        candidates.append(clause_no)
+
+    return candidates
+
+
+def _resolve_clause_page_range_from_asset(clause: dict, document_asset) -> tuple[int | None, int | None]:
+    resolved_pages: list[int] = []
+    table_ranges: list[tuple[int, int]] = []
+
+    page_refs: dict[str, set[int]] = {}
+    for page in document_asset.pages:
+        page_number = _normalize_page_anchor(page.page_number)
+        if page_number is None:
+            continue
+        ref = _normalize_source_ref_for_page_lookup(page.source_ref)
+        if not ref:
+            continue
+        page_refs.setdefault(ref, set()).add(page_number)
+
+    table_refs: dict[str, tuple[int | None, int | None]] = {
+        str(table.source_ref): (
+            _normalize_page_anchor(table.page_start),
+            _normalize_page_anchor(table.page_end),
+        )
+        for table in document_asset.tables
+        if isinstance(table.source_ref, str) and table.source_ref.strip()
+    }
+
+    for ref in _iter_clause_source_refs(clause):
+        normalized_ref = _normalize_source_ref_for_page_lookup(ref)
+        for page_number in sorted(page_refs.get(normalized_ref, set())):
+            resolved_pages.append(page_number)
+        table_range = table_refs.get(ref)
+        if table_range and table_range[0] is not None:
+            table_ranges.append((
+                table_range[0],
+                table_range[1] if table_range[1] is not None else table_range[0],
+            ))
+
+    if resolved_pages:
+        return min(resolved_pages), max(resolved_pages)
+    if table_ranges:
+        starts = [start for start, _ in table_ranges]
+        ends = [end for _, end in table_ranges]
+        return min(starts), max(ends)
+
+    compact_pages = [
+        (page_number, _compact_anchor_text(page.normalized_text))
+        for page in document_asset.pages
+        for page_number in [_normalize_page_anchor(page.page_number)]
+        if page_number is not None and not _is_toc_like_anchor_page(page.normalized_text)
+    ]
+
+    for snippet in _candidate_anchor_snippets(clause):
+        matches = [
+            page_number
+            for page_number, compact_text in compact_pages
+            if compact_text and snippet in compact_text
+        ]
+        if matches:
+            return min(matches), max(matches)
+
+    return None, None
+
+
+def _backfill_clause_page_anchors_from_asset(clauses: list[dict], document_asset) -> list[dict]:
+    if not clauses:
+        return clauses
+
+    for clause in clauses:
+        current_start = _normalize_page_anchor(clause.get("page_start"))
+        current_end = _normalize_page_anchor(clause.get("page_end"))
+        if current_start is not None and current_end is not None:
+            continue
+        inferred_start, inferred_end = _resolve_clause_page_range_from_asset(clause, document_asset)
+        if inferred_start is not None:
+            clause["page_start"] = inferred_start
+            clause["page_end"] = inferred_end if inferred_end is not None else inferred_start
+
+    clause_by_id = {
+        clause["id"]: clause
+        for clause in clauses
+        if clause.get("id") is not None
+    }
+    children_by_parent: dict[UUID, list[dict]] = {}
+    for clause in clauses:
+        parent_id = clause.get("parent_id")
+        if parent_id is None:
+            continue
+        children_by_parent.setdefault(parent_id, []).append(clause)
+
+    changed = True
+    while changed:
+        changed = False
+        for clause in clauses:
+            start = _normalize_page_anchor(clause.get("page_start"))
+            end = _normalize_page_anchor(clause.get("page_end"))
+            if start is None or end is None:
+                parent = clause_by_id.get(clause.get("parent_id"))
+                parent_start = _normalize_page_anchor(parent.get("page_start")) if parent else None
+                parent_end = _normalize_page_anchor(parent.get("page_end")) if parent else None
+                if parent_start is not None and parent_end is not None:
+                    clause["page_start"] = parent_start
+                    clause["page_end"] = parent_end
+                    changed = True
+                    continue
+
+            if start is not None and end is not None:
+                continue
+            child_pages = [
+                (
+                    _normalize_page_anchor(child.get("page_start")),
+                    _normalize_page_anchor(child.get("page_end")),
+                )
+                for child in children_by_parent.get(clause.get("id"), [])
+            ]
+            anchored_children = [
+                (child_start, child_end)
+                for child_start, child_end in child_pages
+                if child_start is not None and child_end is not None
+            ]
+            if anchored_children:
+                clause["page_start"] = min(child_start for child_start, _ in anchored_children)
+                clause["page_end"] = max(child_end for _, child_end in anchored_children)
+                changed = True
+
+    return clauses
+
+
 def ensure_standard_ocr(
     conn: Connection,
     *,
@@ -1840,6 +2046,7 @@ def process_standard_ai(
 
         clauses = build_tree(all_entries, standard_id)
         clauses = _prune_empty_outline_hosts(clauses, outline_clause_nos=outline_clause_nos)
+        clauses = _backfill_clause_page_anchors_from_asset(clauses, document_asset)
         clauses = link_commentary(clauses)
         structured_validation = validate_clauses(clauses, outline_clause_nos=outline_clause_nos)
         repair_tasks = (

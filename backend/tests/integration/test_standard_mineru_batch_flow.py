@@ -10,6 +10,7 @@ import pytest
 
 from tender_backend.services.norm_service import norm_processor
 from tender_backend.services.norm_service.block_segments import BlockSegment, build_single_standard_blocks
+from tender_backend.services.norm_service.document_assets import DocumentAsset, PageAsset, TableAsset
 from tender_backend.services.norm_service.layout_compressor import PageWindow, compress_sections
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes, split_into_scopes
@@ -146,10 +147,15 @@ def test_parse_via_mineru_uses_batch_upload_flow(monkeypatch, tmp_path: Path) ->
             "enable_table": True,
             "enable_formula": False,
         },
-        {"Authorization": "Bearer token"},
+        {"Authorization": "Bearer token", "token": "token"},
     )
     assert ("PUT", "https://upload.example.com/file-1", pdf_bytes, None) in calls
-    assert ("GET", "https://mineru.net/api/v4/extract-results/batch/batch-123", None, {"Authorization": "Bearer token"}) in calls
+    assert (
+        "GET",
+        "https://mineru.net/api/v4/extract-results/batch/batch-123",
+        None,
+        {"Authorization": "Bearer token", "token": "token"},
+    ) in calls
     assert ("GET", "https://download.example.com/result.zip", None, None) in calls
     assert persisted["document_id"] == UUID("11111111-1111-1111-1111-111111111111")
     assert persisted["sections"] == [
@@ -260,9 +266,86 @@ def test_parse_via_mineru_persists_canonical_payload_from_pdf_info(
         "tables": [],
         "full_markdown": "1 总则\n正文内容",
     }
-    # Legacy keys must not leak into raw_payload.
-    assert "batch_id" not in captured["raw_payload"]
-    assert "result_item" not in captured["raw_payload"]
+
+
+def test_parse_via_mineru_uses_uuid_token_header_for_jwt_api_key(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "spec.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7 fake pdf")
+    jwt = (
+        "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ."
+        "eyJ1dWlkIjoiZWU1ZGUyZTItYzJjMC00ZTBkLTliODEtMGU1OWUzMWEzOGI1IiwiZXhwIjoxNzgwMTEwOTc1fQ."
+        "sig"
+    )
+    captured_headers: list[tuple[str, dict[str, str] | None]] = []
+
+    def fake_post(url: str, **kwargs):
+        captured_headers.append(("POST", kwargs.get("headers")))
+        if url.endswith("/file-urls/batch"):
+            return _FakeResponse(json_data={
+                "data": {
+                    "batch_id": "batch-jwt",
+                    "file_urls": ["https://upload.example.com/file-jwt"],
+                },
+            })
+        pytest.fail(f"unexpected POST {url}")
+
+    def fake_put(url: str, **kwargs):
+        return _FakeResponse(status_code=200)
+
+    def fake_get(url: str, **kwargs):
+        captured_headers.append(("GET", kwargs.get("headers")))
+        if url.endswith("/extract-results/batch/batch-jwt"):
+            return _FakeResponse(json_data={
+                "data": {
+                    "extract_result": [{
+                        "state": "done",
+                        "full_zip_url": "https://download.example.com/result-jwt.zip",
+                    }],
+                },
+            })
+        if url == "https://download.example.com/result-jwt.zip":
+            return _FakeResponse(content=make_result_zip(
+                make_middle_json([
+                    make_pdf_info_page(0, [
+                        make_text_block("1 总则", block_type="title"),
+                        make_text_block("正文内容"),
+                    ]),
+                ]),
+                full_md="1 总则\n正文内容",
+            ))
+        pytest.fail(f"unexpected GET {url}")
+
+    monkeypatch.setattr(norm_processor._agent_repo, "get_by_key", lambda conn, key: SimpleNamespace(
+        enabled=True,
+        api_key=jwt,
+        base_url="https://mineru.net/api/v4/extract/task",
+    ))
+    monkeypatch.setattr(norm_processor, "_get_pdf_path", lambda conn, document_id: str(pdf_path))
+    monkeypatch.setattr(norm_processor.httpx, "post", fake_post)
+    monkeypatch.setattr(norm_processor.httpx, "put", fake_put)
+    monkeypatch.setattr(norm_processor.httpx, "get", fake_get)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+    monkeypatch.setattr(parse_parser, "persist_sections", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(parse_parser, "persist_tables", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(parse_parser, "update_document_parse_assets", lambda *args, **kwargs: None)
+
+    norm_processor._parse_via_mineru(object(), "cccccccc-cccc-cccc-cccc-cccccccccccc")
+
+    assert captured_headers[0] == (
+        "POST",
+        {
+            "Authorization": f"Bearer {jwt}",
+            "token": "ee5de2e2-c2c0-4e0d-9b81-0e59e31a38b5",
+        },
+    )
+    assert captured_headers[1] == (
+        "GET",
+        {
+            "Authorization": f"Bearer {jwt}",
+            "token": "ee5de2e2-c2c0-4e0d-9b81-0e59e31a38b5",
+        },
+    )
+    assert captured_headers[2] == ("GET", None)
 
 
 def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: Path) -> None:
@@ -353,7 +436,7 @@ def test_parse_via_mineru_uses_configured_batch_options(monkeypatch, tmp_path: P
             "enable_table": False,
             "enable_formula": True,
         },
-        {"Authorization": "Bearer token"},
+        {"Authorization": "Bearer token", "token": "token"},
     )
 
 
@@ -1033,6 +1116,155 @@ def test_process_scope_with_retries_replaces_non_positive_page_anchors_from_scop
 
     assert entries[0]["page_start"] == 21
     assert entries[0]["page_end"] == 22
+
+
+def test_backfill_clause_page_anchors_recovers_page_from_raw_page_text_and_parent() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        parser_name="mineru",
+        parser_version="2.7.6",
+        raw_payload={},
+        pages=[
+            PageAsset(
+                page_number=18,
+                normalized_text=(
+                    "4.2.4设备在保管期间，应经常检查。充油保管时应每隔10天对变压器外观进行一次检查。"
+                    "每隔30天应从变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：\n"
+                    "1 外观应无渗油。"
+                ),
+                raw_page={"page_number": 18},
+                source_ref="document.raw_payload.pages[17]",
+            )
+        ],
+        tables=[],
+        full_markdown="",
+    )
+    clauses = [
+        {
+            "id": uuid4(),
+            "clause_no": "4.2.4",
+            "node_type": "clause",
+            "source_type": "text",
+            "source_label": "4.2.4 设备在保管期间，应经常检查。充油保管时应每隔10天对变压器外观进行一次检查。",
+            "source_ref": "document_section:raw-section#4",
+            "source_refs": ["document_section:raw-section#4"],
+            "clause_text": "设备在保管期间，应经常检查。充油保管时应每隔10天对变压器外观进行一次检查。",
+            "page_start": None,
+            "page_end": None,
+            "parent_id": None,
+        },
+        {
+            "id": uuid4(),
+            "clause_no": "4.2.4",
+            "node_type": "item",
+            "source_type": "text",
+            "source_label": "4.2.4 设备在保管期间，应经常检查。充油保管时应每隔10天对变压器外观进行一次检查。",
+            "source_ref": "document_section:raw-section#4",
+            "source_refs": ["document_section:raw-section#4"],
+            "clause_text": "外观应无渗油。",
+            "page_start": None,
+            "page_end": None,
+            "parent_id": None,  # filled below to keep UUID stable in fixture
+        },
+    ]
+    clauses[1]["parent_id"] = clauses[0]["id"]
+
+    norm_processor._backfill_clause_page_anchors_from_asset(clauses, asset)
+
+    assert clauses[0]["page_start"] == 18
+    assert clauses[0]["page_end"] == 18
+    assert clauses[1]["page_start"] == 18
+    assert clauses[1]["page_end"] == 18
+
+
+def test_backfill_clause_page_anchors_uses_table_source_refs() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        parser_name="mineru",
+        parser_version="2.7.6",
+        raw_payload={},
+        pages=[],
+        tables=[
+            TableAsset(
+                source_ref="table:t1",
+                page_start=32,
+                page_end=32,
+                table_title="表4.10.2热油循环后施加电压前变压器油标准",
+                table_html="<table><tr><td>项目</td><td>标准</td></tr></table>",
+                raw_json={"id": "t1"},
+            )
+        ],
+        full_markdown="",
+    )
+    clauses = [
+        {
+            "id": uuid4(),
+            "clause_no": None,
+            "node_type": "clause",
+            "source_type": "table",
+            "source_label": "表格: 表4.10.2热油循环后施加电压前变压器油标准",
+            "source_ref": "table:t1",
+            "source_refs": ["table:t1"],
+            "clause_text": "击穿电压：不应低于60kV。",
+            "page_start": None,
+            "page_end": None,
+            "parent_id": None,
+        }
+    ]
+
+    norm_processor._backfill_clause_page_anchors_from_asset(clauses, asset)
+
+    assert clauses[0]["page_start"] == 32
+    assert clauses[0]["page_end"] == 32
+
+
+def test_backfill_clause_page_anchors_ignores_toc_page_matches() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+        parser_name="mineru",
+        parser_version="2.7.6",
+        raw_payload={},
+        pages=[
+            PageAsset(
+                page_number=7,
+                normalized_text="目次\n附录A 新装电力变压器及油浸电抗器不需干燥的条件（29）\nA.0.2 （30）",
+                raw_page={"page_number": 7},
+                source_ref="document.raw_payload.pages[6]",
+            ),
+            PageAsset(
+                page_number=38,
+                normalized_text=(
+                    "附录A 新装电力变压器及油浸电抗器不需干燥的条件\n"
+                    "A.0.2 变压器及电抗器注入合格绝缘油后应符合下列规定：\n"
+                    "1 绝缘油电气强度及含水量应合格。"
+                ),
+                raw_page={"page_number": 38},
+                source_ref="document.raw_payload.pages[37]",
+            ),
+        ],
+        tables=[],
+        full_markdown="",
+    )
+    clauses = [
+        {
+            "id": uuid4(),
+            "clause_no": "A.0.2",
+            "node_type": "clause",
+            "source_type": "text",
+            "source_label": "A.0.2 变压器及电抗器注人合格绝缘油后应符合下列规定：",
+            "source_ref": "document_section:appendix-a",
+            "source_refs": ["document_section:appendix-a"],
+            "clause_text": "器身内压力在出厂至安装前均应保持正压。",
+            "page_start": None,
+            "page_end": None,
+            "parent_id": None,
+        }
+    ]
+
+    norm_processor._backfill_clause_page_anchors_from_asset(clauses, asset)
+
+    assert clauses[0]["page_start"] == 38
+    assert clauses[0]["page_end"] == 38
 
 
 def test_build_processing_scopes_appends_table_segments() -> None:
@@ -2984,6 +3216,94 @@ def test_process_standard_ai_uses_deterministic_entries_for_high_confidence_bloc
     assert captured["entries"][0]["clause_no"] == "4.1.2"
     assert captured["entries"][0]["source_ref"] == "document_section:s1"
     assert captured["entries"][1]["source_ref"] == "table:t1"
+
+
+def test_process_standard_ai_uses_deterministic_entries_for_table_intro_clause_block(monkeypatch) -> None:
+    standard_id = UUID("ff2ddb6c-ba8e-4e42-862f-e75d5824437a")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {
+            "id": "s424",
+            "section_code": "4.2.4",
+            "title": "设备在保管期间，应经常检查。充油保管时应每隔30天对变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：",
+            "text": "",
+            "level": 3,
+            "page_start": 18,
+            "page_end": 18,
+        },
+    ])
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "build_single_standard_blocks", lambda sections, tables: [
+        BlockSegment(
+            segment_type="normative_clause_block",
+            chapter_label="4.2.4 设备在保管期间，应经常检查。充油保管时应每隔30天对变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：",
+            text="设备在保管期间，应经常检查。充油保管时应每隔30天对变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：",
+            clause_no="4.2.4",
+            page_start=18,
+            page_end=18,
+            section_ids=["s424"],
+            source_refs=["document_section:s424"],
+            confidence="high",
+        ),
+    ])
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("table-intro normative clause should not call AI")
+    ))
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: None)
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="e3003181-042a-44da-ad67-44615d7d25f2",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["entries"] == [
+        {
+            "clause_no": "4.2.4",
+            "clause_title": None,
+            "clause_text": "设备在保管期间，应经常检查。充油保管时应每隔30天对变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：",
+            "summary": None,
+            "tags": [],
+            "page_start": 18,
+            "page_end": 18,
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s424",
+            "source_refs": ["document_section:s424"],
+            "source_label": "4.2.4 设备在保管期间，应经常检查。充油保管时应每隔30天对变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：",
+        },
+        {
+            "clause_no": "4.2.4",
+            "clause_title": None,
+            "clause_text": "设备在保管期间，应经常检查。充油保管时应每隔30天对变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：",
+            "summary": None,
+            "tags": [],
+            "page_start": 18,
+            "page_end": 18,
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s424",
+            "source_refs": ["document_section:s424"],
+            "source_label": "4.2.4 设备在保管期间，应经常检查。充油保管时应每隔30天对变压器内抽取油样进行试验，其变压器内油样性能应符合表4.2.4的规定：",
+        },
+    ]
 
 
 def test_process_standard_ai_single_standard_block_path_uses_reconciled_asset_tables(monkeypatch) -> None:

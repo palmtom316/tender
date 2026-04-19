@@ -15,6 +15,7 @@ never has to probe provider shapes.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import dataclass
@@ -33,6 +34,37 @@ MINERU_BASE_URL = os.environ.get("MINERU_API_URL", "https://mineru.net/api/v4/ex
 MINERU_API_KEY = os.environ.get("MINERU_API_KEY", "")
 
 _API_ROOT_SUFFIXES = ("/extract/task", "/parse")
+
+
+def _extract_mineru_token_value(api_key: str) -> str:
+    """Derive the extra MinerU `token` header from the configured API key."""
+    normalized = str(api_key or "").strip()
+    if not normalized:
+        return ""
+
+    parts = normalized.split(".")
+    if len(parts) == 3:
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        try:
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+        except (ValueError, TypeError, json.JSONDecodeError):
+            claims = None
+        if isinstance(claims, dict):
+            for key in ("uuid", "clientId", "phone", "jti"):
+                value = str(claims.get(key) or "").strip()
+                if value:
+                    return value
+
+    return normalized
+
+
+def build_mineru_auth_headers(api_key: str) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {api_key}"}
+    token_value = _extract_mineru_token_value(api_key)
+    if token_value:
+        headers["token"] = token_value
+    return headers
 
 
 @dataclass(frozen=True)
@@ -170,7 +202,7 @@ class MineruClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._api_root = _api_root(base_url)
-        self._headers = {"Authorization": f"Bearer {api_key}"}
+        self._headers = build_mineru_auth_headers(api_key)
         self._options = options if options is not None else _default_options()
         self._timeout = timeout
         self._transport = transport

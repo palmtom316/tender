@@ -56,6 +56,9 @@ def _clause_depth(clause_no: str | None) -> int:
 def _section_label(section: dict) -> str:
     code = str(section.get("section_code") or "").strip()
     title = str(section.get("title") or "").strip()
+    recovered_clause_no, title_body = _recover_clause_no_and_title_body(code, title)
+    if recovered_clause_no and title_body:
+        return f"{recovered_clause_no} {title_body}".strip()
     return f"{code} {title}".strip() or title or code or "未命名章节"
 
 
@@ -69,31 +72,70 @@ def _extract_clause_no(value: str | None) -> str | None:
     return match.group(1)
 
 
+def _recover_clause_no_and_title_body(code: str, title: str) -> tuple[str | None, str]:
+    base_code = str(code or "").strip()
+    title_text = str(title or "").strip()
+    if not base_code or not title_text:
+        return None, title_text
+
+    boundary = r"(?=$|[\s（(：:，。；、\u4e00-\u9fff])"
+    full_match = re.match(
+        rf"^\s*({re.escape(base_code)}\.\d+(?:\.\d+)*){boundary}(.*)$",
+        title_text,
+    )
+    if full_match:
+        return full_match.group(1), full_match.group(2).lstrip()
+
+    if re.fullmatch(r"(?:[A-Z]|\d+)", base_code):
+        nested_match = re.match(rf"^\s*(\d+\.\d+){boundary}(.*)$", title_text)
+        if nested_match:
+            return f"{base_code}.{nested_match.group(1)}", nested_match.group(2).lstrip()
+    return None, title_text
+
+
+def _recover_clause_no_from_code_and_title(code: str, title: str) -> str | None:
+    clause_no, _ = _recover_clause_no_and_title_body(code, title)
+    return clause_no
+
+
 def _section_clause_no(section: dict) -> str | None:
     code = str(section.get("section_code") or "").strip()
+    title = str(section.get("title") or "").strip()
+    recovered = _recover_clause_no_from_code_and_title(code, title)
+    if recovered:
+        return recovered
     if code:
         return code
-    return _extract_clause_no(section.get("title"))
+    return _extract_clause_no(title)
 
 
 def _section_effective_text(section: dict) -> str:
     profile = _profile()
     title = str(section.get("title") or "").strip()
     text = str(section.get("text") or "").strip()
+    _, title_body = _recover_clause_no_and_title_body(
+        str(section.get("section_code") or "").strip(),
+        title,
+    )
+    effective_title = title_body or title
     clause_no = _section_clause_no(section)
     if text:
+        if effective_title != title and clause_no:
+            if effective_title.endswith(("：", ":", "。", "；")):
+                return f"{effective_title}\n{text}".strip()
+            return f"{effective_title}{text}".strip()
         if title and clause_no and profile.list_item_code_pattern.match(clause_no):
             if title.endswith(("：", ":", "。", "；")):
                 return f"{title}\n{text}".strip()
             return f"{title}{text}".strip()
         return text
-    if not title or not clause_no or clause_no.count(".") < 2:
+    if not effective_title or not clause_no or clause_no.count(".") < 2:
         return ""
     if profile.toc_page_ref_pattern.search(title) or profile.toc_dot_leaders_pattern.search(title):
         return ""
-    if not profile.sentence_signal_pattern.search(title):
+    if not profile.sentence_signal_pattern.search(effective_title):
         return ""
-    return title
+    return effective_title
 
 
 def _is_numbered_list_item_section(section: dict) -> bool:
@@ -103,6 +145,8 @@ def _is_numbered_list_item_section(section: dict) -> bool:
         return False
     title = str(section.get("title") or "").strip()
     text = str(section.get("text") or "").strip()
+    if _recover_clause_no_from_code_and_title(code, title):
+        return False
     if not title and not text:
         return False
     if title and (

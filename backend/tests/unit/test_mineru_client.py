@@ -54,6 +54,7 @@ def test_request_upload_url_posts_to_file_urls_batch_and_returns_info() -> None:
         captured["url"] = str(request.url)
         captured["body"] = json.loads(request.content.decode("utf-8"))
         captured["auth"] = request.headers.get("Authorization")
+        captured["token"] = request.headers.get("token")
         return httpx.Response(
             200,
             json={
@@ -77,10 +78,45 @@ def test_request_upload_url_posts_to_file_urls_batch_and_returns_info() -> None:
         "enable_formula": False,
     }
     assert captured["auth"] == "Bearer token"
+    assert captured["token"] == "token"
     assert isinstance(info, MineruUploadInfo)
     assert info.batch_id == "batch-123"
     assert info.upload_url == "https://upload.example.com/file-1"
     assert info.data_id == "doc-1"
+
+
+def test_request_upload_url_derives_token_header_from_jwt_uuid() -> None:
+    captured: dict = {}
+    jwt = (
+        "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ."
+        "eyJ1dWlkIjoiZWU1ZGUyZTItYzJjMC00ZTBkLTliODEtMGU1OWUzMWEzOGI1IiwiZXhwIjoxNzgwMTEwOTc1fQ."
+        "sig"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        captured["token"] = request.headers.get("token")
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "batch_id": "batch-jwt",
+                    "file_urls": ["https://upload.example.com/file-jwt"],
+                }
+            },
+        )
+
+    client = MineruClient(
+        base_url="https://mineru.net/api/v4/extract/task",
+        api_key=jwt,
+        options=_DEFAULT_OPTIONS,
+        transport=httpx.MockTransport(handler),
+    )
+
+    asyncio.run(client.request_upload_url("spec.pdf", data_id="doc-jwt"))
+
+    assert captured["auth"] == f"Bearer {jwt}"
+    assert captured["token"] == "ee5de2e2-c2c0-4e0d-9b81-0e59e31a38b5"
 
 
 def test_request_upload_url_raises_when_response_missing_batch_id() -> None:

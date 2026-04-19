@@ -127,6 +127,89 @@ def test_build_single_standard_blocks_recovers_clause_no_from_heading_when_secti
     assert blocks[0].confidence == "high"
 
 
+def test_build_single_standard_blocks_recovers_split_clause_no_from_chapter_code_and_title_prefix() -> None:
+    sections = [
+        {
+            "id": "s1",
+            "section_code": "4",
+            "title": "2.4设备在保管期间，应经常检查。",
+            "text": "其变压器内油样性能应符合表4.2.4的规定：",
+            "page_start": 18,
+            "page_end": 18,
+        },
+    ]
+
+    blocks = build_single_standard_blocks(sections, [])
+
+    assert blocks[0].clause_no == "4.2.4"
+    assert blocks[0].segment_type == "normative_clause_block"
+
+
+def test_build_single_standard_blocks_does_not_recover_false_clause_no_from_numeric_unit_prefix() -> None:
+    sections = [
+        {
+            "id": "s1",
+            "section_code": "4",
+            "title": "1.131.5MV·A及以上变压器和40MVar及以上的电抗器的装卸及运输，应符合下列规定：",
+            "text": "",
+            "page_start": 15,
+            "page_end": 15,
+        },
+    ]
+
+    blocks = build_single_standard_blocks(sections, [])
+
+    assert blocks[0].clause_no == "4"
+
+
+def test_build_single_standard_blocks_keeps_split_clause_title_out_of_numbered_list_merge() -> None:
+    sections = [
+        {
+            "id": "s-host",
+            "section_code": "4.2.2",
+            "title": "充气运输的变压器、电抗器应符合下列规定：",
+            "text": "",
+            "page_start": 18,
+            "page_end": 18,
+        },
+        {
+            "id": "s-host-1",
+            "section_code": "1",
+            "title": "应安装储油柜及吸湿器，注以合格油至储油柜规定油位。",
+            "text": "",
+            "page_start": 18,
+            "page_end": 18,
+        },
+        {
+            "id": "s-host-2",
+            "section_code": "2",
+            "title": "当不能及时注油时，应继续充与原充气体相同的气体保管。",
+            "text": "",
+            "page_start": 18,
+            "page_end": 18,
+        },
+        {
+            "id": "s-clause",
+            "section_code": "4",
+            "title": "2.4设备在保管期间，应经常检查。其变压器内油样性能应符合表4.2.4的规定：",
+            "text": "表4.2.4变压器内油样性能\n<table><tr><td>试验项目</td><td>标准值</td></tr></table>",
+            "page_start": 18,
+            "page_end": 18,
+        },
+    ]
+
+    blocks = build_single_standard_blocks(sections, [])
+
+    assert len(blocks) == 2
+    assert blocks[0].clause_no == "4.2.2"
+    assert "1 应安装储油柜及吸湿器" in blocks[0].text
+    assert "2 当不能及时注油时" in blocks[0].text
+    assert blocks[1].clause_no == "4.2.4"
+    assert blocks[1].segment_type == "normative_clause_block"
+    assert blocks[1].text.startswith("设备在保管期间，应经常检查。")
+    assert "表4.2.4变压器内油样性能" in blocks[1].text
+
+
 def test_build_single_standard_blocks_keeps_normative_heading_with_appendix_reference_out_of_appendix_bucket() -> None:
     sections = [
         {
