@@ -463,6 +463,38 @@ def test_build_tree_reclassifies_unnumbered_flat_entries_as_items_when_parent_in
     assert not any(item["clause_no"] is None and item["node_type"] == "clause" for item in clauses)
 
 
+def test_build_tree_keeps_table_entries_without_clause_no_out_of_previous_clause_items() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "4.1.2",
+                "clause_text": "变压器或电抗器的装卸应符合下列规定：",
+            },
+            {
+                "clause_no": None,
+                "clause_title": "表4.1.2主要参数",
+                "clause_text": "额定电压：10kV。",
+                "source_type": "table",
+            },
+        ],
+        standard_id,
+    )
+
+    host_clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "4.1.2")
+    table_clause = next(
+        item
+        for item in clauses
+        if item["source_type"] == "table" and item["clause_title"] == "表4.1.2主要参数"
+    )
+
+    assert table_clause["node_type"] == "clause"
+    assert table_clause["clause_no"] is None
+    assert table_clause["parent_id"] is None
+    assert table_clause["id"] != host_clause["id"]
+
+
 def test_build_tree_keeps_auto_inferred_items_for_different_parents_with_same_labels() -> None:
     standard_id = uuid4()
 
@@ -556,6 +588,68 @@ def test_build_tree_attaches_explicit_item_without_clause_no_to_latest_clause_ev
 
     assert item["clause_no"] == "5.2.1"
     assert item["parent_id"] == clause["id"]
+
+
+def test_build_tree_reclassifies_nested_leading_numeric_children_as_items() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "8.0.13",
+                "clause_text": "绕组连同套管的交流耐压试验，应符合下列规定：",
+                "children": [
+                    {
+                        "clause_text": "2)外施交流电压试验电压的频率不应低于40Hz。",
+                    },
+                    {
+                        "clause_text": "3)感应电压试验时，试验电压的频率应大于额定频率。",
+                    },
+                ],
+            }
+        ],
+        standard_id,
+    )
+
+    host_clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "8.0.13")
+    items = [item for item in clauses if item["node_type"] == "item"]
+
+    assert [item["node_label"] for item in items] == ["2)", "3)"]
+    assert all(item["clause_no"] == "8.0.13" for item in items)
+    assert all(item["parent_id"] == host_clause["id"] for item in items)
+    assert len([item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "8.0.13"]) == 1
+
+
+def test_build_tree_reclassifies_nested_same_clause_number_sequence_children() -> None:
+    standard_id = uuid4()
+
+    clauses = build_tree(
+        [
+            {
+                "clause_no": "8.0.13",
+                "clause_text": "绕组连同套管的交流耐压试验，应符合下列规定：",
+                "children": [
+                    {
+                        "clause_no": "8.0.13",
+                        "clause_text": "2)外施交流电压试验电压的频率不应低于40Hz。",
+                    },
+                    {
+                        "clause_no": "8.0.13",
+                        "clause_text": "3)感应电压试验时，试验电压的频率应大于额定频率。",
+                    },
+                ],
+            }
+        ],
+        standard_id,
+    )
+
+    host_clause = next(item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "8.0.13")
+    items = [item for item in clauses if item["node_type"] == "item"]
+
+    assert [item["node_label"] for item in items] == ["2)", "3)"]
+    assert all(item["clause_no"] == "8.0.13" for item in items)
+    assert all(item["parent_id"] == host_clause["id"] for item in items)
+    assert len([item for item in clauses if item["node_type"] == "clause" and item["clause_no"] == "8.0.13"]) == 1
 
 
 def test_build_tree_repairs_top_level_orphan_items_even_when_other_entries_have_children() -> None:

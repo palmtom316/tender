@@ -40,5 +40,5 @@ def test_call_with_fallback_uses_task_level_timeout_and_retries(monkeypatch) -> 
     )
 
     assert result.content == "[]"
-    assert captured["timeout"] == 180
+    assert captured["timeout"] == 300
     assert captured["max_retries"] == 0

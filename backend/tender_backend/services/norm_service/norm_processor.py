@@ -713,9 +713,10 @@ def _fetch_sections(conn: Connection, document_id: str) -> list[dict]:
                FROM document_section
                WHERE document_id = %s
                ORDER BY
+                   CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END,
+                   sort_order,
                    CASE WHEN page_start IS NULL THEN 1 ELSE 0 END,
                    page_start,
-                   sort_order,
                    ctid""",
             (document_id,),
         ).fetchall()
@@ -779,13 +780,26 @@ def _build_processing_scopes(
         sections=sections,
         tables=tables,
     )
+    first_content_section = next(
+        (
+            section
+            for section in sections
+            if str(section.get("title") or "").strip() or str(section.get("text") or "").strip()
+        ),
+        None,
+    )
+    should_trim_pages_by_section_bounds = bool(
+        first_content_section
+        and isinstance(first_content_section.get("page_start"), int)
+        and first_content_section.get("page_start") > 0
+    )
     bounded_pages = [
         page_no
         for section in sections
         for page_no in (section.get("page_start"), section.get("page_end"))
         if isinstance(page_no, int) and page_no > 0
     ]
-    if asset.pages and bounded_pages:
+    if asset.pages and bounded_pages and should_trim_pages_by_section_bounds:
         first_page = min(bounded_pages)
         last_page = max(bounded_pages)
         filtered_pages = [
@@ -1092,6 +1106,287 @@ def _deterministic_entries_from_scope(scope: ProcessingScope) -> list[dict]:
     return _deterministic_table_entries_from_block(block)
 
 
+def _canonical_scope_source_label(label: object) -> str:
+    return _SCOPE_LABEL_SPLIT_SUFFIX_RE.sub("", str(label or "").strip())
+
+
+def _host_entry_from_scope_label(
+    scope: ProcessingScope,
+    *,
+    first_clause_no: str,
+    source_ref: str | None,
+    source_label: str,
+) -> dict | None:
+    normalized_label = source_label
+    if not normalized_label:
+        return None
+
+    appendix_match = _INLINE_SCOPE_APPENDIX_LABEL_RE.match(normalized_label)
+    if appendix_match:
+        clause_no = str(appendix_match.group(1) or "").strip()
+        clause_title = str(appendix_match.group(2) or "").strip()
+        if clause_no and clause_title and first_clause_no.startswith(f"{clause_no}."):
+            return {
+                "clause_no": clause_no,
+                "clause_title": clause_title,
+                "clause_text": f"附录{clause_no}{clause_title}",
+                "summary": None,
+                "tags": [],
+                "page_start": scope.page_start,
+                "page_end": scope.page_end,
+                "clause_type": "normative",
+                "source_type": "text",
+                "source_ref": source_ref,
+                "source_refs": list(scope.source_refs),
+                "source_label": source_label,
+            }
+
+    host_match = _INLINE_SCOPE_HOST_LABEL_RE.match(normalized_label)
+    if not host_match:
+        first_line = str(scope.text or "").splitlines()[0].strip() if str(scope.text or "").strip() else ""
+        host_match = _INLINE_SCOPE_HOST_LABEL_RE.match(first_line)
+    if not host_match:
+        return None
+
+    clause_no = str(host_match.group(1) or "").strip()
+    clause_title = str(host_match.group(2) or "").strip()
+    if not clause_no or not clause_title:
+        return None
+    if clause_no == first_clause_no or not first_clause_no.startswith(f"{clause_no}."):
+        return None
+
+    return {
+        "clause_no": clause_no,
+        "clause_title": clause_title,
+        "clause_text": f"{clause_no}{clause_title}",
+        "summary": None,
+        "tags": [],
+        "page_start": scope.page_start,
+        "page_end": scope.page_end,
+        "clause_type": "normative",
+        "source_type": "text",
+        "source_ref": source_ref,
+        "source_refs": list(scope.source_refs),
+        "source_label": source_label,
+    }
+
+
+def _scope_host_clause_no(scope: ProcessingScope) -> str | None:
+    source_label = _canonical_scope_source_label(scope.chapter_label)
+    appendix_match = _INLINE_SCOPE_APPENDIX_LABEL_RE.match(source_label)
+    if appendix_match:
+        clause_no = str(appendix_match.group(1) or "").strip()
+        return clause_no or None
+
+    host_match = _INLINE_SCOPE_HOST_LABEL_RE.match(source_label)
+    if not host_match:
+        return None
+    clause_no = str(host_match.group(1) or "").strip()
+    return clause_no or None
+
+
+def _clause_no_belongs_to_scope(clause_no: str, scope: ProcessingScope) -> bool:
+    expected_host = _scope_host_clause_no(scope)
+    if not expected_host:
+        return True
+    return clause_no == expected_host or clause_no.startswith(f"{expected_host}.")
+
+
+def _collect_known_clause_nos(sections: list[dict]) -> set[str]:
+    known: set[str] = set()
+    for section in sections:
+        for candidate in (
+            str(section.get("section_code") or "").strip(),
+            _section_host_code(section),
+        ):
+            if candidate and _STRUCTURED_CLAUSE_NO_RE.match(candidate):
+                known.add(candidate)
+    return known
+
+
+def _effective_scope_clause_allowlist(
+    scope: ProcessingScope,
+    allowed_clause_nos: set[str] | None,
+) -> set[str] | None:
+    if allowed_clause_nos is None:
+        return None
+    scope_host = _scope_host_clause_no(scope)
+    scoped = {
+        clause_no
+        for clause_no in allowed_clause_nos
+        if _clause_no_belongs_to_scope(clause_no, scope)
+    }
+    if not scoped:
+        return None
+    detailed = {
+        clause_no
+        for clause_no in scoped
+        if scope_host is None or clause_no != scope_host
+    }
+    return scoped if detailed else None
+
+
+def _sanitize_scope_entries(
+    scope: ProcessingScope,
+    entries: list[dict],
+    *,
+    allowed_clause_nos: set[str] | None = None,
+) -> list[dict]:
+    sanitized: list[dict] = []
+    effective_allowed_clause_nos = _effective_scope_clause_allowlist(scope, allowed_clause_nos)
+
+    def _sanitize_entry(entry: dict) -> dict | None:
+        current = dict(entry)
+        raw_clause_no = str(current.get("clause_no") or "").strip()
+        node_type = str(current.get("node_type") or "").strip()
+
+        if raw_clause_no and _STRUCTURED_CLAUSE_NO_RE.match(raw_clause_no):
+            clause_allowed = _clause_no_belongs_to_scope(raw_clause_no, scope)
+            if clause_allowed and effective_allowed_clause_nos is not None:
+                clause_allowed = raw_clause_no in effective_allowed_clause_nos
+            if not clause_allowed:
+                if node_type in {"item", "subitem"}:
+                    current.pop("clause_no", None)
+                else:
+                    return None
+
+        children = current.get("children")
+        if isinstance(children, list):
+            current["children"] = [
+                child
+                for item in children
+                if isinstance(item, dict)
+                for child in [_sanitize_entry(item)]
+                if child is not None
+            ]
+        return current
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        sanitized_entry = _sanitize_entry(entry)
+        if sanitized_entry is not None:
+            sanitized.append(sanitized_entry)
+    return sanitized
+
+
+def _deterministic_inline_clause_entries_from_scope(
+    scope: ProcessingScope,
+    *,
+    allowed_clause_nos: set[str] | None = None,
+) -> list[dict]:
+    if scope.scope_type != "normative":
+        return []
+
+    lines = [line.strip() for line in str(scope.text or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return []
+
+    clause_starts = [
+        index
+        for index, line in enumerate(lines)
+        if _INLINE_SCOPE_CLAUSE_LINE_RE.match(line)
+    ]
+    if len(clause_starts) < 2:
+        return []
+
+    entries: list[dict] = []
+    effective_allowed_clause_nos = _effective_scope_clause_allowlist(scope, allowed_clause_nos)
+    source_ref = scope.source_refs[0] if scope.source_refs else None
+    source_label = _canonical_scope_source_label(scope.chapter_label)
+    first_clause_match = _INLINE_SCOPE_CLAUSE_LINE_RE.match(lines[clause_starts[0]])
+    first_clause_no = str(first_clause_match.group(1) or "").strip() if first_clause_match else ""
+    host_entry = _host_entry_from_scope_label(
+        scope,
+        first_clause_no=first_clause_no,
+        source_ref=source_ref,
+        source_label=source_label,
+    )
+    if host_entry is not None:
+        entries.append(host_entry)
+
+    for offset, start_index in enumerate(clause_starts):
+        next_index = clause_starts[offset + 1] if offset + 1 < len(clause_starts) else len(lines)
+        match = _INLINE_SCOPE_CLAUSE_LINE_RE.match(lines[start_index])
+        if not match:
+            continue
+        clause_no = str(match.group(1) or "").strip()
+        first_body = str(match.group(2) or "").strip()
+        if not _clause_no_belongs_to_scope(clause_no, scope):
+            continue
+        if effective_allowed_clause_nos is not None and clause_no not in effective_allowed_clause_nos:
+            continue
+        body_lines = [first_body] if first_body else []
+        body_lines.extend(lines[start_index + 1:next_index])
+        clause_text = "\n".join(line for line in body_lines if line).strip()
+        if not clause_no or not clause_text:
+            continue
+        entries.append({
+            "clause_no": clause_no,
+            "clause_title": None,
+            "clause_text": clause_text,
+            "summary": None,
+            "tags": [],
+            "page_start": scope.page_start,
+            "page_end": scope.page_end,
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": source_ref,
+            "source_refs": list(scope.source_refs),
+            "source_label": source_label,
+        })
+
+    return entries
+
+
+def _iter_entry_dicts(entries: list[dict]) -> list[dict]:
+    collected: list[dict] = []
+
+    def _visit(value: dict) -> None:
+        collected.append(value)
+        children = value.get("children")
+        if not isinstance(children, list):
+            return
+        for child in children:
+            if isinstance(child, dict):
+                _visit(child)
+
+    for entry in entries:
+        if isinstance(entry, dict):
+            _visit(entry)
+    return collected
+
+
+def _supplement_scope_entries_with_deterministic_inline(
+    scope: ProcessingScope,
+    entries: list[dict],
+    *,
+    allowed_clause_nos: set[str] | None = None,
+) -> list[dict]:
+    deterministic_entries = _deterministic_inline_clause_entries_from_scope(
+        scope,
+        allowed_clause_nos=allowed_clause_nos,
+    )
+    if not deterministic_entries:
+        return entries
+    if not entries:
+        return deterministic_entries
+
+    existing_clause_nos = {
+        str(entry.get("clause_no") or "").strip()
+        for entry in _iter_entry_dicts(entries)
+        if str(entry.get("clause_no") or "").strip()
+    }
+    missing_entries = [
+        entry
+        for entry in deterministic_entries
+        if str(entry.get("clause_no") or "").strip() not in existing_clause_nos
+    ]
+    if not missing_entries:
+        return entries
+    return missing_entries + entries
+
+
 def _should_skip_block_for_ai(block: BlockSegment) -> bool:
     if block.segment_type in {"heading_only_block", "non_clause_block"}:
         return True
@@ -1106,14 +1401,19 @@ def _should_skip_block_for_ai(block: BlockSegment) -> bool:
     return False
 
 
-_ACTUAL_CHAPTER_TITLE = re.compile(r"^\d{1,2}\s+\S")
+_ACTUAL_CHAPTER_TITLE = re.compile(r"^\d{1,2}(?![.\d])\s*\S")
 _ACTUAL_CLAUSE_TITLE = re.compile(r"^\d+(?:\.\d+)+\s+\S")
+_TOC_TITLE_RE = re.compile(r"^\s*(?:目次|contents)\s*$", re.IGNORECASE)
 _TOC_PAGE_REF = re.compile(r"(?:\(\d+\)|（\d+）)\s*$")
 _TOC_DOT_LEADERS = re.compile(r"[.…]{2,}")
 _BLOCK_CLAUSE_NO_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b")
-_EMBEDDED_SECTION_HEADING_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\s+(\S.*)$")
-_NUMBERED_ITEM_HEADING_RE = re.compile(
-    r"^\s*(?:[（(]\s*(\d+)\s*[）)]|(\d+))(?:[、.)）]\s*|\s+)?(.*)$"
+_INLINE_SCOPE_CLAUSE_LINE_RE = re.compile(r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\s*(\S.*)$")
+_INLINE_SCOPE_HOST_LABEL_RE = re.compile(r"^\s*((?:[1-9]\d*(?:\.\d+)*|[A-Z]))\s*(?![.．])(\S.*)$")
+_INLINE_SCOPE_APPENDIX_LABEL_RE = re.compile(r"^\s*附录\s*([A-Z])\s*(\S.*)$")
+_SCOPE_LABEL_SPLIT_SUFFIX_RE = re.compile(r"\s*\(\d+/\d+\)\s*$")
+_STRUCTURED_CLAUSE_NO_RE = re.compile(r"^(?:[A-Z](?:\.\d+)*|\d+(?:\.\d+)*)$")
+_EMBEDDED_SECTION_HEADING_RE = re.compile(
+    r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))(?![.\d])\s*(\S.*)$"
 )
 _LAYOUT_MARKER_RE = re.compile(r"^(?:text|text_list)$")
 _PAGE_ARTIFACT_RE = re.compile(r"^[·•]?\d+[·•]?$")
@@ -1128,6 +1428,30 @@ def _section_heading_text(section: dict) -> str:
     code = str(section.get("section_code") or "").strip()
     title = str(section.get("title") or "").strip()
     return f"{code} {title}".strip()
+
+
+def _section_host_code(section: dict) -> str:
+    code = str(section.get("section_code") or "").strip()
+    if code:
+        return code
+
+    title = str(section.get("title") or "").strip()
+    if not title:
+        return ""
+
+    embedded_match = _EMBEDDED_SECTION_HEADING_RE.match(title)
+    if embedded_match:
+        return str(embedded_match.group(1) or "").strip()
+
+    appendix_match = _INLINE_SCOPE_APPENDIX_LABEL_RE.match(title)
+    if appendix_match:
+        return str(appendix_match.group(1) or "").strip()
+
+    host_match = re.match(r"^\s*([1-9]\d*)(?![.\d])\s*\S", title)
+    if host_match:
+        return str(host_match.group(1) or "").strip()
+
+    return ""
 
 
 def _is_clause_like_section_code(code: str) -> bool:
@@ -1183,14 +1507,41 @@ def _clean_section_text_lines(text: str) -> list[str]:
 
 def _parse_numbered_item_heading(line: str) -> tuple[str, str] | None:
     stripped = line.strip()
-    match = _NUMBERED_ITEM_HEADING_RE.match(stripped)
-    if not match:
+    if not stripped:
         return None
-    code = match.group(1) or match.group(2)
-    title = match.group(3).strip()
-    if not code or not title:
+
+    bracketed_match = re.match(r"^[（(]\s*(\d+)\s*[）)]", stripped)
+    if bracketed_match:
+        code = str(bracketed_match.group(1) or "").strip()
+        rest = stripped[bracketed_match.end():].lstrip("、.)） \t")
+        return (code, rest) if code and rest else None
+
+    digit_match = re.match(r"^(\d+)", stripped)
+    if not digit_match:
         return None
-    return code, title
+
+    code = str(digit_match.group(1) or "").strip()
+    next_index = digit_match.end()
+    if next_index >= len(stripped):
+        return None
+
+    next_char = stripped[next_index]
+    if next_char in {".", "．"}:
+        return None
+
+    if next_char in {"、", ")", "）"}:
+        rest = stripped[next_index + 1:].strip()
+        return (code, rest) if rest else None
+
+    if next_char.isspace():
+        rest = stripped[next_index:].strip()
+        return (code, rest) if rest else None
+
+    if next_char.isascii():
+        return None
+
+    rest = stripped[next_index:].strip()
+    return (code, rest) if rest else None
 
 
 def _text_invites_numbered_items(text: str) -> bool:
@@ -1224,7 +1575,7 @@ def _split_embedded_sections(section: dict) -> list[dict]:
         normalized_without_markers["text"] = ""
         return [_coerce_inline_clause_text(normalized_without_markers)]
 
-    parent_code = str(normalized.get("section_code") or "").strip()
+    parent_code = _section_host_code(normalized)
     parent_title = str(normalized.get("title") or "").strip()
     parent_level = normalized.get("level")
     source_id = str(normalized.get("id") or "").strip()
@@ -1462,11 +1813,20 @@ def _prune_empty_outline_hosts(
 
 def _is_toc_heading(section: dict) -> bool:
     title = _section_heading_text(section)
+    if _TOC_TITLE_RE.match(title):
+        return True
     if _TOC_PAGE_REF.search(title):
         return True
     if _TOC_DOT_LEADERS.search(title):
         return True
     text = (section.get("text") or "").strip()
+    toc_like_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+    if sum(1 for line in toc_like_lines if _TOC_PAGE_REF.search(line) or _TOC_DOT_LEADERS.search(line)) >= 2:
+        return True
     if text:
         return False
     return False
@@ -1965,6 +2325,7 @@ def process_standard_ai(
         sections = _normalize_sections_for_processing(raw_sections)
         if not sections:
             raise ValueError("No normalized sections available for processing")
+        known_clause_nos = _collect_known_clause_nos(sections)
         outline_clause_nos = (
             collect_outline_clause_nos_from_pages(document_asset.pages)
             | _collect_outline_clause_nos(raw_sections)
@@ -2012,6 +2373,11 @@ def process_standard_ai(
                 if current_block is not None
                 else _deterministic_entries_from_scope(scope)
             )
+            direct_entries = _sanitize_scope_entries(
+                scope,
+                direct_entries,
+                allowed_clause_nos=known_clause_nos,
+            )
             if direct_entries:
                 all_entries.extend(direct_entries)
                 logger.info(
@@ -2032,6 +2398,26 @@ def process_standard_ai(
             )
 
             entries = _process_scope_with_retries(conn, scope)
+            entries = _sanitize_scope_entries(
+                scope,
+                entries,
+                allowed_clause_nos=known_clause_nos,
+            )
+            supplemented_entries = _supplement_scope_entries_with_deterministic_inline(
+                scope,
+                entries,
+                allowed_clause_nos=known_clause_nos,
+            )
+            if supplemented_entries is not entries:
+                entries = supplemented_entries
+                logger.info(
+                    "processing_scope_deterministic_fallback",
+                    index=i + 1,
+                    total=len(scopes),
+                    scope_type=scope.scope_type,
+                    chapter=scope.chapter_label,
+                    entry_count=len(entries),
+                )
             all_entries.extend(entries)
 
             if i < len(scopes) - 1:

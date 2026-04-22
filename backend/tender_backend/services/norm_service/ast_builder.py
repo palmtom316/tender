@@ -17,6 +17,10 @@ _CLAUSE_NO_NORMALIZE = re.compile(r"^(\d+(?:[.\-]\d+)*)")
 _EMBEDDED_CLAUSE_LEAD = re.compile(r"^(?P<clause_no>\d+(?:\.\d+)+)\s+(?P<body>\S.*)$", re.S)
 _CLAUSE_LABEL_RE = re.compile(r"^\s*(?:[A-Z]\.)?\d+(?:\.\d+)+\s*$")
 _ITEM_MARKER_RE = re.compile(r"^\s*(?:[（(]\s*(\d+)\s*[）)]|(\d+)([、.)）]?))\s*$")
+_LEADING_SEQUENCE_TEXT_RE = re.compile(
+    r"^\s*(?:[（(]\s*(?P<bracketed>\d+)\s*[）)]|(?P<plain>\d+)(?P<suffix>[、.)）]?))\s*(?P<body>\S.*)$",
+    re.S,
+)
 _ALLOWED_CLAUSE_TYPES = {"normative", "commentary"}
 _ALLOWED_SOURCE_TYPES = {"text", "table"}
 _ALLOWED_NODE_TYPES = {"clause", "commentary", "item", "subitem"}
@@ -122,6 +126,29 @@ def _extract_clause_no_from_node_label(raw: object) -> str | None:
     return normalized
 
 
+def _leading_sequence_parts(text: object) -> tuple[str, str] | None:
+    match = _LEADING_SEQUENCE_TEXT_RE.match(str(text or "").strip())
+    if not match:
+        return None
+    bracketed = match.group("bracketed")
+    plain = match.group("plain")
+    suffix = match.group("suffix") or ""
+    body = str(match.group("body") or "").strip()
+    if not body:
+        return None
+    if bracketed:
+        label = f"({bracketed})"
+    elif suffix in {")", "）"}:
+        label = f"{plain})"
+    elif suffix == "、":
+        label = f"{plain}、"
+    else:
+        label = str(plain or "").strip()
+    if not label:
+        return None
+    return label, body
+
+
 def _entry_invites_list_children(entry: dict) -> bool:
     text_parts = [
         str(entry.get("clause_title") or "").strip(),
@@ -155,6 +182,7 @@ def _repair_flat_sequence_entries(entries: list[dict]) -> list[dict]:
 
     for entry in entries:
         current = dict(entry)
+        current = _reclassify_same_clause_sequence_entry(current, inherited_clause_no=active_parent_clause_no)
         raw_clause_no = current.get("clause_no")
         item_label = _normalize_item_marker(raw_clause_no)
         node_type = str(current.get("node_type") or "").strip() or None
@@ -188,6 +216,11 @@ def _repair_flat_sequence_entries(entries: list[dict]) -> list[dict]:
                 next_item_index = 1
             else:
                 active_parent_clause_no = None
+            continue
+
+        if str(current.get("source_type") or "").strip() == "table" and not str(raw_clause_no or "").strip():
+            repaired.append(current)
+            active_parent_clause_no = None
             continue
 
         if active_parent_clause_no and (item_label or not str(raw_clause_no or "").strip()):
@@ -360,6 +393,62 @@ def _promote_clause_label_child(entry: dict, *, inherited_clause_no: str | None)
     return promoted
 
 
+def _promote_implicit_sequence_child(entry: dict, *, inherited_clause_no: str | None) -> dict:
+    promoted = dict(entry)
+    if not inherited_clause_no:
+        return promoted
+    if str(promoted.get("source_type") or "").strip() == "table":
+        return promoted
+    if str(promoted.get("clause_no") or "").strip():
+        return promoted
+    if str(promoted.get("node_label") or "").strip():
+        return promoted
+
+    node_type = str(promoted.get("node_type") or "").strip()
+    if node_type in {"item", "subitem", "commentary"}:
+        return promoted
+
+    parts = _leading_sequence_parts(promoted.get("clause_text"))
+    if not parts:
+        return promoted
+
+    label, body = parts
+    promoted["node_type"] = "item"
+    promoted["node_label"] = label
+    promoted["clause_no"] = inherited_clause_no
+    promoted["clause_text"] = body
+    return promoted
+
+
+def _reclassify_same_clause_sequence_entry(entry: dict, *, inherited_clause_no: str | None) -> dict:
+    promoted = dict(entry)
+    if not inherited_clause_no:
+        return promoted
+    if str(promoted.get("source_type") or "").strip() == "table":
+        return promoted
+    if str(promoted.get("node_label") or "").strip():
+        return promoted
+
+    node_type = str(promoted.get("node_type") or "").strip()
+    if node_type in {"item", "subitem", "commentary"}:
+        return promoted
+
+    clause_no = normalize_clause_no(promoted.get("clause_no")) if promoted.get("clause_no") else ""
+    if clause_no != inherited_clause_no:
+        return promoted
+
+    parts = _leading_sequence_parts(promoted.get("clause_text"))
+    if not parts:
+        return promoted
+
+    label, body = parts
+    promoted["node_type"] = "item"
+    promoted["node_label"] = label
+    promoted["clause_no"] = inherited_clause_no
+    promoted["clause_text"] = body
+    return promoted
+
+
 def _build_nested_ast(
     entries: list[dict],
     *,
@@ -378,6 +467,8 @@ def _build_nested_ast(
     for sibling_index, entry in enumerate(entries):
         current_entry = _promote_embedded_clause_child(entry, inherited_clause_no=inherited_clause_no)
         current_entry = _promote_clause_label_child(current_entry, inherited_clause_no=inherited_clause_no)
+        current_entry = _promote_implicit_sequence_child(current_entry, inherited_clause_no=inherited_clause_no)
+        current_entry = _reclassify_same_clause_sequence_entry(current_entry, inherited_clause_no=inherited_clause_no)
         clause_type = _normalize_clause_type(entry.get("clause_type", "normative"))
         node_type = _default_node_type(current_entry, clause_type=clause_type)
         item_marker = _normalize_item_marker(current_entry.get("clause_no"))
@@ -449,7 +540,7 @@ def _build_nested_ast(
         children = current_entry.get("children")
         if isinstance(children, list) and children:
             node.children = _build_nested_ast(
-                deduplicate_entries(children),
+                children,
                 standard_id=standard_id,
                 parent_id=node_id,
                 parent_key=node_key,
@@ -634,6 +725,6 @@ def build_clause_ast(entries: list[dict], standard_id: UUID) -> list[ClauseASTNo
         for entry in repaired_entries
     )
     if has_explicit_children:
-        roots = _build_nested_ast(deduplicate_entries(repaired_entries), standard_id=standard_id)
+        roots = _build_nested_ast(repaired_entries, standard_id=standard_id)
         return _attach_clause_hierarchy(roots)
     return _build_flat_ast(repaired_entries, standard_id=standard_id)

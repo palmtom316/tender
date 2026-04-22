@@ -1877,6 +1877,39 @@ def test_normalize_sections_for_processing_drops_toc_rows_even_when_they_carry_t
     ]
 
 
+def test_normalize_sections_for_processing_drops_toc_heading_even_when_body_contains_catalog_rows() -> None:
+    sections = [
+        {
+            "section_code": None,
+            "title": "目次",
+            "text": "1 总则 ………………………………………… (1)\n2 术语 ………………………………………… (2)",
+            "level": 1,
+            "page_start": 7,
+        },
+        {
+            "section_code": "1",
+            "title": "总则",
+            "text": "",
+            "level": 1,
+            "page_start": 10,
+        },
+        {
+            "section_code": "1.0.1",
+            "title": "为保证施工安装质量，制定本规范。",
+            "text": "",
+            "level": 2,
+            "page_start": 10,
+        },
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [f'{section.get("section_code") or ""} {section["title"]}'.strip() for section in normalized] == [
+        "1 总则",
+        "1.0.1 为保证施工安装质量，制定本规范。",
+    ]
+
+
 def test_normalize_sections_for_processing_promotes_inline_clause_title_to_text() -> None:
     sections = [
         {"section_code": "1.0.1", "title": "为保证施工安装质量，制定本规范。", "text": "", "level": 3, "page_start": 10},
@@ -2908,6 +2941,369 @@ def test_process_standard_ai_keeps_numbered_chapter_block_for_ai_in_single_stand
     assert summary["status"] == "completed"
     assert captured["processed_scopes"] == ["1 总则"]
     assert [entry["clause_no"] for entry in captured["entries"]] == ["1.0.1"]
+
+
+def test_process_standard_ai_falls_back_to_deterministic_inline_clause_split_when_ai_returns_empty(monkeypatch) -> None:
+    standard_id = UUID("f4a6c7c8-3a6d-4d86-8cd7-2cbfcaa0d801")
+    captured: dict[str, object] = {"processed_scopes": []}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "section_code": "1", "title": "总则", "text": "", "level": 1, "page_start": 11, "page_end": 11},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1总则",
+            text=(
+                "1总则\n"
+                "1.0.1为适应电气装置安装工程电气设备交接试验的需要，制定本标准。\n"
+                "1.0.2本标准适用于750kV及以下交流电压等级新安装的电气设备交接试验。"
+            ),
+            page_start=11,
+            page_end=11,
+            section_ids=["s1"],
+            source_refs=["document.raw_payload.pages[10]"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+
+    def fake_process_scope_with_retries(conn, scope):
+        captured["processed_scopes"].append(scope.chapter_label)
+        return []
+
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", fake_process_scope_with_retries)
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        phrase_flags=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0, "phrase_flag_count": 0, "issues": [], "phrase_flags": []},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="9491c69c-9ee7-4a5b-902e-16c3b2c82e9b",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["processed_scopes"] == ["1总则"]
+    assert [entry["clause_no"] for entry in captured["entries"]] == ["1", "1.0.1", "1.0.2"]
+
+
+def test_parse_numbered_item_heading_rejects_decimal_clause_and_unit_prefixes() -> None:
+    assert norm_processor._parse_numbered_item_heading("1测量绕组的绝缘电阻；") == ("1", "测量绕组的绝缘电阻；")
+    assert norm_processor._parse_numbered_item_heading("5.0.1直流电机的试验项目，应包括下列内容：") is None
+    assert norm_processor._parse_numbered_item_heading("1000V及以上的电动机应测量吸收比。") is None
+    assert norm_processor._parse_numbered_item_heading("16000kW以上同步发电机应进行试验。") is None
+
+
+def test_normalize_sections_for_processing_keeps_chapter_one_heading_without_space_after_number() -> None:
+    sections = [
+        {
+            "id": "toc",
+            "section_code": None,
+            "title": "目 次",
+            "text": "1总则 （1）\n2术语 （2）",
+        },
+        {
+            "id": "s1",
+            "section_code": None,
+            "title": "1总 则",
+            "text": (
+                "1.0.1为适应电气装置安装工程电气设备交接试验的需要，制定本标准。\n"
+                "1.0.2本标准适用于750kV及以下交流电压等级新安装的电气设备交接试验。"
+            ),
+            "page_start": 11,
+            "page_end": 11,
+        },
+        {
+            "id": "s2",
+            "section_code": None,
+            "title": "2术 语",
+            "text": "2.0.1自动灭磁装置 automatic field suppression equipment",
+            "page_start": 12,
+            "page_end": 12,
+        },
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert normalized[0]["title"] == "1总 则"
+    assert normalized[1]["section_code"] == "1.0.1"
+    assert normalized[2]["section_code"] == "1.0.2"
+    assert normalized[3]["title"] == "2术 语"
+    assert normalized[4]["section_code"] == "2.0.1"
+
+
+def test_build_processing_scopes_keeps_leading_pages_when_first_section_lacks_page_anchor(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    fake_pages = [
+        SimpleNamespace(page_number=11, normalized_text="1总则"),
+        SimpleNamespace(page_number=12, normalized_text="2术语"),
+    ]
+    fake_asset = SimpleNamespace(
+        pages=fake_pages,
+        tables=[],
+        full_markdown="1总则\n2术语",
+    )
+
+    monkeypatch.setattr(norm_processor, "build_document_asset", lambda **kwargs: fake_asset)
+    monkeypatch.setattr(
+        norm_processor,
+        "build_structured_processing_scopes",
+        lambda asset: captured.setdefault("pages", [page.page_number for page in asset.pages]) or [],
+    )
+
+    norm_processor._build_processing_scopes(
+        [
+            {"title": "1总 则", "text": "1.0.1...", "page_start": None, "page_end": None},
+            {"title": "2术 语", "text": "2.0.1...", "page_start": 12, "page_end": 12},
+        ],
+        [],
+        document={"id": "59745fdb-6819-46c2-a8c1-1f92b9eb5d41"},
+        document_id="59745fdb-6819-46c2-a8c1-1f92b9eb5d41",
+    )
+
+    assert captured["pages"] == [11, 12]
+
+
+def test_process_standard_ai_supplements_missing_inline_scope_entries_when_ai_response_is_incomplete(monkeypatch) -> None:
+    standard_id = UUID("74f8d621-7b54-47a0-8d6d-13518132f001")
+    captured: dict[str, object] = {"processed_scopes": []}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {"id": "s1", "section_code": "1", "title": "总则", "text": "", "level": 1, "page_start": 11, "page_end": 11},
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: None)
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="1总则",
+            text=(
+                "1总则\n"
+                "1.0.1为适应电气装置安装工程电气设备交接试验的需要，制定本标准。\n"
+                "1.0.2本标准适用于750kV及以下交流电压等级新安装的电气设备交接试验。"
+            ),
+            page_start=11,
+            page_end=11,
+            section_ids=["s1"],
+            source_refs=["document.raw_payload.pages[10]"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+
+    def fake_process_scope_with_retries(conn, scope):
+        captured["processed_scopes"].append(scope.chapter_label)
+        return [{
+            "clause_no": "1.0.2",
+            "clause_text": "本标准适用于750kV及以下交流电压等级新安装的电气设备交接试验。",
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_label": "1总则",
+        }]
+
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", fake_process_scope_with_retries)
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or [])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        phrase_flags=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0, "phrase_flag_count": 0, "issues": [], "phrase_flags": []},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "结构",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="9491c69c-9ee7-4a5b-902e-16c3b2c82e9c",
+    )
+
+    assert summary["status"] == "completed"
+    assert captured["processed_scopes"] == ["1总则"]
+    assert [entry["clause_no"] for entry in captured["entries"]] == ["1", "1.0.1", "1.0.2"]
+
+
+def test_deterministic_inline_clause_entries_from_scope_adds_appendix_host_from_scope_label() -> None:
+    scope = ProcessingScope(
+        scope_type="normative",
+        chapter_label="附录G电力电缆线路交叉互联系统 (1/2)",
+        text=(
+            "G.0.1交叉互联系统对地绝缘的直流耐压试验，应符合下列规定：\n"
+            "G.0.2非线性电阻型护层过电压保护器试验，应符合下列规定："
+        ),
+        page_start=200,
+        page_end=201,
+        source_refs=["document.raw_payload.pages[199]"],
+    )
+
+    entries = norm_processor._deterministic_inline_clause_entries_from_scope(scope)
+
+    assert [entry["clause_no"] for entry in entries] == ["G", "G.0.1", "G.0.2"]
+    assert entries[0]["clause_title"] == "电力电缆线路交叉互联系统"
+    assert entries[0]["source_label"] == "附录G电力电缆线路交叉互联系统"
+
+
+def test_deterministic_inline_clause_entries_from_scope_filters_numeric_fragments_by_known_clause_nos() -> None:
+    scope = ProcessingScope(
+        scope_type="normative",
+        chapter_label="17电力电缆线路",
+        text=(
+            "17电力电缆线路\n"
+            "17.0.3绝缘电阻测量，应符合下列规定：\n"
+            "1耐压试验前后,绝缘电阻测量应无明显变化；\n"
+            "2橡塑电缆外护套、内衬层的绝缘电阻不应低于\n"
+            "0.5MΩ/km;\n"
+            "17.0.4直流耐压试验及泄漏电流测量，应符合下列规定："
+        ),
+        page_start=180,
+        page_end=181,
+        source_refs=["document.raw_payload.pages[179]"],
+    )
+
+    entries = norm_processor._deterministic_inline_clause_entries_from_scope(
+        scope,
+        allowed_clause_nos={"17", "17.0.3", "17.0.4"},
+    )
+
+    assert [entry["clause_no"] for entry in entries] == ["17", "17.0.3", "17.0.4"]
+
+
+def test_deterministic_inline_clause_entries_from_scope_rejects_scope_mismatched_clause_numbers() -> None:
+    scope = ProcessingScope(
+        scope_type="normative",
+        chapter_label="附录G电力电缆线路交叉互联系统 (6/16)",
+        text=(
+            "8.0.13外施耐压试验用来验证线端和中性点端子及它们所连接\n"
+            "的绕组对地及对其他绕组的外施耐受强度。\n"
+            "8.0.14长时感应电压试验(ACLD)用以模拟瞬变过电压和连续运行电压作用的可靠性。"
+        ),
+        page_start=210,
+        page_end=211,
+        source_refs=["document.raw_payload.pages[209]"],
+    )
+
+    entries = norm_processor._deterministic_inline_clause_entries_from_scope(
+        scope,
+        allowed_clause_nos={"8.0.13", "8.0.14"},
+    )
+
+    assert entries == []
+
+
+def test_process_standard_ai_filters_scope_mismatched_ai_clause_entries(monkeypatch) -> None:
+    standard_id = uuid4()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, document_id: [
+        {
+            "id": "s1",
+            "section_code": "10",
+            "title": "10互感器",
+            "text": "10.0.1互感器的试验项目，应包括下列内容：",
+            "page_start": 20,
+            "page_end": 20,
+        },
+        {
+            "id": "s2",
+            "section_code": "10.0.1",
+            "title": "10.0.1互感器的试验项目，应包括下列内容：",
+            "text": "10.0.1互感器的试验项目，应包括下列内容：",
+            "page_start": 20,
+            "page_end": 20,
+        },
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, document_id: {"id": document_id})
+    monkeypatch.setattr(norm_processor, "build_document_asset", lambda **kwargs: SimpleNamespace(pages=[], tables=[], full_markdown=""))
+    monkeypatch.setattr(norm_processor, "collect_outline_clause_nos_from_pages", lambda pages: set())
+    monkeypatch.setattr(norm_processor, "_collect_outline_clause_nos", lambda sections: {"10", "10.0.1"})
+    monkeypatch.setattr(norm_processor, "_normalize_sections_for_processing", lambda sections: sections)
+    monkeypatch.setattr(norm_processor, "_build_processing_scopes", lambda sections, tables, document=None, document_id=None: [
+        ProcessingScope(
+            scope_type="normative",
+            chapter_label="10互感器",
+            text="10.0.1互感器的试验项目，应包括下列内容：",
+            page_start=20,
+            page_end=20,
+            source_refs=["document.raw_payload.pages[19]"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "rebalance_scopes", lambda scopes, **kwargs: scopes)
+    monkeypatch.setattr(norm_processor, "_process_scope_with_retries", lambda conn, scope: [
+        {
+            "clause_no": "10.0.1",
+            "clause_text": "互感器的试验项目，应包括下列内容：",
+            "clause_type": "normative",
+            "source_label": scope.chapter_label,
+        },
+        {
+            "clause_no": "8.0.13",
+            "clause_text": "条第4款的规定；",
+            "clause_type": "normative",
+            "source_label": scope.chapter_label,
+        },
+    ])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: captured.setdefault("entries", list(entries)) or [])
+    monkeypatch.setattr(norm_processor, "_prune_empty_outline_hosts", lambda clauses, *, outline_clause_nos=None: clauses)
+    monkeypatch.setattr(norm_processor, "_backfill_clause_page_anchors_from_asset", lambda clauses, document_asset: clauses)
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        phrase_flags=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0, "phrase_flag_count": 0, "issues": [], "phrase_flags": []},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor, "run_repair_tasks", lambda conn=None, document_id=None, tasks=None: [])
+    monkeypatch.setattr(norm_processor, "merge_repair_patches", lambda clauses, patches: clauses)
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, current_clauses: 0)
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 1",
+        "specialty": "电气",
+    })
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id="9491c69c-9ee7-4a5b-902e-16c3b2c82e9d",
+    )
+
+    assert summary["status"] == "completed"
+    assert [entry["clause_no"] for entry in captured["entries"]] == ["10.0.1"]
 
 
 def test_prune_empty_outline_hosts_drops_empty_outline_clause_and_reparents_children() -> None:

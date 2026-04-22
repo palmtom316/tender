@@ -10,7 +10,7 @@ TASK_PROFILES = {
     "tag_clauses": {
         "primary_model": "deepseek-chat",
         "fallback_model": "qwen-plus",
-        "timeout": 180,
+        "timeout": 300,
         "max_retries": 0,
     },
     "vision_repair": {

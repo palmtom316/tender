@@ -225,3 +225,50 @@ def test_rebuild_outline_sections_from_pages_ignores_numbered_list_items_between
         ("5.2", "安装与调整"),
         ("5.3", "GIS中的六氟化硫断路器的安装"),
     ]
+
+
+def test_rebuild_outline_sections_from_pages_ignores_gb50150_sentence_like_top_level_fragments() -> None:
+    pages = [
+        PageAsset(
+            page_number=17,
+            normalized_text=(
+                "4 同步发电机及调相机\n"
+                "6测量转子绕组的直流电阻;\n"
+                "8测量发电机或励磁机的励磁回路连同所连接设备的绝缘\n"
+                "18测量相序;\n"
+                "21kV及以下电压等级的任何容量的同步发电机，应按本\n"
+                "5对于汇水管死接地的电机应在无水情况下进行;对汇水管"
+            ),
+            raw_page=None,
+            source_ref="document.raw_payload.pages[16]",
+        ),
+        PageAsset(
+            page_number=18,
+            normalized_text=(
+                "7 交流电动机\n"
+                "24h后，各进行一次变压器器身内绝缘油的油中溶解气\n"
+                "11 真空断路器"
+            ),
+            raw_page=None,
+            source_ref="document.raw_payload.pages[17]",
+        ),
+        PageAsset(
+            page_number=72,
+            normalized_text=(
+                "20 避雷器\n"
+                "31kV以下电压等级，应采用500V兆欧表，绝缘电阻不应\n"
+                "20.75倍直流参考电压下的泄漏电流值不应大于50μA，或"
+            ),
+            raw_page=None,
+            source_ref="document.raw_payload.pages[71]",
+        ),
+    ]
+
+    sections = rebuild_outline_sections_from_pages(pages)
+
+    assert [(section["section_code"], section["title"]) for section in sections] == [
+        ("4", "同步发电机及调相机"),
+        ("7", "交流电动机"),
+        ("11", "真空断路器"),
+        ("20", "避雷器"),
+    ]

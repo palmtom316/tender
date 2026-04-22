@@ -26,9 +26,31 @@ _IGNORE_LINES = {"text", "text_list", "title", "image", "table"}
 _OUTLINE_HEADING_RE = re.compile(r"^(?P<code>\d+(?:\.\d+)?)\s*(?P<title>\S.*)$")
 _APPENDIX_HEADING_RE = re.compile(r"^(?:附录)\s*(?P<code>[A-Z])\s*(?P<title>\S.*)$")
 _PLAIN_NUMBERED_ITEM_RE = re.compile(r"^\d+\s+\S")
-_TITLE_SENTENCE_PUNCT = ("。", "；", "：", "!", "?", "！", "？")
+_TITLE_SENTENCE_PUNCT = ("，", ",", "。", "；", ";", "：", ":", "!", "?", "！", "？")
 _MAX_TITLE_LENGTH = 30
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_TOP_LEVEL_SENTENCE_START_HINTS = (
+    "测量",
+    "检查",
+    "进行",
+    "采用",
+    "对于",
+    "额定",
+)
+_TOP_LEVEL_SENTENCE_BODY_HINTS = (
+    "应",
+    "不应",
+    "后",
+    "按本",
+)
+_MID_PAGE_TOP_LEVEL_TITLE_MAX_LENGTH = 14
+_TITLE_UNIT_TOKEN_RE = re.compile(
+    r"(?:kV|kW|kVA|MVA|MVar|MV·A|μA|mA|MΩ|MPa|uL/L|tan|℃|%)",
+    re.IGNORECASE,
+)
+_ASCII_FRAGMENT_START_CHARS = frozenset(
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ%μ°"
+)
 
 
 @dataclass(frozen=True)
@@ -88,6 +110,36 @@ def _looks_like_outline_title(title: str) -> bool:
     if cjk_count * 2 < len(stripped):
         return False
     return True
+
+
+def _looks_like_sentence_fragment(code: str, title: str, line_index: int) -> bool:
+    stripped = title.strip()
+    if not stripped:
+        return False
+
+    if stripped[0].isdigit():
+        return True
+
+    if "." in code:
+        return False
+
+    # True top-level headings usually appear at the start of a page/section.
+    # Mid-page integer-prefixed lines in GB50150 often come from numbered
+    # requirement lists and should not become outline markers.
+    if line_index <= 0:
+        return False
+
+    if len(stripped) > _MID_PAGE_TOP_LEVEL_TITLE_MAX_LENGTH:
+        return True
+    if stripped[0] in _ASCII_FRAGMENT_START_CHARS:
+        return True
+    if any(mark in stripped for mark in _TITLE_SENTENCE_PUNCT):
+        return True
+    if _TITLE_UNIT_TOKEN_RE.search(stripped):
+        return True
+    if stripped.startswith(_TOP_LEVEL_SENTENCE_START_HINTS):
+        return True
+    return any(fragment in stripped for fragment in _TOP_LEVEL_SENTENCE_BODY_HINTS)
 
 
 def _has_list_item_context(lines: list[str], line_index: int, code: str) -> bool:
@@ -170,6 +222,8 @@ def collect_outline_markers_from_pages(pages: list[PageAsset]) -> list[OutlineMa
             if code in seen_codes:
                 continue
             if not _looks_like_outline_title(title):
+                continue
+            if _looks_like_sentence_fragment(code, title, line_index):
                 continue
             if _has_list_item_context(lines, line_index, code):
                 continue
