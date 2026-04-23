@@ -1,0 +1,47 @@
+{
+  "parser_version": "2.7.6",
+  "pdf_path": "/Users/palmtom/Projects/tender/docs/OCR/GB 50147-2010 电气装置安装工程高压电器施工及验收规范.pdf",
+  "canonical_pages": 107,
+  "canonical_tables": 7,
+  "sections": 129,
+  "full_markdown_chars": 59876,
+  "anchored_sections": 129,
+  "section_page_coverage_ratio": 1.0,
+  "toc_noise_count": 1,
+  "suspicious_section_code_count": 0,
+  "dropped_sections": 4,
+  "backfilled_sections": 119,
+  "first_section": {
+    "section_code": null,
+    "title": "高压电器施工及验收规范",
+    "level": 1,
+    "page_start": 1,
+    "page_end": 1,
+    "text": "Code for construction and acceptance of high-voltage electric equipment installation engineering\n\n2010-05-31 发布\n\n2010-12-01 实施\n\n中华人民共和国住房和城乡建设部\n\n中华人民共和国国家质量监督检验检疫总局\n\n联合发布",
+    "text_source": "mineru_markdown",
+    "sort_order": 1,
+    "raw_json": {
+      "page_number": 1,
+      "markdown": "电气装置安装工程\n高压电器施工及验收规范\nCode for construction and acceptance of high-voltage\nelectric equipment installation engineering\n2010-05-31 发布\n2010-12-01 实施\n中华人民共和国住房和城乡建设部\n中华人民共和国国家质量监督检验检疫总局\n联合发布"
+    }
+  },
+  "last_section": {
+    "section_code": null,
+    "title": "11.5工程交接验收",
+    "level": 1,
+    "page_start": 107,
+    "page_end": 107,
+    "text": "11.5.1电容器组采用差压保护时，差压保护的二次接线应与电容器组一次接线方式相一致。",
+    "text_source": "mineru_markdown",
+    "sort_order": 132,
+    "raw_json": {
+      "page_number": 107,
+      "markdown": "11.4.6受施工现场场地限制以及支持绝缘子基础高出地面和串\n补平台重量重、尺寸大的影响，串补平台的组装、吊装是串补工程\n的最大难点，应充分考虑组装、吊装顺序。\n11.5工程交接验收\n11.5.1电容器组采用差压保护时，差压保护的二次接线应与电\n容器组一次接线方式相一致。",
+      "raw_page": {
+        "page_number": 107,
+        "markdown": "11.4.6受施工现场场地限制以及支持绝缘子基础高出地面和串\n补平台重量重、尺寸大的影响，串补平台的组装、吊装是串补工程\n的最大难点，应充分考虑组装、吊装顺序。\n11.5工程交接验收\n11.5.1电容器组采用差压保护时，差压保护的二次接线应与电\n容器组一次接线方式相一致。"
+      },
+      "source_ref": "document.raw_payload.pages[106]"
+    }
+  }
+}

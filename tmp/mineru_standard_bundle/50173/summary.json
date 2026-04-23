@@ -1,0 +1,35 @@
+{
+  "parser_version": "2.7.6",
+  "pdf_path": "/Users/palmtom/Downloads/50173.pdf",
+  "canonical_pages": 86,
+  "canonical_tables": 107,
+  "sections": 105,
+  "full_markdown_chars": 176899,
+  "anchored_sections": 8,
+  "section_page_coverage_ratio": 0.0762,
+  "toc_noise_count": 1,
+  "suspicious_section_code_count": 0,
+  "first_section": {
+    "section_code": null,
+    "title": "电气装置安装工程",
+    "level": 1,
+    "page_start": null,
+    "page_end": null,
+    "text": "",
+    "text_source": "mineru_markdown",
+    "sort_order": 0,
+    "raw_json": null
+  },
+  "last_section": {
+    "section_code": null,
+    "title": "11.3竣工移交",
+    "level": 1,
+    "page_start": null,
+    "page_end": null,
+    "text": "11.3.1本条规定了工程竣工后应移交的资料。\n\n11.3.3本条规定了竣工移交的要求，当工程试运行验收合格后，施工、监理、设计、建设及运行各方应签署竣工验收签证书并及时组织竣工移交。",
+    "text_source": "mineru_markdown",
+    "sort_order": 104,
+    "raw_json": null
+  },
+  "system_bundle_document": "mineru"
+}

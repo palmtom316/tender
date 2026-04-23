@@ -1,0 +1,35 @@
+{
+  "parser_version": "2.7.6",
+  "pdf_path": "/Users/palmtom/Projects/tender/docs/OCR/GB 50147-2010 电气装置安装工程高压电器施工及验收规范.pdf",
+  "canonical_pages": 107,
+  "canonical_tables": 7,
+  "sections": 133,
+  "full_markdown_chars": 59876,
+  "anchored_sections": 10,
+  "section_page_coverage_ratio": 0.0752,
+  "toc_noise_count": 2,
+  "suspicious_section_code_count": 0,
+  "first_section": {
+    "section_code": null,
+    "title": "电气装置安装工程",
+    "level": 1,
+    "page_start": null,
+    "page_end": null,
+    "text": "",
+    "text_source": "mineru_markdown",
+    "sort_order": 0,
+    "raw_json": null
+  },
+  "last_section": {
+    "section_code": null,
+    "title": "11.5工程交接验收",
+    "level": 1,
+    "page_start": null,
+    "page_end": null,
+    "text": "11.5.1电容器组采用差压保护时，差压保护的二次接线应与电容器组一次接线方式相一致。",
+    "text_source": "mineru_markdown",
+    "sort_order": 132,
+    "raw_json": null
+  },
+  "system_bundle_document": "mineru"
+}
