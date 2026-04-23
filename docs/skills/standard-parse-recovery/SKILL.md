@@ -1,6 +1,6 @@
 ---
 name: standard-parse-recovery
-description: Use when standard document parsing quality regresses in this repo, especially for MinerU parse drift, table provenance/page anchor issues, AI scope timeout failures, or validation-count regressions. Guides root-cause investigation, targeted fixes, real-sample reruns, and regression verification for tender backend norm_service.
+description: Use when standard document parsing quality regresses in this repo, especially for MinerU parse drift, table provenance/page anchor issues, AI scope timeout failures, or validation-count regressions in tender backend norm_service.
 ---
 
 # Standard Parse Recovery
@@ -86,8 +86,7 @@ Focused regression:
 Real-sample rerun in `tmux`:
 
 ```bash
-tmux new -s tender_verify_real
-docker compose --env-file infra/.env -f infra/docker-compose.yml exec -T backend python - <<'PY'
+tmux new-session -d -s tender_verify_real "docker compose --env-file infra/.env -f infra/docker-compose.yml exec -T backend python - <<'PY' > /tmp/tender_verify_real.log 2>&1
 import json
 import os
 from uuid import UUID
@@ -104,6 +103,8 @@ try:
 finally:
     conn.close()
 PY
+"
+tmux ls
 ```
 
 Watch progress:
