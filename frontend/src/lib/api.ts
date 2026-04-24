@@ -375,6 +375,78 @@ export function testAgentConnection(
   return request(`/settings/agents/${agentKey}/test`, { method: "POST" });
 }
 
+export interface SkillDefinition {
+  skill_name: string;
+  description: string;
+  tool_names: string[];
+  prompt_template_id: string | null;
+  version: number;
+  active: boolean;
+  created_at: string;
+}
+
+export interface SkillDefinitionUpdate {
+  description?: string;
+  tool_names?: string[];
+  prompt_template_id?: string | null;
+  version?: number;
+  active?: boolean;
+}
+
+export interface SkillDefinitionCreate extends SkillDefinitionUpdate {
+  skill_name: string;
+}
+
+export interface SkillSyncResult {
+  inserted: number;
+  updated: number;
+  total: number;
+  skill_names: string[];
+}
+
+export function fetchSkillDefinitions(options?: {
+  signal?: AbortSignal;
+}): Promise<SkillDefinition[]> {
+  return request<SkillDefinition[]>("/settings/skills", {
+    signal: options?.signal,
+  });
+}
+
+export function createSkillDefinition(
+  data: SkillDefinitionCreate,
+): Promise<SkillDefinition> {
+  return request<SkillDefinition>("/settings/skills", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateSkillDefinition(
+  skillName: string,
+  data: SkillDefinitionUpdate,
+): Promise<SkillDefinition> {
+  return request<SkillDefinition>(`/settings/skills/${encodeURIComponent(skillName)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteSkillDefinition(
+  skillName: string,
+): Promise<{ skill_name: string; deleted: boolean }> {
+  return request(`/settings/skills/${encodeURIComponent(skillName)}`, {
+    method: "DELETE",
+  });
+}
+
+export function syncDefaultSkills(): Promise<SkillSyncResult> {
+  return request<SkillSyncResult>("/settings/skills/sync-defaults", {
+    method: "POST",
+  });
+}
+
 // ── Auth ──
 
 export interface LoginResponse {

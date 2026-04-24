@@ -30,6 +30,7 @@ from tender_backend.services.norm_service.block_segments import BlockSegment, bu
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.outline_rebuilder import collect_outline_clause_nos_from_pages
 from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
+from tender_backend.services.norm_service.section_cleaning import clean_sections
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes
@@ -1852,6 +1853,7 @@ def _normalize_sections_for_processing(sections: list[dict]) -> list[dict]:
             continue
         normalized.extend(_split_embedded_sections(section))
 
+    normalized = clean_sections(normalized, drop_toc_noise=False)
     normalized = [
         {**section, "sort_order": index}
         for index, section in enumerate(normalized)
