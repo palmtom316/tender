@@ -1910,6 +1910,99 @@ def test_normalize_sections_for_processing_drops_toc_heading_even_when_body_cont
     ]
 
 
+def test_normalize_sections_for_processing_backfills_missing_heading_anchor_from_page_markdown() -> None:
+    sections = [
+        {
+            "id": "chapter",
+            "section_code": "1",
+            "title": "总则",
+            "text": "",
+            "level": 1,
+            "page_start": None,
+            "page_end": None,
+            "raw_json": None,
+        },
+        {
+            "id": "clause",
+            "section_code": "1.0.1",
+            "title": "为保证施工安装质量，制定本规范。",
+            "text": "",
+            "level": 3,
+            "page_start": 10,
+            "page_end": 10,
+            "raw_json": {
+                "page_number": 10,
+                "markdown": "1 总则\n1.0.1 为保证施工安装质量，制定本规范。",
+            },
+        },
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert normalized[0]["section_code"] == "1"
+    assert normalized[0]["page_start"] == 10
+    assert normalized[0]["page_end"] == 10
+    assert normalized[0]["raw_json"]["page_number"] == 10
+
+
+def test_normalize_sections_for_processing_drops_suspicious_year_code_and_unanchored_heading_noise() -> None:
+    sections = [
+        {
+            "id": "chapter",
+            "section_code": "1",
+            "title": "总则",
+            "text": "",
+            "level": 1,
+            "page_start": 10,
+            "page_end": 10,
+            "raw_json": {
+                "page_number": 10,
+                "markdown": "1 总则\n1.0.1 为保证施工安装质量，制定本规范。",
+            },
+        },
+        {
+            "id": "year-noise",
+            "section_code": "2014",
+            "title": "2014",
+            "text": "",
+            "level": 1,
+            "page_start": None,
+            "page_end": None,
+            "raw_json": {
+                "page_number": 1,
+                "markdown": "2014\n中华人民共和国住房和城乡建设部公告",
+            },
+        },
+        {
+            "id": "heading-noise",
+            "section_code": None,
+            "title": "4.2 安装与调整",
+            "text": "",
+            "level": 2,
+            "page_start": None,
+            "page_end": None,
+            "raw_json": None,
+        },
+        {
+            "id": "clause",
+            "section_code": "1.0.1",
+            "title": "为保证施工安装质量，制定本规范。",
+            "text": "",
+            "level": 3,
+            "page_start": 10,
+            "page_end": 10,
+            "raw_json": {
+                "page_number": 10,
+                "markdown": "1 总则\n1.0.1 为保证施工安装质量，制定本规范。",
+            },
+        },
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [section["id"] for section in normalized] == ["chapter", "clause"]
+
+
 def test_normalize_sections_for_processing_promotes_inline_clause_title_to_text() -> None:
     sections = [
         {"section_code": "1.0.1", "title": "为保证施工安装质量，制定本规范。", "text": "", "level": 3, "page_start": 10},

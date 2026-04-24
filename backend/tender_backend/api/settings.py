@@ -3,13 +3,20 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from psycopg import Connection
+from uuid import UUID
 
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository, AgentConfigRow
+from tender_backend.db.repositories.skill_definition_repo import (
+    SkillDefinitionRepository,
+    SkillDefinitionRow,
+)
+from tender_backend.services.skill_catalog import default_skill_specs
 
 router = APIRouter(tags=["settings"])
 
 _repo = AgentConfigRepository()
+_skills = SkillDefinitionRepository()
 
 
 def _mask_key(key: str) -> str:
@@ -46,6 +53,33 @@ class AgentConfigUpdate(BaseModel):
     enabled: bool | None = None
 
 
+class SkillDefinitionOut(BaseModel):
+    skill_name: str
+    description: str
+    tool_names: list[str]
+    prompt_template_id: str | None
+    version: int
+    active: bool
+    created_at: str
+
+
+class SkillDefinitionCreate(BaseModel):
+    skill_name: str
+    description: str = ""
+    tool_names: list[str] = []
+    prompt_template_id: str | None = None
+    version: int = 1
+    active: bool = True
+
+
+class SkillDefinitionUpdate(BaseModel):
+    description: str | None = None
+    tool_names: list[str] | None = None
+    prompt_template_id: str | None = None
+    version: int | None = None
+    active: bool | None = None
+
+
 def _to_out(row: AgentConfigRow) -> AgentConfigOut:
     return AgentConfigOut(
         agent_key=row.agent_key,
@@ -61,6 +95,28 @@ def _to_out(row: AgentConfigRow) -> AgentConfigOut:
         enabled=row.enabled,
         updated_at=row.updated_at.isoformat(),
     )
+
+
+def _skill_to_out(row: SkillDefinitionRow) -> SkillDefinitionOut:
+    return SkillDefinitionOut(
+        skill_name=row.skill_name,
+        description=row.description,
+        tool_names=row.tool_names,
+        prompt_template_id=str(row.prompt_template_id) if row.prompt_template_id else None,
+        version=row.version,
+        active=row.active,
+        created_at=row.created_at.isoformat(),
+    )
+
+
+def _parse_prompt_template_id(raw: str | None) -> UUID | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="prompt_template_id must be a valid UUID") from exc
 
 
 @router.get("/settings/agents", response_model=list[AgentConfigOut])
@@ -129,3 +185,102 @@ async def test_agent_connection(
             return {"success": False, "message": f"API 返回 HTTP {resp.status_code}: {resp.text[:200]}"}
         except Exception as e:
             return {"success": False, "message": f"连接失败: {e}"}
+
+
+@router.get("/settings/skills", response_model=list[SkillDefinitionOut])
+async def list_skill_definitions(conn: Connection = Depends(get_db_conn)) -> list[SkillDefinitionOut]:
+    return [_skill_to_out(row) for row in _skills.list_all(conn)]
+
+
+@router.post("/settings/skills", response_model=SkillDefinitionOut)
+async def create_skill_definition(
+    payload: SkillDefinitionCreate,
+    conn: Connection = Depends(get_db_conn),
+) -> SkillDefinitionOut:
+    skill_name = payload.skill_name.strip()
+    existing = _skills.get_by_name(conn, skill_name)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail=f"Skill already exists: {skill_name}")
+
+    row = _skills.create(
+        conn,
+        skill_name=skill_name,
+        description=payload.description.strip(),
+        tool_names=[tool.strip() for tool in payload.tool_names if tool.strip()],
+        prompt_template_id=_parse_prompt_template_id(payload.prompt_template_id),
+        version=payload.version,
+        active=payload.active,
+    )
+    return _skill_to_out(row)
+
+
+@router.put("/settings/skills/{skill_name}", response_model=SkillDefinitionOut)
+async def update_skill_definition(
+    skill_name: str,
+    payload: SkillDefinitionUpdate,
+    conn: Connection = Depends(get_db_conn),
+) -> SkillDefinitionOut:
+    existing = _skills.get_by_name(conn, skill_name)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "description" in updates and updates["description"] is not None:
+        updates["description"] = updates["description"].strip()
+    if "tool_names" in updates and updates["tool_names"] is not None:
+        updates["tool_names"] = [tool.strip() for tool in updates["tool_names"] if tool.strip()]
+    if "prompt_template_id" in updates:
+        updates["prompt_template_id"] = _parse_prompt_template_id(updates["prompt_template_id"])
+
+    row = _skills.update(conn, skill_name, **updates)
+    return _skill_to_out(row)
+
+
+@router.delete("/settings/skills/{skill_name}")
+async def delete_skill_definition(
+    skill_name: str,
+    conn: Connection = Depends(get_db_conn),
+) -> dict[str, object]:
+    deleted = _skills.delete(conn, skill_name=skill_name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+    return {"skill_name": skill_name, "deleted": True}
+
+
+@router.post("/settings/skills/sync-defaults")
+async def sync_default_skills(conn: Connection = Depends(get_db_conn)) -> dict[str, object]:
+    inserted = 0
+    updated = 0
+    names: list[str] = []
+
+    for spec in default_skill_specs():
+        names.append(spec.skill_name)
+        existing = _skills.get_by_name(conn, spec.skill_name)
+        if existing is None:
+            _skills.create(
+                conn,
+                skill_name=spec.skill_name,
+                description=spec.description,
+                tool_names=spec.tool_names,
+                version=spec.version,
+                active=spec.active,
+            )
+            inserted += 1
+            continue
+
+        _skills.update(
+            conn,
+            spec.skill_name,
+            description=spec.description,
+            tool_names=spec.tool_names,
+            version=max(existing.version, spec.version),
+            active=existing.active,
+        )
+        updated += 1
+
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "total": len(names),
+        "skill_names": sorted(names),
+    }

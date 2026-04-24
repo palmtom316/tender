@@ -8,12 +8,20 @@ import {
   fetchAgentConfigs,
   updateAgentConfig,
   testAgentConnection,
+  fetchSkillDefinitions,
+  createSkillDefinition,
+  updateSkillDefinition,
+  deleteSkillDefinition,
+  syncDefaultSkills,
   fetchUsers,
   createUser,
   updateUser,
   deleteUser,
   type AgentConfig,
   type AgentConfigUpdate,
+  type SkillDefinition,
+  type SkillDefinitionCreate,
+  type SkillDefinitionUpdate,
   type SystemUser,
 } from "../../lib/api";
 
@@ -38,6 +46,9 @@ export function SettingsModule() {
 
   if (tab === "users") {
     return <UserManagement />;
+  }
+  if (tab === "skills") {
+    return <SkillsSettings />;
   }
   if (tab === "system") {
     return <SystemSettings />;
@@ -481,6 +492,313 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
             {feedback.msg}
           </span>
         )}
+      </div>
+    </Card>
+  );
+}
+
+function SkillsSettings() {
+  const [skills, setSkills] = useState<SkillDefinition[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<SkillDefinition | null>(null);
+
+  const loadSkills = async (signal?: AbortSignal) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await fetchSkillDefinitions({ signal });
+      setSkills(data);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setError((e as Error).message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadSkills(controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  const handleSync = async () => {
+    try {
+      setSyncing(true);
+      setFeedback(null);
+      const result = await syncDefaultSkills();
+      await loadSkills();
+      setFeedback(`已同步 ${result.total} 个 skill（新增 ${result.inserted}，更新 ${result.updated}）`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleCreated = (skill: SkillDefinition) => {
+    setSkills((prev) => [...prev, skill].sort((a, b) => a.skill_name.localeCompare(b.skill_name)));
+    setShowForm(false);
+  };
+
+  const handleUpdated = (skill: SkillDefinition) => {
+    setSkills((prev) =>
+      prev
+        .map((item) => (item.skill_name === skill.skill_name ? skill : item))
+        .sort((a, b) => a.skill_name.localeCompare(b.skill_name)),
+    );
+    setEditingSkill(null);
+  };
+
+  const handleDelete = async (skillName: string) => {
+    if (!confirm(`确定删除 skill “${skillName}”？`)) return;
+    try {
+      await deleteSkillDefinition(skillName);
+      setSkills((prev) => prev.filter((item) => item.skill_name !== skillName));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-6)", gap: "var(--space-3)", flexWrap: "wrap" }}>
+        <div>
+          <h1 className="section-heading" style={{ margin: 0 }}>Skills</h1>
+          <p style={{ marginTop: "var(--space-2)", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>
+            将工作流能力和 repo-local skill catalog 接入 Tender 系统，支持同步、启停与维护。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <ClayButton onClick={handleSync} disabled={syncing} variant="secondary">
+            {syncing ? "同步中..." : "同步默认 Skills"}
+          </ClayButton>
+          <ClayButton onClick={() => { setShowForm(true); setEditingSkill(null); }}>
+            新增 Skill
+          </ClayButton>
+        </div>
+      </div>
+
+      {feedback && (
+        <Card style={{ marginBottom: "var(--space-4)" }}>
+          <p style={{ color: "var(--color-success)", margin: 0 }}>{feedback}</p>
+        </Card>
+      )}
+
+      {loading && <p style={{ color: "var(--color-text-muted)" }}>加载中...</p>}
+      {error && (
+        <Card style={{ marginBottom: "var(--space-4)" }}>
+          <p style={{ color: "var(--color-danger)" }}>加载失败: {error}</p>
+          <ClayButton onClick={() => loadSkills()}>重试</ClayButton>
+        </Card>
+      )}
+
+      {(showForm || editingSkill) && (
+        <SkillDefinitionForm
+          skill={editingSkill}
+          onSaved={editingSkill ? handleUpdated : handleCreated}
+          onCancel={() => { setShowForm(false); setEditingSkill(null); }}
+        />
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+        {skills.map((skill) => (
+          <Card key={skill.skill_name} style={{ maxWidth: 820 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-3)" }}>
+              <div style={{ flex: 1 }}>
+                <div className="flex items-center gap-2" style={{ marginBottom: "var(--space-2)", flexWrap: "wrap" }}>
+                  <strong>{skill.skill_name}</strong>
+                  <Badge variant={skill.active ? "info" : "default"}>
+                    {skill.active ? "已启用" : "已停用"}
+                  </Badge>
+                  <Badge variant="warning">v{skill.version}</Badge>
+                  {skill.prompt_template_id && (
+                    <Badge variant="default">Prompt 已关联</Badge>
+                  )}
+                </div>
+                <p style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)", marginBottom: "var(--space-3)" }}>
+                  {skill.description || "暂无描述"}
+                </p>
+                <div style={{ fontSize: "var(--text-sm)", marginBottom: "var(--space-2)" }}>
+                  <strong>工具链：</strong>
+                </div>
+                <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                  {skill.tool_names.length > 0 ? skill.tool_names.map((tool) => (
+                    <Badge key={tool} variant="default">{tool}</Badge>
+                  )) : (
+                    <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>未配置</span>
+                  )}
+                </div>
+                <div style={{ marginTop: "var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                  创建时间：{new Date(skill.created_at).toLocaleString()}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <ClayButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setEditingSkill(skill);
+                    setShowForm(false);
+                  }}
+                >
+                  编辑
+                </ClayButton>
+                <ClayButton
+                  size="sm"
+                  onClick={() => handleDelete(skill.skill_name)}
+                >
+                  删除
+                </ClayButton>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface SkillDefinitionFormProps {
+  skill: SkillDefinition | null;
+  onSaved: (skill: SkillDefinition) => void;
+  onCancel: () => void;
+}
+
+function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormProps) {
+  const isEdit = skill !== null;
+  const [skillName, setSkillName] = useState(skill?.skill_name ?? "");
+  const [description, setDescription] = useState(skill?.description ?? "");
+  const [toolNamesText, setToolNamesText] = useState((skill?.tool_names ?? []).join(", "));
+  const [promptTemplateId, setPromptTemplateId] = useState(skill?.prompt_template_id ?? "");
+  const [version, setVersion] = useState(String(skill?.version ?? 1));
+  const [active, setActive] = useState(skill?.active ?? true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const parseToolNames = () =>
+    toolNamesText
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    setError(null);
+
+    if (!skillName.trim()) {
+      setError("请填写 skill 名称");
+      setSaving(false);
+      return;
+    }
+
+    const versionNumber = Number(version);
+    if (!Number.isInteger(versionNumber) || versionNumber < 1) {
+      setError("版本号必须是大于等于 1 的整数");
+      setSaving(false);
+      return;
+    }
+
+    try {
+      if (isEdit) {
+        const payload: SkillDefinitionUpdate = {
+          description,
+          tool_names: parseToolNames(),
+          prompt_template_id: promptTemplateId.trim() || null,
+          version: versionNumber,
+          active,
+        };
+        const updated = await updateSkillDefinition(skill.skill_name, payload);
+        onSaved(updated);
+      } else {
+        const payload: SkillDefinitionCreate = {
+          skill_name: skillName.trim(),
+          description,
+          tool_names: parseToolNames(),
+          prompt_template_id: promptTemplateId.trim() || null,
+          version: versionNumber,
+          active,
+        };
+        const created = await createSkillDefinition(payload);
+        onSaved(created);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card style={{ maxWidth: 820, marginBottom: "var(--space-6)" }}>
+      <h3 style={{ marginBottom: "var(--space-4)" }}>{isEdit ? "编辑 Skill" : "新增 Skill"}</h3>
+      <div className="form-group">
+        <label className="form-label">Skill 名称</label>
+        <input
+          className="clay-input"
+          value={skillName}
+          onChange={(e) => setSkillName(e.target.value)}
+          disabled={isEdit}
+          placeholder="generate_section"
+        />
+      </div>
+      <div className="form-group">
+        <label className="form-label">描述</label>
+        <textarea
+          className="clay-input"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={3}
+          placeholder="说明这个 skill 负责什么工作"
+        />
+      </div>
+      <div className="form-group">
+        <label className="form-label">工具名称</label>
+        <textarea
+          className="clay-input"
+          value={toolNamesText}
+          onChange={(e) => setToolNamesText(e.target.value)}
+          rows={3}
+          placeholder="用逗号或换行分隔，例如：load_project_facts, llm_generate_section"
+        />
+      </div>
+      <div className="agent-form-grid">
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Prompt Template ID</label>
+          <input
+            className="clay-input"
+            value={promptTemplateId}
+            onChange={(e) => setPromptTemplateId(e.target.value)}
+            placeholder="可选 UUID"
+          />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">版本</label>
+          <input
+            className="clay-input"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            inputMode="numeric"
+          />
+        </div>
+      </div>
+      <div className="form-group">
+        <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", cursor: "pointer" }}>
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+          <span className="form-label" style={{ margin: 0 }}>启用 Skill</span>
+        </label>
+      </div>
+      {error && <p style={{ color: "var(--color-danger)", fontSize: "var(--text-sm)", marginBottom: "var(--space-3)" }}>{error}</p>}
+      <div className="flex items-center gap-3">
+        <ClayButton onClick={handleSubmit} disabled={saving}>
+          {saving ? "保存中..." : "保存"}
+        </ClayButton>
+        <ClayButton onClick={onCancel}>取消</ClayButton>
       </div>
     </Card>
   );
