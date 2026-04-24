@@ -2343,6 +2343,8 @@ def test_process_standard_ai_uses_existing_ocr_sections(monkeypatch) -> None:
     assert summary["status"] == "completed"
     assert summary["total_clauses"] == 1
     assert summary["scopes_processed"] == 1
+    assert summary["quality_report"]["overview"]["status"] == "pass"
+    assert summary["quality_report"]["metrics"]["clause_count"] == 1
     assert captured["indexed"] == 1
     assert captured["scope_source_refs"] == ["document_section:s1"]
     assert captured["scope_context"] == {

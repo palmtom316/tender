@@ -8,12 +8,14 @@ import type {
   BatchStandardUploadItem,
   Standard,
   StandardParseAssets,
+  StandardQualityReportResponse,
   StandardSearchHit,
   StandardViewerData,
 } from "../../lib/api";
 import {
   deleteStandard,
   fetchStandardParseAssets,
+  fetchStandardQualityReport,
   fetchStandardViewer,
   listStandards,
   triggerStandardProcessing,
@@ -222,6 +224,9 @@ function StandardsWorkbench() {
   const [viewerParseAssets, setViewerParseAssets] = useState<StandardParseAssets | null>(null);
   const [viewerParseAssetsLoading, setViewerParseAssetsLoading] = useState(false);
   const [viewerParseAssetsError, setViewerParseAssetsError] = useState("");
+  const [viewerQualityReport, setViewerQualityReport] = useState<StandardQualityReportResponse | null>(null);
+  const [viewerQualityReportLoading, setViewerQualityReportLoading] = useState(false);
+  const [viewerQualityReportError, setViewerQualityReportError] = useState("");
   const [initialClauseId, setInitialClauseId] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
   const viewerRequestRef = useRef(0);
@@ -274,6 +279,9 @@ function StandardsWorkbench() {
     setViewerParseAssets(null);
     setViewerParseAssetsError("");
     setViewerParseAssetsLoading(true);
+    setViewerQualityReport(null);
+    setViewerQualityReportError("");
+    setViewerQualityReportLoading(true);
 
     try {
       const parseAssetsPromise = fetchStandardParseAssets(standardId, { signal: controller.signal })
@@ -291,6 +299,21 @@ function StandardsWorkbench() {
           if (viewerRequestRef.current !== requestId || controller.signal.aborted) return;
           setViewerParseAssetsLoading(false);
         });
+      const qualityReportPromise = fetchStandardQualityReport(standardId, { signal: controller.signal })
+        .then((report) => {
+          if (viewerRequestRef.current !== requestId || controller.signal.aborted) return;
+          setViewerQualityReport(report);
+          setViewerQualityReportError("");
+        })
+        .catch((err: unknown) => {
+          if (viewerRequestRef.current !== requestId || controller.signal.aborted) return;
+          setViewerQualityReport(null);
+          setViewerQualityReportError(err instanceof Error ? err.message : "加载质量报告失败");
+        })
+        .finally(() => {
+          if (viewerRequestRef.current !== requestId || controller.signal.aborted) return;
+          setViewerQualityReportLoading(false);
+        });
 
       const data = await fetchStandardViewer(standardId, { signal: controller.signal });
       if (viewerRequestRef.current !== requestId) return;
@@ -300,10 +323,12 @@ function StandardsWorkbench() {
       setViewerOpen(true);
       setActionError("");
       await parseAssetsPromise;
+      await qualityReportPromise;
     } catch (err: unknown) {
       if (controller.signal.aborted) return;
       if (viewerRequestRef.current !== requestId) return;
       setViewerParseAssetsLoading(false);
+      setViewerQualityReportLoading(false);
       setActionError(err instanceof Error ? err.message : "加载查阅数据失败");
     } finally {
       if (viewerAbortRef.current === controller) {
@@ -334,6 +359,9 @@ function StandardsWorkbench() {
         setViewerParseAssets(null);
         setViewerParseAssetsError("");
         setViewerParseAssetsLoading(false);
+        setViewerQualityReport(null);
+        setViewerQualityReportError("");
+        setViewerQualityReportLoading(false);
       }
       loadStandards();
     } catch (err: unknown) {
@@ -381,6 +409,9 @@ function StandardsWorkbench() {
         parseAssets={viewerParseAssets}
         parseAssetsLoading={viewerParseAssetsLoading}
         parseAssetsError={viewerParseAssetsError}
+        qualityReport={viewerQualityReport?.report ?? null}
+        qualityReportLoading={viewerQualityReportLoading}
+        qualityReportError={viewerQualityReportError}
         initialClauseId={initialClauseId}
         onClose={() => {
           viewerAbortRef.current?.abort();
@@ -388,6 +419,9 @@ function StandardsWorkbench() {
           setViewerOpen(false);
           setViewerParseAssetsLoading(false);
           setViewerParseAssetsError("");
+          setViewerQualityReport(null);
+          setViewerQualityReportError("");
+          setViewerQualityReportLoading(false);
         }}
       />
     </div>

@@ -8,6 +8,7 @@ import type {
   StandardParseAssetSection,
   StandardParseAssetTable,
   StandardParseAssets,
+  StandardQualityReport,
   StandardViewerData,
 } from "../../../lib/api";
 import { StandardClauseTree, findClauseNode, firstClauseNode } from "./StandardClauseTree";
@@ -28,6 +29,9 @@ type StandardViewerModalProps = {
   parseAssets: StandardParseAssets | null;
   parseAssetsLoading?: boolean;
   parseAssetsError?: string;
+  qualityReport?: StandardQualityReport | null;
+  qualityReportLoading?: boolean;
+  qualityReportError?: string;
   initialClauseId?: string | null;
   onClose: () => void;
 };
@@ -43,6 +47,23 @@ function formatPageRange(pageStart: number | null, pageEnd: number | null): stri
   if (pageStart == null) return `P${pageEnd}`;
   if (pageEnd == null || pageStart === pageEnd) return `P${pageStart}`;
   return `P${pageStart}-${pageEnd}`;
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "-";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function qualityBadgeVariant(status: "pass" | "review" | "fail"): "success" | "warning" | "danger" {
+  if (status === "pass") return "success";
+  if (status === "review") return "warning";
+  return "danger";
+}
+
+function gateBadgeVariant(status: "pass" | "warn" | "fail"): "success" | "warning" | "danger" {
+  if (status === "pass") return "success";
+  if (status === "warn") return "warning";
+  return "danger";
 }
 
 function formatRawPreview(value: unknown): string {
@@ -253,6 +274,9 @@ export function StandardViewerModal({
   parseAssets,
   parseAssetsLoading = false,
   parseAssetsError = "",
+  qualityReport = null,
+  qualityReportLoading = false,
+  qualityReportError = "",
   initialClauseId = null,
   onClose,
 }: StandardViewerModalProps) {
@@ -436,6 +460,86 @@ export function StandardViewerModal({
                               <Badge variant="default">{selectedClause.source_label}</Badge>
                             )}
                           </div>
+
+                          {qualityReportLoading && (
+                            <div className="standard-viewer-modal__diagnostics-note">正在加载入库质量报告...</div>
+                          )}
+                          {!qualityReportLoading && qualityReportError && (
+                            <div className="warning-banner">{qualityReportError}</div>
+                          )}
+                          {qualityReport && (
+                            <div className="standard-viewer-modal__asset-group">
+                              <div className="standard-viewer-modal__asset-title">入库质量</div>
+                              <div className="standard-viewer-modal__tags">
+                                <Badge variant={qualityBadgeVariant(qualityReport.overview.status)}>
+                                  {qualityReport.overview.status === "pass"
+                                    ? "通过"
+                                    : qualityReport.overview.status === "review"
+                                      ? "需复核"
+                                      : "未通过"}
+                                </Badge>
+                                <Badge variant="default">
+                                  段落锚点 {formatPercent(qualityReport.metrics.section_anchor_coverage)}
+                                </Badge>
+                                <Badge variant="default">
+                                  条款锚点 {formatPercent(qualityReport.metrics.clause_anchor_coverage)}
+                                </Badge>
+                                <Badge variant="default">
+                                  校验问题 {qualityReport.metrics.validation_issue_count}
+                                </Badge>
+                                <Badge variant="default">
+                                  表格条款 {qualityReport.metrics.table_clause_count}/{qualityReport.metrics.table_count}
+                                </Badge>
+                              </div>
+                              <div className="standard-viewer-modal__diagnostics-note">
+                                {qualityReport.overview.summary}
+                              </div>
+                              <div className="standard-viewer-modal__tags">
+                                {qualityReport.gates.map((gate) => (
+                                  <Badge key={gate.code} variant={gateBadgeVariant(gate.status)}>
+                                    {gate.code}
+                                  </Badge>
+                                ))}
+                              </div>
+                              {qualityReport.gates.map((gate) => (
+                                <div key={gate.code} className="standard-viewer-modal__asset-card">
+                                  <div className="standard-viewer-modal__asset-meta">
+                                    <strong>{gate.code}</strong>
+                                    <span>{gate.status}</span>
+                                  </div>
+                                  <p className="standard-viewer-modal__asset-text">{gate.message}</p>
+                                </div>
+                              ))}
+                              {qualityReport.recommended_skills.length > 0 && (
+                                <>
+                                  <div className="standard-viewer-modal__asset-title">建议 Skills</div>
+                                  {qualityReport.recommended_skills.map((skill) => (
+                                    <div key={skill.skill_name} className="standard-viewer-modal__asset-card">
+                                      <div className="standard-viewer-modal__asset-meta">
+                                        <strong>{skill.skill_name}</strong>
+                                        <span>{skill.active ? "已接入" : "未启用"}</span>
+                                      </div>
+                                      <p className="standard-viewer-modal__asset-text">{skill.reason}</p>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+                              {qualityReport.top_issues.length > 0 && (
+                                <>
+                                  <div className="standard-viewer-modal__asset-title">重点问题</div>
+                                  {qualityReport.top_issues.map((issue) => (
+                                    <div key={`${issue.code}-${issue.clause_no ?? "root"}-${issue.message}`} className="standard-viewer-modal__asset-card">
+                                      <div className="standard-viewer-modal__asset-meta">
+                                        <strong>{issue.code}</strong>
+                                        <span>{issue.clause_no ?? "未定位条款"}</span>
+                                      </div>
+                                      <p className="standard-viewer-modal__asset-text">{issue.message}</p>
+                                    </div>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          )}
 
                           {relatedSections.length > 0 && (
                             <div className="standard-viewer-modal__asset-group">

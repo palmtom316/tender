@@ -15,13 +15,19 @@ from tender_backend.core.security import CurrentUser, Role, get_current_user, re
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.document_repository import DocumentRepository
 from tender_backend.db.repositories.file_repository import FileRepository
+from tender_backend.db.repositories.skill_definition_repo import SkillDefinitionRepository
 from tender_backend.db.repositories.standard_processing_job_repository import (
     StandardProcessingJobRepository,
 )
 from tender_backend.db.repositories.standard_repo import StandardRepository
+from tender_backend.services.norm_service.document_assets import build_document_asset
+from tender_backend.services.norm_service.norm_processor import _normalize_sections_for_processing
+from tender_backend.services.norm_service.quality_report import build_standard_quality_report
 from tender_backend.services.norm_service.standard_processing_scheduler import (
     ensure_standard_processing_scheduler_started,
 )
+from tender_backend.services.norm_service.validation import ValidationResult, validate_clauses
+from tender_backend.services.skill_catalog import default_skill_specs
 from tender_backend.services.search_service.index_manager import IndexManager
 from tender_backend.services.search_service.query_service import search_standard_clauses
 from tender_backend.services.storage_service.project_file_storage import ProjectFileStorage
@@ -32,6 +38,7 @@ _repo = StandardRepository()
 _jobs = StandardProcessingJobRepository()
 _files = FileRepository()
 _docs = DocumentRepository()
+_skills = SkillDefinitionRepository()
 _storage = ProjectFileStorage()
 
 # Sentinel project ID for standard uploads
@@ -159,6 +166,54 @@ def _serialize_parse_table(table: dict) -> dict:
         "table_html": table.get("table_html"),
         "raw_json": table.get("raw_json"),
     }
+
+
+def _list_configured_skills(conn: Connection) -> list:
+    try:
+        return _skills.list_all(conn)
+    except errors.UndefinedTable:
+        return []
+
+
+def _build_quality_report_payload(conn: Connection, standard_id: UUID) -> tuple[dict, dict]:
+    std = _repo.get_standard(conn, standard_id)
+    if not std:
+        raise HTTPException(status_code=404, detail="Standard not found")
+
+    file_meta = _repo.get_standard_file(conn, standard_id)
+    if not file_meta:
+        raise HTTPException(status_code=404, detail="Standard source PDF not found")
+
+    document_id = file_meta["document_id"]
+    document = _repo.get_document_parse_info(conn, document_id=document_id)
+    raw_sections = _repo.list_document_sections(conn, document_id=document_id)
+    tables = _repo.list_document_tables(conn, document_id=document_id)
+    document_asset = build_document_asset(
+        document_id=document_id,
+        document=document,
+        sections=raw_sections,
+        tables=tables,
+    )
+
+    clauses = _repo.list_clauses(conn, standard_id=standard_id)
+    normalized_sections = _normalize_sections_for_processing(raw_sections)
+    validation = (
+        validate_clauses(clauses)
+        if clauses
+        else ValidationResult()
+    )
+    report = build_standard_quality_report(
+        document_asset=document_asset,
+        raw_sections=raw_sections,
+        normalized_sections=normalized_sections,
+        tables=tables,
+        clauses=clauses,
+        validation=validation,
+        available_skills=default_skill_specs(),
+        configured_skills=_list_configured_skills(conn),
+    )
+
+    return std, report
 
 
 def _search_hit_is_usable(hit: dict) -> bool:
@@ -371,6 +426,23 @@ async def get_standard_parse_assets(
         "document": _serialize_parse_document(assets.get("document")),
         "sections": [_serialize_parse_section(section) for section in assets.get("sections", [])],
         "tables": [_serialize_parse_table(table) for table in assets.get("tables", [])],
+    }
+
+
+@router.get("/standards/{standard_id}/quality-report")
+async def get_standard_quality_report(
+    standard_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> dict:
+    std, report = _build_quality_report_payload(conn, standard_id)
+    return {
+        "standard_id": str(standard_id),
+        "standard_code": std["standard_code"],
+        "standard_name": std["standard_name"],
+        "processing_status": std.get("processing_status", "pending"),
+        "ocr_status": std.get("ocr_status"),
+        "ai_status": std.get("ai_status"),
+        "report": report,
     }
 
 
