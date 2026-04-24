@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from uuid import uuid4
+
+from tender_backend.services.norm_service.quality_report import build_standard_quality_report
+from tender_backend.services.norm_service.validation import ValidationIssue, ValidationResult
+
+
+def test_build_standard_quality_report_flags_low_anchor_coverage_and_recommends_skills() -> None:
+    document_asset = SimpleNamespace(
+        pages=[
+            SimpleNamespace(page_number=1, normalized_text="1 总则\n正文"),
+            SimpleNamespace(page_number=2, normalized_text="2 术语\n正文"),
+        ]
+    )
+    raw_sections = [
+        {"id": "s0", "title": "中华人民共和国国家标准", "text": "", "level": 1},
+        {"id": "s1", "section_code": "1", "title": "总则", "text": "正文", "level": 1},
+    ]
+    normalized_sections = [
+        {"id": "s1", "section_code": "1", "title": "总则", "text": "正文", "level": 1},
+    ]
+    clauses = [
+        {
+            "id": uuid4(),
+            "clause_no": "1.0.1",
+            "clause_text": "正文",
+            "clause_type": "normative",
+            "source_type": "text",
+            "page_start": None,
+        }
+    ]
+    validation = ValidationResult(issues=[
+        ValidationIssue(
+            code="page.missing_anchor",
+            severity="warning",
+            message="Clause 1.0.1: missing page anchors",
+            clause_no="1.0.1",
+        )
+    ])
+
+    report = build_standard_quality_report(
+        document_asset=document_asset,
+        raw_sections=raw_sections,
+        normalized_sections=normalized_sections,
+        tables=[],
+        clauses=clauses,
+        validation=validation,
+        warnings=["Clause 1.0.1: missing page anchors"],
+    )
+
+    assert report["overview"]["status"] == "fail"
+    assert report["metrics"]["raw_section_count"] == 2
+    assert report["metrics"]["section_anchor_coverage"] == 0.0
+    assert report["metrics"]["clause_anchor_coverage"] == 0.0
+    assert report["metrics"]["front_matter_noise_count"] == 1
+    assert report["gates"][0]["code"] == "section_anchor_coverage"
+    assert report["gates"][0]["status"] == "fail"
+    assert report["recommended_skills"][0]["skill_name"] == "mineru-standard-bundle"
+    assert any(skill["skill_name"] == "standard-parse-recovery" for skill in report["recommended_skills"])

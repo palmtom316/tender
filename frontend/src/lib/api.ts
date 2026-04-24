@@ -656,6 +656,77 @@ export interface StandardParseAssets {
   tables: StandardParseAssetTable[];
 }
 
+export interface StandardQualityGate {
+  code: string;
+  status: "pass" | "warn" | "fail";
+  message: string;
+  metric?: number;
+  threshold?: number;
+}
+
+export interface StandardQualityIssue {
+  code: string;
+  severity: string;
+  message: string;
+  clause_no: string | null;
+  page_start: number | null;
+  page_end: number | null;
+}
+
+export interface StandardQualitySkillRecommendation {
+  skill_name: string;
+  description: string;
+  tool_names: string[];
+  active: boolean;
+  reason: string;
+  trigger_codes: string[];
+}
+
+export interface StandardQualityReport {
+  overview: {
+    status: "pass" | "review" | "fail";
+    summary: string;
+  };
+  metrics: {
+    page_count: number;
+    raw_section_count: number;
+    normalized_section_count: number;
+    table_count: number;
+    clause_count: number;
+    commentary_clause_count: number;
+    table_clause_count: number;
+    anchored_section_count: number;
+    anchored_clause_count: number;
+    section_anchor_coverage: number;
+    clause_anchor_coverage: number;
+    backfilled_anchor_count: number;
+    dropped_noise_count: number;
+    validation_issue_count: number;
+    validation_phrase_flag_count: number;
+    validation_severity_counts: Record<string, number>;
+    validation_issue_code_counts: Record<string, number>;
+    toc_noise_count: number;
+    front_matter_noise_count: number;
+    suspicious_year_code_count: number;
+    unanchored_heading_noise_count: number;
+    terminal_heading_noise_count: number;
+  };
+  gates: StandardQualityGate[];
+  warnings: string[];
+  top_issues: StandardQualityIssue[];
+  recommended_skills: StandardQualitySkillRecommendation[];
+}
+
+export interface StandardQualityReportResponse {
+  standard_id: string;
+  standard_code: string;
+  standard_name: string;
+  processing_status: string;
+  ocr_status: string | null;
+  ai_status: string | null;
+  report: StandardQualityReport;
+}
+
 export interface BatchStandardUploadItem {
   file: File;
   standard_code: string;
@@ -732,6 +803,15 @@ export function fetchStandardParseAssets(
   options?: { signal?: AbortSignal },
 ): Promise<StandardParseAssets> {
   return request<StandardParseAssets>(`/standards/${standardId}/parse-assets`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchStandardQualityReport(
+  standardId: string,
+  options?: { signal?: AbortSignal },
+): Promise<StandardQualityReportResponse> {
+  return request<StandardQualityReportResponse>(`/standards/${standardId}/quality-report`, {
     signal: options?.signal,
   });
 }

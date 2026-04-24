@@ -87,6 +87,17 @@ def _apply_extra_schema(conn: psycopg.Connection) -> None:
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS skill_definition (
+      id UUID PRIMARY KEY,
+      skill_name VARCHAR(255) NOT NULL UNIQUE,
+      description TEXT,
+      tool_names JSONB NOT NULL DEFAULT '[]'::jsonb,
+      prompt_template_id UUID,
+      version INT NOT NULL DEFAULT 1,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     INSERT INTO project (id, name)
     VALUES ('00000000-0000-0000-0000-000000000001', '规范规程资料库')
     ON CONFLICT DO NOTHING;
@@ -482,6 +493,66 @@ def test_get_standard_parse_assets_returns_parser_sections_and_tables(
     assert payload["sections"][0]["raw_json"]["page_number"] == 12
     assert payload["tables"][0]["table_title"] == "主要参数"
     assert payload["tables"][0]["table_html"].startswith("<table>")
+
+
+def test_get_standard_quality_report_returns_gates_metrics_and_skill_recommendations(
+    client: SyncASGIClient,
+    tmp_path: Path,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(db_url=db_url, tmp_path=tmp_path)
+    section_id = uuid4()
+    skill_id = uuid4()
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(
+            """
+            INSERT INTO document_section
+              (id, document_id, section_code, title, level, page_start, page_end, text, text_source, sort_order)
+            VALUES
+              (%s, %s, %s, %s, %s, NULL, NULL, %s, %s, %s)
+            """,
+            (
+                section_id,
+                seeded["document_id"],
+                "1",
+                "总则",
+                1,
+                "正文内容",
+                "mineru_markdown",
+                0,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO skill_definition
+              (id, skill_name, description, tool_names, version, active)
+            VALUES
+              (%s, %s, %s, %s::jsonb, %s, %s)
+            """,
+            (
+                skill_id,
+                "mineru-standard-bundle",
+                "OCR 质量复盘工具",
+                '["run_mineru_standard_bundle"]',
+                1,
+                True,
+            ),
+        )
+        conn.commit()
+
+    response = client.get(f"/api/standards/{seeded['standard_id']}/quality-report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["standard_id"] == seeded["standard_id"]
+    assert payload["report"]["overview"]["status"] == "fail"
+    assert payload["report"]["metrics"]["raw_section_count"] == 1
+    assert payload["report"]["metrics"]["section_anchor_coverage"] == 0.0
+    assert payload["report"]["gates"][0]["code"] == "section_anchor_coverage"
+    assert payload["report"]["recommended_skills"][0]["skill_name"] == "mineru-standard-bundle"
+    assert payload["report"]["recommended_skills"][0]["active"] is True
 
 
 def test_get_standard_viewer_nests_commentary_under_matching_clause(

@@ -29,6 +29,7 @@ from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.block_segments import BlockSegment, build_single_standard_blocks
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.outline_rebuilder import collect_outline_clause_nos_from_pages
+from tender_backend.services.norm_service.quality_report import build_standard_quality_report
 from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
 from tender_backend.services.norm_service.section_cleaning import clean_sections
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
@@ -2462,6 +2463,15 @@ def process_standard_ai(
         if repair_error:
             warnings.append(f"repair tasks failed: {repair_error}")
         combined_warnings = warnings + revalidated.warning_messages(limit=10)
+        quality_report = build_standard_quality_report(
+            document_asset=document_asset,
+            raw_sections=raw_sections,
+            normalized_sections=sections,
+            tables=tables,
+            clauses=clauses,
+            validation=revalidated,
+            warnings=combined_warnings,
+        )
 
         _std_repo.delete_clauses(conn, standard_id)
         inserted = _std_repo.bulk_create_clauses(conn, clauses)
@@ -2482,6 +2492,7 @@ def process_standard_ai(
             "repair_error": repair_error,
             "warnings": combined_warnings[:5],
             "validation": revalidated.to_dict(),
+            "quality_report": quality_report,
             "elapsed_seconds": round(elapsed, 1),
         }
 
