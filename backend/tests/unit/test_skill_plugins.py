@@ -194,3 +194,112 @@ def test_process_standard_ai_stops_before_ai_when_active_preflight_fails(monkeyp
             "metrics": {"section_page_coverage_ratio": 0.2},
         }
     ]
+
+
+def test_process_standard_ai_does_not_replace_clauses_when_quality_fails(monkeypatch) -> None:
+    standard_id = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    document_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+
+    _setup_quality_gate_process(monkeypatch, standard_id)
+    monkeypatch.setattr(norm_processor, "build_standard_quality_report", lambda **kwargs: {
+        "overview": {"status": "fail", "summary": "quality failed"},
+        "metrics": {},
+        "gates": [{"code": "ai_fallback_ratio", "status": "fail"}],
+    })
+    monkeypatch.setattr(
+        norm_processor._std_repo,
+        "delete_clauses",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("delete should not run")),
+    )
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id=document_id,
+    )
+
+    assert summary["status"] == "needs_review"
+    assert summary["total_clauses"] == 0
+    assert summary["quality_report"]["overview"]["status"] == "fail"
+
+
+def test_process_standard_ai_force_persists_failed_quality_for_diagnostics(monkeypatch) -> None:
+    standard_id = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+    document_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    calls: list[str] = []
+
+    _setup_quality_gate_process(monkeypatch, standard_id)
+    monkeypatch.setattr(norm_processor, "build_standard_quality_report", lambda **kwargs: {
+        "overview": {"status": "fail", "summary": "quality failed"},
+        "metrics": {},
+        "gates": [{"code": "ai_fallback_ratio", "status": "fail"}],
+    })
+    monkeypatch.setattr(norm_processor._std_repo, "delete_clauses", lambda conn, current_standard_id: calls.append("delete") or 0)
+    monkeypatch.setattr(norm_processor._std_repo, "bulk_create_clauses", lambda conn, clauses: calls.append("insert") or len(clauses))
+
+    summary = norm_processor.process_standard_ai(
+        object(),
+        standard_id=standard_id,
+        document_id=document_id,
+        force_persist_failed_quality=True,
+    )
+
+    assert summary["status"] == "completed"
+    assert calls == ["delete", "insert"]
+
+
+def _setup_quality_gate_process(monkeypatch, standard_id: UUID) -> None:
+    monkeypatch.setattr(norm_processor._std_repo, "get_standard", lambda conn, current_standard_id: {
+        "id": standard_id,
+        "standard_code": "GB 50150-2016",
+    })
+    monkeypatch.setattr(norm_processor, "_fetch_sections", lambda conn, current_document_id: [
+        {
+            "id": "s1",
+            "section_code": "1.0.1",
+            "title": "制定本标准。",
+            "text": "",
+            "level": 1,
+            "page_start": 1,
+            "page_end": 1,
+        }
+    ])
+    monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, current_document_id: [])
+    monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, current_document_id: None)
+    monkeypatch.setattr(norm_processor, "_active_parse_skill_names", lambda conn: set())
+    monkeypatch.setattr(norm_processor, "build_single_standard_blocks", lambda sections, tables: [
+        BlockSegment(
+            segment_type="normative_clause_block",
+            chapter_label="1.0.1 制定本标准。",
+            text="制定本标准。",
+            clause_no="1.0.1",
+            page_start=1,
+            page_end=1,
+            section_ids=["s1"],
+            source_refs=["document_section:s1"],
+        )
+    ])
+    monkeypatch.setattr(norm_processor, "build_tree", lambda entries, current_standard_id: [
+        {
+            "id": UUID("11111111-1111-1111-1111-111111111111"),
+            "standard_id": current_standard_id,
+            "parent_id": None,
+            "clause_no": "1.0.1",
+            "clause_text": "制定本标准。",
+            "clause_type": "normative",
+            "source_type": "text",
+            "source_ref": "document_section:s1",
+            "page_start": 1,
+            "page_end": 1,
+        }
+    ])
+    monkeypatch.setattr(norm_processor, "link_commentary", lambda clauses: clauses)
+    monkeypatch.setattr(norm_processor, "validate_tree", lambda clauses: [])
+    monkeypatch.setattr(norm_processor, "validate_clauses", lambda clauses, *, outline_clause_nos=None: SimpleNamespace(
+        issues=[],
+        warning_messages=lambda limit=10: [],
+        to_dict=lambda: {"issue_count": 0},
+    ))
+    monkeypatch.setattr(norm_processor, "build_repair_tasks", lambda clauses, issues: [])
+    monkeypatch.setattr(norm_processor, "_index_clauses", lambda standard, clauses: None)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)

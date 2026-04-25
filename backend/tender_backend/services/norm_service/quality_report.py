@@ -167,6 +167,9 @@ def build_standard_quality_report(
     available_skills: Iterable["SkillSpec"] | None = None,
     configured_skills: Iterable[SkillDefinitionRow] | None = None,
     executed_skills: list[dict[str, Any]] | None = None,
+    ai_fallback_count: int = 0,
+    total_parser_block_count: int = 0,
+    max_ai_fallback_ratio: float = 0.15,
 ) -> dict[str, Any]:
     warning_messages = list(warnings or [])
     anchor_pages = _iter_anchor_pages(document_asset)
@@ -207,6 +210,11 @@ def build_standard_quality_report(
         "validation_phrase_flag_count": len(phrase_flags),
         "validation_severity_counts": severity_counts,
         "validation_issue_code_counts": issue_code_counts,
+        "ai_fallback_count": ai_fallback_count,
+        "total_parser_block_count": total_parser_block_count,
+        "ai_fallback_ratio": _ratio(ai_fallback_count, total_parser_block_count)
+        if total_parser_block_count > 0
+        else 0.0,
         **noise_counts,
     }
 
@@ -329,12 +337,41 @@ def build_standard_quality_report(
     else:
         cleanup_gate = _gate("ocr_cleanup", "pass", "OCR 清洗阶段未发现明显噪声或锚点缺口。")
 
+    ai_fallback_ratio = metrics["ai_fallback_ratio"]
+    if total_parser_block_count <= 0:
+        ai_gate = _gate("ai_fallback_ratio", "pass", "没有需要 AI fallback 的确定性解析块。")
+    elif ai_fallback_ratio > max_ai_fallback_ratio:
+        ai_gate = _gate(
+            "ai_fallback_ratio",
+            "fail",
+            f"AI fallback 比例为 {ai_fallback_ratio:.1%}，超过确定性解析覆盖门禁。",
+            metric=ai_fallback_ratio,
+            threshold=max_ai_fallback_ratio,
+        )
+    elif ai_fallback_count > 0:
+        ai_gate = _gate(
+            "ai_fallback_ratio",
+            "warn",
+            f"AI fallback 比例为 {ai_fallback_ratio:.1%}，建议抽查模型输出 artifact。",
+            metric=ai_fallback_ratio,
+            threshold=max_ai_fallback_ratio,
+        )
+    else:
+        ai_gate = _gate(
+            "ai_fallback_ratio",
+            "pass",
+            "确定性解析覆盖全部块，未使用 AI fallback。",
+            metric=ai_fallback_ratio,
+            threshold=max_ai_fallback_ratio,
+        )
+
     gates = [
         section_gate,
         clause_gate,
         validation_gate,
         table_gate,
         cleanup_gate,
+        ai_gate,
     ]
 
     gate_statuses = {gate["status"] for gate in gates}

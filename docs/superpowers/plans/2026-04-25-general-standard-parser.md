@@ -528,11 +528,11 @@ Expected: all parser boundary tests pass without AI.
 
 ## Task 7: Table Requirement Normalization
 
-- [ ] **Step 1: Extract current table parser**
+- [x] **Step 1: Extract current table parser**
 
 Move `_TableHTMLParser`, `_expand_table_rows()`, and deterministic table entry logic from `norm_processor.py` into a focused module.
 
-- [ ] **Step 2: Add profile table strategies**
+- [x] **Step 2: Add profile table strategies**
 
 Support at least:
 
@@ -543,7 +543,7 @@ form_template_table
 non_requirement_table
 ```
 
-- [ ] **Step 3: Gate form-only tables**
+- [x] **Step 3: Gate form-only tables**
 
 Tables that are forms/check records should be preserved as source assets but not inflated into navigable clauses unless they contain explicit quality requirements.
 
@@ -557,7 +557,7 @@ Expected: table capture metrics remain stable or improve.
 
 ## Task 8: AI As Enrichment/Fallback
 
-- [ ] **Step 1: Split prompt modes**
+- [x] **Step 1: Split prompt modes**
 
 Replace the current all-in-one extraction prompt with:
 
@@ -578,11 +578,11 @@ normalize_table_requirement -> unparsed_block_repair or table_requirement_normal
 whole-document consistency -> standard_parse_audit
 ```
 
-- [ ] **Step 2: Add raw response artifacts**
+- [x] **Step 2: Add raw response artifacts**
 
 Persist AI input/output per block so every model decision can be audited and replayed.
 
-- [ ] **Step 3: Enforce fallback ratio**
+- [x] **Step 3: Enforce fallback ratio**
 
 If more than a configured percentage of blocks require AI fallback, quality status should be fail/review before DB replacement.
 
@@ -596,15 +596,15 @@ Expected: AST and validation tests remain green.
 
 ## Task 9: Pre-Persist Quality Gate
 
-- [ ] **Step 1: Move quality gate before delete/insert**
+- [x] **Step 1: Move quality gate before delete/insert**
 
 In `process_standard_ai()`, compute `quality_report` before `_std_repo.delete_clauses()`.
 
-- [ ] **Step 2: Add status behavior**
+- [x] **Step 2: Add status behavior**
 
 If quality is `fail`, do not delete existing clauses. Store artifacts and mark processing as `needs_review` or return `status="needs_review"`.
 
-- [ ] **Step 3: Add explicit force flag**
+- [x] **Step 3: Add explicit force flag**
 
 Allow a controlled `force_persist_failed_quality=True` path only for diagnostics.
 

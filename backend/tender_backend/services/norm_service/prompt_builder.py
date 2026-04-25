@@ -235,3 +235,42 @@ def build_clause_enrichment_batch_prompt(clause_nodes: list[dict]) -> str:
 def build_unparsed_block_repair_prompt(block: dict) -> str:
     """Build a patch-oriented prompt for a low-confidence parser block."""
     return UNPARSED_BLOCK_REPAIR_PROMPT.format(block=_json_dumps(block))
+
+
+PROMPT_MODE_TASK_TYPES = {
+    "summarize_tags": "clause_enrichment_batch",
+    "classify_requirement": "clause_enrichment_batch",
+    "repair_unparsed_block": "unparsed_block_repair",
+    "normalize_table_requirement": "unparsed_block_repair",
+    "whole_document_consistency": "standard_parse_audit",
+}
+
+
+def prompt_mode_task_type(prompt_mode: str) -> str:
+    try:
+        return PROMPT_MODE_TASK_TYPES[prompt_mode]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported prompt mode: {prompt_mode}") from exc
+
+
+def build_task_mode_prompt(prompt_mode: str, **payload: object) -> str:
+    """Build enrichment/fallback prompts by task mode, never legacy extraction."""
+    prompt_mode_task_type(prompt_mode)
+    if prompt_mode in {"summarize_tags", "classify_requirement"}:
+        clause_nodes = payload.get("clause_nodes")
+        if not isinstance(clause_nodes, list):
+            raise ValueError(f"{prompt_mode} requires clause_nodes")
+        return build_clause_enrichment_batch_prompt(clause_nodes)
+    if prompt_mode in {"repair_unparsed_block", "normalize_table_requirement"}:
+        block = payload.get("block")
+        if not isinstance(block, dict):
+            raise ValueError(f"{prompt_mode} requires block")
+        return build_unparsed_block_repair_prompt(block)
+    if prompt_mode == "whole_document_consistency":
+        return build_standard_parse_audit_prompt(
+            document_outline=list(payload.get("document_outline") or []),
+            deterministic_blocks=list(payload.get("deterministic_blocks") or []),
+            ast_summary=list(payload.get("ast_summary") or []),
+            validation_issues=list(payload.get("validation_issues") or []),
+        )
+    raise ValueError(f"Unsupported prompt mode: {prompt_mode}")

@@ -97,3 +97,35 @@ def test_build_standard_quality_report_separates_executed_available_and_disabled
     assert any(skill["skill_name"] == "standard-parse-recovery" for skill in report["available_skills"])
     assert any(skill["skill_name"] == "standard-parse-recovery" for skill in report["disabled_parse_plugins"])
     assert report["recommended_skills"] == []
+
+
+def test_build_standard_quality_report_fails_when_ai_fallback_ratio_is_high() -> None:
+    document_asset = SimpleNamespace(pages=[SimpleNamespace(page_number=1, normalized_text="1 总则")])
+
+    report = build_standard_quality_report(
+        document_asset=document_asset,
+        raw_sections=[{"id": "s1", "page_start": 1, "title": "1 总则", "text": "正文"}],
+        normalized_sections=[{"id": "s1", "page_start": 1, "title": "1 总则", "text": "正文"}],
+        tables=[],
+        clauses=[
+            {
+                "id": uuid4(),
+                "clause_no": "1.0.1",
+                "clause_text": "正文",
+                "clause_type": "normative",
+                "source_type": "text",
+                "page_start": 1,
+            }
+        ],
+        validation=ValidationResult(issues=[]),
+        ai_fallback_count=3,
+        total_parser_block_count=5,
+        max_ai_fallback_ratio=0.2,
+    )
+
+    assert report["overview"]["status"] == "fail"
+    assert report["metrics"]["ai_fallback_ratio"] == 0.6
+    assert any(
+        gate["code"] == "ai_fallback_ratio" and gate["status"] == "fail"
+        for gate in report["gates"]
+    )

@@ -12,8 +12,6 @@ import os
 import random
 import re
 import time
-from html import unescape
-from html.parser import HTMLParser
 from dataclasses import replace
 from io import BytesIO
 from uuid import UUID
@@ -32,6 +30,10 @@ from tender_backend.services.norm_service.block_segments import BlockSegment, bu
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.outline_rebuilder import collect_outline_clause_nos_from_pages
 from tender_backend.services.norm_service.parse_profiles import CN_GB_PROFILE, ParseProfile
+from tender_backend.services.norm_service.parse_artifacts import (
+    AiResponseArtifact,
+    serialize_ai_response_artifacts,
+)
 from tender_backend.services.norm_service.profile_resolver import resolve_standard_profile
 from tender_backend.services.norm_service.quality_report import build_standard_quality_report
 from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
@@ -41,6 +43,9 @@ from tender_backend.services.norm_service.skill_plugins import (
     ParseSkillContext,
     default_parse_skill_plugins,
     run_parse_skill_hooks,
+)
+from tender_backend.services.norm_service.table_requirements import (
+    deterministic_table_entries_from_block as build_table_requirement_entries,
 )
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
 from tender_backend.services.norm_service.prompt_builder import build_prompt
@@ -923,153 +928,12 @@ def _resolved_block_clause_no(block: BlockSegment) -> str | None:
     return None
 
 
-class _TableHTMLParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.rows: list[list[dict[str, object]]] = []
-        self._current_row: list[dict[str, object]] | None = None
-        self._current_cell: dict[str, object] | None = None
-        self._text_parts: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "tr":
-            self._current_row = []
-            return
-        if tag in {"td", "th"} and self._current_row is not None:
-            attr_map = dict(attrs)
-            self._current_cell = {
-                "rowspan": int(attr_map.get("rowspan") or 1),
-                "colspan": int(attr_map.get("colspan") or 1),
-            }
-            self._text_parts = []
-            return
-        if tag == "br" and self._current_cell is not None:
-            self._text_parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"td", "th"} and self._current_cell is not None and self._current_row is not None:
-            text = " ".join(unescape("".join(self._text_parts)).split())
-            self._current_cell["text"] = text
-            self._current_row.append(self._current_cell)
-            self._current_cell = None
-            self._text_parts = []
-            return
-        if tag == "tr" and self._current_row is not None:
-            if self._current_row:
-                self.rows.append(self._current_row)
-            self._current_row = None
-
-    def handle_data(self, data: str) -> None:
-        if self._current_cell is not None:
-            self._text_parts.append(data)
-
-
-def _expand_table_rows(table_html: str) -> list[list[str]]:
-    parser = _TableHTMLParser()
-    parser.feed(table_html)
-
-    expanded_rows: list[list[str]] = []
-    pending: dict[int, tuple[int, str]] = {}
-
-    for row in parser.rows:
-        expanded: list[str] = []
-        col_index = 0
-
-        def _consume_pending() -> None:
-            nonlocal col_index
-            while col_index in pending:
-                remaining, text = pending[col_index]
-                expanded.append(text)
-                if remaining <= 1:
-                    del pending[col_index]
-                else:
-                    pending[col_index] = (remaining - 1, text)
-                col_index += 1
-
-        _consume_pending()
-        for cell in row:
-            _consume_pending()
-            text = str(cell.get("text") or "").strip()
-            rowspan = max(1, int(cell.get("rowspan") or 1))
-            colspan = max(1, int(cell.get("colspan") or 1))
-            for _ in range(colspan):
-                expanded.append(text)
-                if rowspan > 1:
-                    pending[col_index] = (rowspan - 1, text)
-                col_index += 1
-        _consume_pending()
-        if any(value.strip() for value in expanded):
-            expanded_rows.append(expanded)
-
-    return expanded_rows
-
-
-def _deterministic_table_entries_from_block(block: BlockSegment) -> list[dict]:
-    table_html = str(block.table_html or "").strip()
-    table_title = str(block.table_title or "").strip()
-    if not table_html or not table_title:
-        return []
-    page_start = block.page_start
-    page_end = block.page_end if block.page_end is not None else block.page_start
-
-    rows = _expand_table_rows(table_html)
-    if len(rows) < 2:
-        return []
-
-    header = [cell.strip() for cell in rows[0]]
-    width = max(len(header), *(len(row) for row in rows[1:]))
-    if width < 2:
-        return []
-    header += [""] * (width - len(header))
-
-    grouped_rows: dict[str, list[str]] = {}
-    grouped_remarks: dict[str, list[str]] = {}
-
-    for raw_row in rows[1:]:
-        row = list(raw_row) + [""] * (width - len(raw_row))
-        primary = row[0].strip()
-        if not primary:
-            continue
-
-        row_parts: list[str] = []
-        remark_parts = grouped_remarks.setdefault(primary, [])
-        for index, cell in enumerate(row[1:], start=1):
-            cell_text = cell.strip()
-            if not cell_text or cell_text == "-":
-                continue
-            column_name = header[index].strip() or f"列{index + 1}"
-            if column_name == "备注":
-                if cell_text not in remark_parts:
-                    remark_parts.append(cell_text)
-                continue
-            row_parts.append(f"{column_name}{cell_text}")
-
-        if row_parts:
-            grouped_rows.setdefault(primary, []).append("，".join(row_parts))
-
-    entries: list[dict] = []
-    for primary, row_parts in grouped_rows.items():
-        sentence_parts = list(row_parts)
-        remarks = grouped_remarks.get(primary, [])
-        if remarks:
-            sentence_parts.append(f"备注：{'；'.join(remarks)}")
-        clause_text = f"{primary}：" + "；".join(sentence_parts) + "。"
-        entries.append({
-            "clause_no": None,
-            "clause_title": table_title,
-            "clause_text": clause_text,
-            "summary": None,
-            "tags": [],
-            "page_start": page_start,
-            "page_end": page_end,
-            "clause_type": "normative",
-            "source_type": "table",
-            "source_ref": block.source_refs[0] if block.source_refs else None,
-            "source_refs": list(block.source_refs),
-            "source_label": block.chapter_label,
-        })
-
-    return entries
+def _deterministic_table_entries_from_block(
+    block: BlockSegment,
+    *,
+    strategy: str | None = None,
+) -> list[dict]:
+    return build_table_requirement_entries(block, strategy=strategy)
 
 
 def _should_extract_normative_block_deterministically(clause_no: str, text: str) -> bool:
@@ -1089,9 +953,13 @@ def _should_extract_normative_block_deterministically(clause_no: str, text: str)
     return True
 
 
-def _deterministic_entries_from_block(block: BlockSegment) -> list[dict]:
+def _deterministic_entries_from_block(
+    block: BlockSegment,
+    *,
+    table_strategy: str | None = None,
+) -> list[dict]:
     if block.segment_type == "table_requirement_block":
-        return _deterministic_table_entries_from_block(block)
+        return _deterministic_table_entries_from_block(block, strategy=table_strategy)
     text = block.text.strip()
     if not text:
         return []
@@ -1126,7 +994,11 @@ def _deterministic_entries_from_block(block: BlockSegment) -> list[dict]:
     }]
 
 
-def _deterministic_entries_from_scope(scope: ProcessingScope) -> list[dict]:
+def _deterministic_entries_from_scope(
+    scope: ProcessingScope,
+    *,
+    table_strategy: str | None = None,
+) -> list[dict]:
     if scope.scope_type != "table":
         return []
     table_title = ""
@@ -1143,7 +1015,7 @@ def _deterministic_entries_from_scope(scope: ProcessingScope) -> list[dict]:
         source_refs=list(scope.source_refs),
         confidence="high",
     )
-    return _deterministic_table_entries_from_block(block)
+    return _deterministic_table_entries_from_block(block, strategy=table_strategy)
 
 
 def _canonical_scope_source_label(label: object) -> str:
@@ -2030,6 +1902,8 @@ def _is_retryable_ai_gateway_status(exc: httpx.HTTPStatusError) -> bool:
 def _process_scope_with_retries(
     conn: Connection,
     scope: ProcessingScope,
+    *,
+    ai_artifacts: list[AiResponseArtifact] | None = None,
 ) -> list[dict]:
     """Process one scope and split it into smaller chunks when the provider times out."""
     pending_scopes: list[tuple[ProcessingScope, int]] = [(scope, 0)]
@@ -2069,11 +1943,37 @@ def _process_scope_with_retries(
             continue
 
         entries = _parse_llm_json(raw_response)
+        if ai_artifacts is not None:
+            ai_artifacts.append(
+                AiResponseArtifact(
+                    task_type="tag_clauses",
+                    prompt_mode="legacy_extract",
+                    scope_label=current_scope.chapter_label,
+                    prompt=prompt,
+                    raw_response=raw_response,
+                    parsed_count=len(entries),
+                    source_refs=list(current_scope.source_refs),
+                )
+            )
         for entry in entries:
             _apply_scope_defaults(entry, current_scope)
         all_entries.extend(entries)
 
     return all_entries
+
+
+def _process_scope_collecting_artifacts(
+    conn: Connection,
+    scope: ProcessingScope,
+    *,
+    ai_artifacts: list[AiResponseArtifact],
+) -> list[dict]:
+    try:
+        return _process_scope_with_retries(conn, scope, ai_artifacts=ai_artifacts)
+    except TypeError as exc:
+        if "ai_artifacts" not in str(exc):
+            raise
+        return _process_scope_with_retries(conn, scope)
 
 
 def _apply_scope_defaults(entry: dict, scope: ProcessingScope) -> None:
@@ -2350,6 +2250,7 @@ def process_standard_ai(
     *,
     standard_id: UUID,
     document_id: str,
+    force_persist_failed_quality: bool = False,
 ) -> dict:
     """Run the AI extraction phase using existing OCR sections."""
     started_at = time.time()
@@ -2460,6 +2361,8 @@ def process_standard_ai(
             raise ValueError("No processing scopes generated")
 
         all_entries: list[dict] = list(deterministic_entries)
+        ai_artifacts: list[AiResponseArtifact] = []
+        ai_fallback_count = 0
         for i, scope in enumerate(scopes):
             current_block = blocks[i] if use_single_standard_block_path else None
             if current_block is not None and _should_skip_block_for_ai(current_block):
@@ -2474,9 +2377,15 @@ def process_standard_ai(
                 continue
 
             direct_entries = (
-                _deterministic_entries_from_block(current_block)
+                _deterministic_entries_from_block(
+                    current_block,
+                    table_strategy=profile.table_requirement_strategy,
+                )
                 if current_block is not None
-                else _deterministic_entries_from_scope(scope)
+                else _deterministic_entries_from_scope(
+                    scope,
+                    table_strategy=profile.table_requirement_strategy,
+                )
             )
             direct_entries = _sanitize_scope_entries(
                 scope,
@@ -2502,7 +2411,12 @@ def process_standard_ai(
                 chapter=scope.chapter_label,
             )
 
-            entries = _process_scope_with_retries(conn, scope)
+            ai_fallback_count += 1
+            entries = _process_scope_collecting_artifacts(
+                conn,
+                scope,
+                ai_artifacts=ai_artifacts,
+            )
             entries = _sanitize_scope_entries(
                 scope,
                 entries,
@@ -2574,6 +2488,11 @@ def process_standard_ai(
             validation=revalidated,
             warnings=combined_warnings,
             executed_skills=_serialize_executed_skills(executed_skills),
+            ai_fallback_count=ai_fallback_count,
+            total_parser_block_count=len(scopes) if use_single_standard_block_path else 0,
+            max_ai_fallback_ratio=float(
+                profile.quality_thresholds.get("max_ai_fallback_ratio", 0.15)
+            ),
         )
         skill_context.clauses = clauses
         skill_context.validation = revalidated
@@ -2600,6 +2519,7 @@ def process_standard_ai(
                 "validation": revalidated.to_dict(),
                 "quality_report": quality_report,
                 "executed_skills": _serialize_executed_skills(executed_skills),
+                "ai_response_artifacts": serialize_ai_response_artifacts(ai_artifacts),
                 "elapsed_seconds": round(elapsed, 1),
             }
         executed_skills.extend(run_parse_skill_hooks(
@@ -2609,6 +2529,27 @@ def process_standard_ai(
             active_skill_names=active_skill_names,
         ))
         quality_report["executed_skills"] = _serialize_executed_skills(executed_skills)
+        quality_status = str((quality_report.get("overview") or {}).get("status") or "")
+        if quality_status == "fail" and not force_persist_failed_quality:
+            elapsed = time.time() - started_at
+            return {
+                "standard_id": str(standard_id),
+                "status": "needs_review",
+                "total_clauses": 0,
+                "normative": sum(1 for c in clauses if c["clause_type"] == "normative"),
+                "commentary": sum(1 for c in clauses if c["clause_type"] == "commentary"),
+                "scopes_processed": len(scopes),
+                "repair_task_count": len(repair_tasks),
+                "issues_before_repair": len(structured_validation.issues),
+                "issues_after_repair": len(revalidated.issues),
+                "repair_error": repair_error,
+                "warnings": combined_warnings[:5],
+                "validation": revalidated.to_dict(),
+                "quality_report": quality_report,
+                "executed_skills": _serialize_executed_skills(executed_skills),
+                "ai_response_artifacts": serialize_ai_response_artifacts(ai_artifacts),
+                "elapsed_seconds": round(elapsed, 1),
+            }
 
         _std_repo.delete_clauses(conn, standard_id)
         inserted = _std_repo.bulk_create_clauses(conn, clauses)
@@ -2631,6 +2572,7 @@ def process_standard_ai(
             "validation": revalidated.to_dict(),
             "quality_report": quality_report,
             "executed_skills": _serialize_executed_skills(executed_skills),
+            "ai_response_artifacts": serialize_ai_response_artifacts(ai_artifacts),
             "elapsed_seconds": round(elapsed, 1),
         }
 

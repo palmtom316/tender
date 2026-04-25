@@ -1007,6 +1007,39 @@ def test_process_scope_with_retries_marks_table_entries_with_table_source(monkey
     ]
 
 
+def test_process_scope_with_retries_records_raw_ai_response_artifact(monkeypatch) -> None:
+    scope = ProcessingScope(
+        scope_type="normative",
+        chapter_label="3.1 一般规定",
+        text="3.1.1 设备安装应牢固。",
+        page_start=12,
+        page_end=12,
+        source_refs=["document_section:s1"],
+    )
+    artifacts = []
+
+    monkeypatch.setattr(
+        norm_processor,
+        "_call_ai_gateway",
+        lambda conn, prompt, scope_label: '[{"clause_no":"3.1.1","clause_text":"设备安装应牢固。"}]',
+    )
+
+    entries = norm_processor._process_scope_with_retries(
+        object(),
+        scope,
+        ai_artifacts=artifacts,
+    )
+
+    assert entries[0]["clause_no"] == "3.1.1"
+    assert len(artifacts) == 1
+    assert artifacts[0].task_type == "tag_clauses"
+    assert artifacts[0].prompt_mode == "legacy_extract"
+    assert artifacts[0].scope_label == "3.1 一般规定"
+    assert artifacts[0].raw_response == '[{"clause_no":"3.1.1","clause_text":"设备安装应牢固。"}]'
+    assert artifacts[0].parsed_count == 1
+    assert artifacts[0].source_refs == ["document_section:s1"]
+
+
 def test_process_scope_with_retries_skips_non_dict_llm_entries(monkeypatch) -> None:
     scope = ProcessingScope(
         scope_type="normative",
@@ -2906,6 +2939,7 @@ def test_process_standard_ai_uses_block_scopes_for_single_standard_experiment(mo
         object(),
         standard_id=standard_id,
         document_id="e3003181-042a-44da-ad67-44615d7d25f2",
+        force_persist_failed_quality=True,
     )
 
     assert summary["status"] == "completed"
@@ -3587,6 +3621,7 @@ def test_process_standard_ai_seeds_sentence_like_section_titles_for_single_stand
         object(),
         standard_id=standard_id,
         document_id="e3003181-042a-44da-ad67-44615d7d25f2",
+        force_persist_failed_quality=True,
     )
 
     assert summary["status"] == "completed"
@@ -3700,6 +3735,7 @@ def test_process_standard_ai_uses_deterministic_entries_for_high_confidence_bloc
         object(),
         standard_id=standard_id,
         document_id="e3003181-042a-44da-ad67-44615d7d25f2",
+        force_persist_failed_quality=True,
     )
 
     assert summary["status"] == "completed"
@@ -4117,6 +4153,7 @@ def test_deterministic_entries_from_table_block_group_rows_by_primary_column() -
             "source_ref": "table:t1",
             "source_refs": ["table:t1"],
             "source_label": "表格: 表 4.2.4 变压器内油样性能",
+            "table_strategy": "parameter_limit_table",
         },
         {
             "clause_no": None,
@@ -4131,6 +4168,7 @@ def test_deterministic_entries_from_table_block_group_rows_by_primary_column() -
             "source_ref": "table:t1",
             "source_refs": ["table:t1"],
             "source_label": "表格: 表 4.2.4 变压器内油样性能",
+            "table_strategy": "parameter_limit_table",
         },
     ]
 
