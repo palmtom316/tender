@@ -6,6 +6,7 @@ This is the core processing pipeline for standard PDFs.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 import json
 import os
 import random
@@ -25,13 +26,22 @@ from psycopg.rows import dict_row
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
+from tender_backend.db.repositories.skill_definition_repo import SkillDefinitionRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
 from tender_backend.services.norm_service.block_segments import BlockSegment, build_single_standard_blocks
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.outline_rebuilder import collect_outline_clause_nos_from_pages
+from tender_backend.services.norm_service.parse_profiles import CN_GB_PROFILE, ParseProfile
+from tender_backend.services.norm_service.profile_resolver import resolve_standard_profile
 from tender_backend.services.norm_service.quality_report import build_standard_quality_report
 from tender_backend.services.norm_service.repair_tasks import build_repair_tasks
 from tender_backend.services.norm_service.section_cleaning import clean_sections
+from tender_backend.services.norm_service.skill_plugins import (
+    ExecutedParseSkill,
+    ParseSkillContext,
+    default_parse_skill_plugins,
+    run_parse_skill_hooks,
+)
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
 from tender_backend.services.norm_service.prompt_builder import build_prompt
 from tender_backend.services.norm_service.scope_splitter import ProcessingScope, rebalance_scopes
@@ -49,15 +59,10 @@ logger = structlog.stdlib.get_logger(__name__)
 
 AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "http://localhost:8001")
 _MAX_SCOPE_RETRY_ATTEMPTS = 2
-_SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS = {
-    UUID("ff2ddb6c-ba8e-4e42-862f-e75d5824437a"),
-}
-_SINGLE_STANDARD_BLOCK_EXPERIMENT_CODES = {
-    "GB50148-2010",
-}
 
 _std_repo = StandardRepository()
 _agent_repo = AgentConfigRepository()
+_skill_repo = SkillDefinitionRepository()
 _storage = ProjectFileStorage()
 
 
@@ -115,17 +120,50 @@ def _scope_delay_seconds() -> float:
     return delay
 
 
-def _normalize_standard_code(value: object) -> str:
-    return "".join(str(value or "").upper().split())
-
-
 def _should_use_single_standard_block_path(
-    standard_id: UUID,
-    standard: dict | None,
+    profile: ParseProfile,
+    sections: list[dict] | None = None,
 ) -> bool:
-    if standard_id in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+    if not profile.deterministic_block_parser:
+        return False
+    if sections is None:
         return True
-    return _normalize_standard_code((standard or {}).get("standard_code")) in _SINGLE_STANDARD_BLOCK_EXPERIMENT_CODES
+    return any(str(section.get("section_code") or "").strip() for section in sections)
+
+
+def _build_profile_blocks(
+    sections: list[dict],
+    tables: list[dict],
+    *,
+    profile: ParseProfile,
+) -> list[BlockSegment]:
+    if profile == CN_GB_PROFILE:
+        return build_single_standard_blocks(sections, tables)
+    return build_single_standard_blocks(sections, tables, profile=profile)
+
+
+def _parse_skill_plugins():
+    return default_parse_skill_plugins()
+
+
+def _active_parse_skill_names(conn: Connection) -> set[str]:
+    try:
+        return {
+            row.skill_name
+            for row in _skill_repo.list_all(conn)
+            if row.active
+        }
+    except Exception as exc:
+        logger.warning("parse_skill_lookup_failed", error=str(exc))
+        return set()
+
+
+def _serialize_executed_skills(executed_skills: list[ExecutedParseSkill]) -> list[dict]:
+    return [asdict(skill) for skill in executed_skills]
+
+
+def _has_blocking_skill_failure(executed_skills: list[ExecutedParseSkill]) -> bool:
+    return any(skill.blocking for skill in executed_skills)
 
 
 def _extract_markdown_from_zip(content: bytes) -> str:
@@ -1395,6 +1433,12 @@ def _should_skip_block_for_ai(block: BlockSegment) -> bool:
     if block.segment_type in {"commentary_block", "appendix_block"} and not block.text.strip():
         return True
     if (
+        block.segment_type == "normative_clause_block"
+        and block.text.strip()
+        and _ACTUAL_CHAPTER_TITLE.match(block.chapter_label)
+    ):
+        return False
+    if (
         block.segment_type != "table_requirement_block"
         and _resolved_block_clause_no(block) is None
         and not str(block.clause_no or "").strip()
@@ -1899,7 +1943,7 @@ def _call_ai_gateway(
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.0,
-        "max_tokens": 8192,
+        "max_tokens": None,
     }
 
     # Apply per-agent credentials as overrides
@@ -1907,7 +1951,7 @@ def _call_ai_gateway(
         payload["primary_override"] = {
             "base_url": config.base_url,
             "api_key": config.api_key,
-            "model": config.primary_model or "deepseek-chat",
+            "model": config.primary_model or "deepseek-v4-flash",
         }
     if config.fallback_base_url and config.fallback_api_key:
         payload["fallback_override"] = {
@@ -2313,7 +2357,6 @@ def process_standard_ai(
 
     try:
         standard = _std_repo.get_standard(conn, standard_id)
-        use_single_standard_block_path = _should_use_single_standard_block_path(standard_id, standard)
         raw_sections = _fetch_sections(conn, document_id)
         if not raw_sections:
             raise ValueError(f"No OCR sections available for document {document_id}")
@@ -2325,6 +2368,53 @@ def process_standard_ai(
             sections=raw_sections,
             tables=tables,
         )
+        parse_plugins = _parse_skill_plugins()
+        active_skill_names = _active_parse_skill_names(conn)
+        executed_skills: list[ExecutedParseSkill] = []
+        skill_context = ParseSkillContext(
+            standard=standard,
+            document_id=document_id,
+            document_asset=document_asset,
+            raw_sections=raw_sections,
+            tables=tables,
+        )
+        executed_skills.extend(run_parse_skill_hooks(
+            hook="preflight_parse_asset",
+            context=skill_context,
+            plugins=parse_plugins,
+            active_skill_names=active_skill_names,
+        ))
+        if _has_blocking_skill_failure(executed_skills):
+            elapsed = time.time() - started_at
+            return {
+                "standard_id": str(standard_id),
+                "status": "needs_review",
+                "total_clauses": 0,
+                "normative": 0,
+                "commentary": 0,
+                "scopes_processed": 0,
+                "warnings": [
+                    message
+                    for skill in executed_skills
+                    for message in skill.messages
+                ][:5],
+                "executed_skills": _serialize_executed_skills(executed_skills),
+                "elapsed_seconds": round(elapsed, 1),
+            }
+        executed_skills.extend(run_parse_skill_hooks(
+            hook="cleanup_parse_asset",
+            context=skill_context,
+            plugins=parse_plugins,
+            active_skill_names=active_skill_names,
+        ))
+        executed_skills.extend(run_parse_skill_hooks(
+            hook="before_profile_resolve",
+            context=skill_context,
+            plugins=parse_plugins,
+            active_skill_names=active_skill_names,
+        ))
+        profile = resolve_standard_profile(standard, document_asset)
+        use_single_standard_block_path = _should_use_single_standard_block_path(profile, raw_sections)
         sections = _normalize_sections_for_processing(raw_sections)
         if not sections:
             raise ValueError("No normalized sections available for processing")
@@ -2336,11 +2426,17 @@ def process_standard_ai(
         if use_single_standard_block_path:
             logger.info("single_standard_block_path_enabled", standard_id=str(standard_id))
             block_tables = _serialize_asset_tables_for_block_path(document_asset)
-            blocks = build_single_standard_blocks(sections, block_tables)
+            blocks = _build_profile_blocks(sections, block_tables, profile=profile)
             block_type_counts: dict[str, int] = {}
             for block in blocks:
                 block_type_counts[block.segment_type] = block_type_counts.get(block.segment_type, 0) + 1
             logger.info("single_standard_blocks_built", counts=block_type_counts)
+            executed_skills.extend(run_parse_skill_hooks(
+                hook="after_block_parse",
+                context=skill_context,
+                plugins=parse_plugins,
+                active_skill_names=active_skill_names,
+            ))
 
             deterministic_entries = []
             scopes = _build_block_processing_scopes(blocks)
@@ -2354,6 +2450,12 @@ def process_standard_ai(
                 document_id=document_id,
             )
             scopes = rebalance_scopes(scopes)
+            executed_skills.extend(run_parse_skill_hooks(
+                hook="after_block_parse",
+                context=skill_context,
+                plugins=parse_plugins,
+                active_skill_names=active_skill_names,
+            ))
         if not scopes and not deterministic_entries:
             raise ValueError("No processing scopes generated")
 
@@ -2471,7 +2573,42 @@ def process_standard_ai(
             clauses=clauses,
             validation=revalidated,
             warnings=combined_warnings,
+            executed_skills=_serialize_executed_skills(executed_skills),
         )
+        skill_context.clauses = clauses
+        skill_context.validation = revalidated
+        executed_skills.extend(run_parse_skill_hooks(
+            hook="after_validation",
+            context=skill_context,
+            plugins=parse_plugins,
+            active_skill_names=active_skill_names,
+        ))
+        if _has_blocking_skill_failure(executed_skills):
+            quality_report["executed_skills"] = _serialize_executed_skills(executed_skills)
+            elapsed = time.time() - started_at
+            return {
+                "standard_id": str(standard_id),
+                "status": "needs_review",
+                "total_clauses": 0,
+                "normative": sum(1 for c in clauses if c["clause_type"] == "normative"),
+                "commentary": sum(1 for c in clauses if c["clause_type"] == "commentary"),
+                "scopes_processed": len(scopes),
+                "repair_task_count": len(repair_tasks),
+                "issues_before_repair": len(structured_validation.issues),
+                "issues_after_repair": len(revalidated.issues),
+                "warnings": combined_warnings[:5],
+                "validation": revalidated.to_dict(),
+                "quality_report": quality_report,
+                "executed_skills": _serialize_executed_skills(executed_skills),
+                "elapsed_seconds": round(elapsed, 1),
+            }
+        executed_skills.extend(run_parse_skill_hooks(
+            hook="recovery_diagnostics",
+            context=skill_context,
+            plugins=parse_plugins,
+            active_skill_names=active_skill_names,
+        ))
+        quality_report["executed_skills"] = _serialize_executed_skills(executed_skills)
 
         _std_repo.delete_clauses(conn, standard_id)
         inserted = _std_repo.bulk_create_clauses(conn, clauses)
@@ -2493,6 +2630,7 @@ def process_standard_ai(
             "warnings": combined_warnings[:5],
             "validation": revalidated.to_dict(),
             "quality_report": quality_report,
+            "executed_skills": _serialize_executed_skills(executed_skills),
             "elapsed_seconds": round(elapsed, 1),
         }
 

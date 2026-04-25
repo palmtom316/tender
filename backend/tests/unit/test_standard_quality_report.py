@@ -59,3 +59,41 @@ def test_build_standard_quality_report_flags_low_anchor_coverage_and_recommends_
     assert report["gates"][0]["status"] == "fail"
     assert report["recommended_skills"][0]["skill_name"] == "mineru-standard-bundle"
     assert any(skill["skill_name"] == "standard-parse-recovery" for skill in report["recommended_skills"])
+
+
+def test_build_standard_quality_report_separates_executed_available_and_disabled_skills() -> None:
+    document_asset = SimpleNamespace(pages=[SimpleNamespace(page_number=1, normalized_text="1 总则")])
+    validation = ValidationResult(issues=[])
+
+    report = build_standard_quality_report(
+        document_asset=document_asset,
+        raw_sections=[{"id": "s1", "page_start": 1, "title": "1 总则", "text": "正文"}],
+        normalized_sections=[{"id": "s1", "page_start": 1, "title": "1 总则", "text": "正文"}],
+        tables=[],
+        clauses=[
+            {
+                "id": uuid4(),
+                "clause_no": "1.0.1",
+                "clause_text": "正文",
+                "clause_type": "normative",
+                "source_type": "text",
+                "page_start": 1,
+            }
+        ],
+        validation=validation,
+        executed_skills=[
+            {
+                "skill_name": "mineru-standard-bundle",
+                "hook": "preflight_parse_asset",
+                "status": "pass",
+                "blocking": False,
+                "messages": [],
+                "metrics": {"section_page_coverage_ratio": 1.0},
+            }
+        ],
+    )
+
+    assert report["executed_skills"][0]["skill_name"] == "mineru-standard-bundle"
+    assert any(skill["skill_name"] == "standard-parse-recovery" for skill in report["available_skills"])
+    assert any(skill["skill_name"] == "standard-parse-recovery" for skill in report["disabled_parse_plugins"])
+    assert report["recommended_skills"] == []

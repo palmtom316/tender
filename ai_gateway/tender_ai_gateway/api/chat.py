@@ -19,11 +19,11 @@ class ProviderOverride(BaseModel):
 class ChatRequest(BaseModel):
     task_type: str = Field(..., examples=["generate_section"])
     provider_hint: str | None = Field(default=None, examples=["deepseek"])
-    model: str | None = Field(default=None, examples=["deepseek-chat"])
+    model: str | None = Field(default=None, examples=["deepseek-v4-flash"])
     credential_id: str | None = None
     messages: list[dict[str, Any]]
     temperature: float = 0.3
-    max_tokens: int = 4096
+    max_tokens: int | None = None
     primary_override: ProviderOverride | None = None
     fallback_override: ProviderOverride | None = None
 

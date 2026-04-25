@@ -166,6 +166,7 @@ def build_standard_quality_report(
     warnings: list[str] | None = None,
     available_skills: Iterable["SkillSpec"] | None = None,
     configured_skills: Iterable[SkillDefinitionRow] | None = None,
+    executed_skills: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     warning_messages = list(warnings or [])
     anchor_pages = _iter_anchor_pages(document_asset)
@@ -354,6 +355,23 @@ def build_standard_quality_report(
         available_skills=available_skills,
         configured_skills=configured_skills,
     )
+    skill_catalog, configured_skill_map = _skill_catalog(available_skills, configured_skills)
+    available_skill_payloads: list[dict[str, Any]] = []
+    disabled_parse_plugins: list[dict[str, Any]] = []
+    for spec in sorted(skill_catalog.values(), key=lambda item: item.skill_name):
+        row = configured_skill_map.get(spec.skill_name)
+        active = row.active if row is not None else bool(spec.active)
+        payload = {
+            "skill_name": spec.skill_name,
+            "description": (row.description if row else "") or spec.description,
+            "tool_names": list((row.tool_names if row else None) or spec.tool_names),
+            "active": active,
+            "skill_type": getattr(spec, "skill_type", "documentation"),
+            "hook_names": list(getattr(spec, "hook_names", None) or []),
+        }
+        available_skill_payloads.append(payload)
+        if payload["skill_type"] == "parse_plugin" and not active:
+            disabled_parse_plugins.append(payload)
 
     return {
         "overview": {
@@ -365,4 +383,7 @@ def build_standard_quality_report(
         "warnings": warning_messages[:10],
         "top_issues": [_serialize_issue(issue) for issue in validation.issues[:5]],
         "recommended_skills": recommended_skills,
+        "executed_skills": list(executed_skills or []),
+        "available_skills": available_skill_payloads,
+        "disabled_parse_plugins": disabled_parse_plugins,
     }

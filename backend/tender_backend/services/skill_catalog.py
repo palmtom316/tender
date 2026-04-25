@@ -18,9 +18,11 @@ class SkillSpec:
     tool_names: list[str]
     version: int = 1
     active: bool = True
+    skill_type: str = "documentation"
+    hook_names: list[str] | None = None
 
 
-_FALLBACK_DOC_SKILLS: tuple[SkillSpec, ...] = (
+_PARSE_PLUGIN_SKILLS: tuple[SkillSpec, ...] = (
     SkillSpec(
         skill_name="mineru-standard-bundle",
         description=(
@@ -29,6 +31,9 @@ _FALLBACK_DOC_SKILLS: tuple[SkillSpec, ...] = (
             "quality evaluation, cleanup, or cross-standard comparison from local pdf, md, and json files."
         ),
         tool_names=["run_mineru_standard_bundle"],
+        active=False,
+        skill_type="parse_plugin",
+        hook_names=["preflight_parse_asset", "cleanup_parse_asset"],
     ),
     SkillSpec(
         skill_name="standard-parse-recovery",
@@ -37,6 +42,22 @@ _FALLBACK_DOC_SKILLS: tuple[SkillSpec, ...] = (
             "for MinerU parse drift, table provenance/page anchor issues, AI scope timeout "
             "failures, or validation-count regressions in tender backend norm_service."
         ),
+        tool_names=[],
+        active=False,
+        skill_type="parse_plugin",
+        hook_names=["after_validation", "recovery_diagnostics"],
+    ),
+)
+
+_FALLBACK_DOC_SKILLS: tuple[SkillSpec, ...] = (
+    SkillSpec(
+        skill_name="mineru-standard-bundle",
+        description=_PARSE_PLUGIN_SKILLS[0].description,
+        tool_names=["run_mineru_standard_bundle"],
+    ),
+    SkillSpec(
+        skill_name="standard-parse-recovery",
+        description=_PARSE_PLUGIN_SKILLS[1].description,
         tool_names=[],
     ),
 )
@@ -61,6 +82,7 @@ def _workflow_skill_specs() -> list[SkillSpec]:
                 skill_name=workflow_name,
                 description=description,
                 tool_names=[step.name for step in workflow.steps],
+                skill_type="workflow",
             )
         )
     return specs
@@ -112,6 +134,7 @@ def _doc_skill_specs() -> list[SkillSpec]:
                 skill_name=skill_name,
                 description=description,
                 tool_names=_doc_skill_tool_names(skill_md.parent),
+                skill_type="documentation",
             )
         )
     return specs
@@ -120,7 +143,7 @@ def _doc_skill_specs() -> list[SkillSpec]:
 def default_skill_specs() -> list[SkillSpec]:
     seen: set[str] = set()
     specs: list[SkillSpec] = []
-    for spec in [*_workflow_skill_specs(), *_doc_skill_specs(), *_FALLBACK_DOC_SKILLS]:
+    for spec in [*_workflow_skill_specs(), *_PARSE_PLUGIN_SKILLS, *_doc_skill_specs(), *_FALLBACK_DOC_SKILLS]:
         if spec.skill_name in seen:
             continue
         seen.add(spec.skill_name)

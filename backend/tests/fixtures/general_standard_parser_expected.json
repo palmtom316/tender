@@ -1,0 +1,9 @@
+{
+  "GB50150-2016": {
+    "bundle_path": "tmp/mineru_converted/GB50150-2016.system-bundle.json",
+    "must_have_clause_nos": ["1.0.1", "3.0.1", "4.0.1", "8.0.1", "25.0.1"],
+    "min_clause_count": 250,
+    "min_anchor_coverage": 0.95,
+    "max_validation_issues": 5
+  }
+}

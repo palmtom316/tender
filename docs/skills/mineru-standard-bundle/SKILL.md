@@ -84,3 +84,34 @@ After running the workflow, review:
 - `section_page_coverage_ratio`
 - `toc_noise_count`
 - `suspicious_section_code_count`
+
+## Executable Parse Plugin Contract
+
+This skill can also be exposed to the backend as the `mineru-standard-bundle`
+parse plugin.
+
+Hooks:
+
+- `preflight_parse_asset`
+- `cleanup_parse_asset`
+
+The plugin must not call AI and must not mutate persisted clauses. It may
+evaluate MinerU-derived `DocumentAsset`, `document_section`, and
+`document_table` data, emit bundle metrics, and return cleaned in-memory
+sections/tables when deterministic cleanup is safe.
+
+Blocking behavior:
+
+- `preflight_parse_asset` returns `fail` when no parseable sections exist.
+- `cleanup_parse_asset` should prefer `pass` with warnings/metrics; a cleanup
+  failure should not discard the original asset unless the caller explicitly
+  decides the original asset fails minimum quality.
+
+Recommended metrics:
+
+- `raw_section_count`
+- `anchored_section_count`
+- `section_page_coverage_ratio`
+- `toc_noise_count`
+- `suspicious_section_code_count`
+- `backfilled_anchor_count`

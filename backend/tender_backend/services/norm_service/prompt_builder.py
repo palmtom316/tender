@@ -110,6 +110,78 @@ TAG_SUMMARY_PROMPT = """\
 仅输出 JSON，不要输出其他文字。
 """
 
+# ── Long-context Flash prompts (audit/enrichment/repair) ──
+
+STANDARD_PARSE_AUDIT_PROMPT = """\
+You are auditing a deterministic standard parser output.
+Do not extract the document from scratch.
+
+Given document outline, deterministic blocks, AST summary, validation issues,
+and source references:
+1. report missing clause numbers
+2. report duplicated or merged clauses
+3. report commentary mismatches
+4. report table requirement gaps
+5. return JSON patches keyed by block_id/node_key/source_ref
+
+If evidence is insufficient, return needs_review instead of guessing.
+Only output JSON.
+
+Document outline JSON:
+{document_outline}
+
+Deterministic blocks JSON:
+{deterministic_blocks}
+
+AST summary JSON:
+{ast_summary}
+
+Validation issues JSON:
+{validation_issues}
+"""
+
+CLAUSE_ENRICHMENT_BATCH_PROMPT = """\
+You are enriching existing standard clause nodes.
+You must not add, remove, split, merge, or renumber clauses.
+Return one JSON array item per input node, keyed by node_key.
+
+Allowed output fields:
+- node_key
+- summary
+- tags
+- requirement_type: mandatory|advisory|permissive|informative
+- mandatory_terms
+
+Only output JSON.
+
+Clause nodes JSON:
+{clause_nodes}
+"""
+
+UNPARSED_BLOCK_REPAIR_PROMPT = """\
+You are repairing one low-confidence parser block.
+Do not rewrite the whole document. Return a patch contract only.
+
+Allowed status values: patch|needs_review|no_change
+Allowed operations: split_clause|attach_item|normalize_table
+
+Output JSON shape:
+{{
+  "status": "patch|needs_review|no_change",
+  "patches": [
+    {{
+      "source_ref": "...",
+      "operation": "split_clause|attach_item|normalize_table",
+      "evidence": "...",
+      "candidate": {{}}
+    }}
+  ]
+}}
+
+Low-confidence block JSON:
+{block}
+"""
+
 
 def build_prompt(scope: ProcessingScope) -> str:
     """Build the appropriate LLM prompt based on scope type."""
@@ -133,3 +205,33 @@ def build_prompt(scope: ProcessingScope) -> str:
 def build_tag_prompt(clause_no: str, clause_text: str) -> str:
     """Build a tag/summary enrichment prompt for a single clause."""
     return TAG_SUMMARY_PROMPT.format(clause_no=clause_no, clause_text=clause_text)
+
+
+def _json_dumps(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def build_standard_parse_audit_prompt(
+    *,
+    document_outline: list[dict],
+    deterministic_blocks: list[dict],
+    ast_summary: list[dict],
+    validation_issues: list[dict],
+) -> str:
+    """Build a whole-document parser audit prompt for long-context models."""
+    return STANDARD_PARSE_AUDIT_PROMPT.format(
+        document_outline=_json_dumps(document_outline),
+        deterministic_blocks=_json_dumps(deterministic_blocks),
+        ast_summary=_json_dumps(ast_summary),
+        validation_issues=_json_dumps(validation_issues),
+    )
+
+
+def build_clause_enrichment_batch_prompt(clause_nodes: list[dict]) -> str:
+    """Build a batch enrichment prompt that cannot mutate AST structure."""
+    return CLAUSE_ENRICHMENT_BATCH_PROMPT.format(clause_nodes=_json_dumps(clause_nodes))
+
+
+def build_unparsed_block_repair_prompt(block: dict) -> str:
+    """Build a patch-oriented prompt for a low-confidence parser block."""
+    return UNPARSED_BLOCK_REPAIR_PROMPT.format(block=_json_dumps(block))
