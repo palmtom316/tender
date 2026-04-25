@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from tender_backend.services.norm_service.prompt_builder import (
+    build_task_mode_prompt,
     build_clause_enrichment_batch_prompt,
     build_standard_parse_audit_prompt,
     build_unparsed_block_repair_prompt,
+    prompt_mode_task_type,
 )
 
 
@@ -48,3 +50,21 @@ def test_build_unparsed_block_repair_prompt_returns_patch_contract() -> None:
     assert "patch|needs_review|no_change" in prompt
     assert "split_clause|attach_item|normalize_table" in prompt
     assert "document_section:2" in prompt
+
+
+def test_prompt_modes_map_to_flash_only_task_profiles() -> None:
+    assert prompt_mode_task_type("summarize_tags") == "clause_enrichment_batch"
+    assert prompt_mode_task_type("classify_requirement") == "clause_enrichment_batch"
+    assert prompt_mode_task_type("repair_unparsed_block") == "unparsed_block_repair"
+    assert prompt_mode_task_type("normalize_table_requirement") == "unparsed_block_repair"
+    assert prompt_mode_task_type("whole_document_consistency") == "standard_parse_audit"
+
+
+def test_task_mode_prompt_builders_do_not_use_legacy_extraction_contract() -> None:
+    prompt = build_task_mode_prompt(
+        "summarize_tags",
+        clause_nodes=[{"node_key": "3.1.1", "clause_no": "3.1.1", "clause_text": "应符合要求。"}],
+    )
+
+    assert "must not add, remove, split, merge, or renumber" in prompt
+    assert "建筑工程规范条款提取助手" not in prompt
