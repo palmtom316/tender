@@ -34,7 +34,7 @@ def test_chat_uses_override_even_without_env_keys(monkeypatch) -> None:
         "tender_ai_gateway.api.chat.call_with_fallback",
         lambda **kwargs: type("Result", (), {
             "content": '[{"clause_no":"1","clause_text":"测试条文"}]',
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-flash",
             "provider": "override-primary",
             "input_tokens": 12,
             "output_tokens": 34,
@@ -52,7 +52,7 @@ def test_chat_uses_override_even_without_env_keys(monkeypatch) -> None:
             "primary_override": {
                 "base_url": "https://api.deepseek.com/v1",
                 "api_key": "override-key",
-                "model": "deepseek-chat",
+                "model": "deepseek-v4-flash",
             },
         },
     )

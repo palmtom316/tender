@@ -172,7 +172,7 @@ async def test_agent_connection(
                 "Content-Type": "application/json",
             }
             payload = {
-                "model": config.primary_model or "deepseek-chat",
+                "model": config.primary_model or "deepseek-v4-flash",
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 5,
             }

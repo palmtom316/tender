@@ -42,10 +42,10 @@ def upgrade() -> None:
     INSERT INTO agent_config (id, agent_key, display_name, description, agent_type, base_url, primary_model, fallback_base_url, fallback_model)
     VALUES
       (gen_random_uuid(), 'parse',            '文档解析 (OCR)',  '招标文件 OCR、表格/标题提取',       'ocr', '',                                    '',                '', ''),
-      (gen_random_uuid(), 'extract',          '智能提取',        '需求分类、事实提取、评分结构化',     'llm', 'https://api.deepseek.com/v1',         'deepseek-chat',   'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'),
-      (gen_random_uuid(), 'generate_section', '章节生成',        '章节大纲 + 正文生成',               'llm', 'https://api.deepseek.com/v1',         'deepseek-chat',   'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'),
-      (gen_random_uuid(), 'review_section',   '质量审查',        '合规审查、一致性校验',              'llm', 'https://api.deepseek.com/v1',         'deepseek-chat',   'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'),
-      (gen_random_uuid(), 'tag_clauses',      '规范标注',        '条文树构建、标签、摘要',            'llm', 'https://api.siliconflow.cn/v1',       'deepseek-ai/DeepSeek-V3.2', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus')
+      (gen_random_uuid(), 'extract',          '智能提取',        '需求分类、事实提取、评分结构化',     'llm', 'https://api.deepseek.com/v1',         'deepseek-v4-flash',   'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'),
+      (gen_random_uuid(), 'generate_section', '章节生成',        '章节大纲 + 正文生成',               'llm', 'https://api.deepseek.com/v1',         'deepseek-v4-flash',   'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'),
+      (gen_random_uuid(), 'review_section',   '质量审查',        '合规审查、一致性校验',              'llm', 'https://api.deepseek.com/v1',         'deepseek-v4-flash',   'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'),
+      (gen_random_uuid(), 'tag_clauses',      '规范标注',        '条文树构建、标签、摘要',            'llm', 'https://api.deepseek.com/v1',         'deepseek-v4-flash', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus')
     ON CONFLICT (agent_key) DO NOTHING;
     """)
 

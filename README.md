@@ -16,7 +16,7 @@ AI-assisted tender document authoring system for technical bids.
    - `python3.12 -m venv .venv`
    - `.venv/bin/pip install -e 'backend[dev]' -e 'ai_gateway[dev]'`
 2. Copy `infra/.env.example` to `infra/.env` and adjust secrets if needed.
-   - `tag_clauses` defaults to SiliconFlow primary (`deepseek-ai/DeepSeek-V3.2`) and Qwen fallback in code/migrations.
+   - `tag_clauses` defaults to DeepSeek `deepseek-v4-flash` primary and Qwen fallback in code/migrations.
    - Keep `DEEPSEEK_API_KEY` and `SILICONFLOW_API_KEY` only in your private `infra/.env`, never in git.
 3. Start infrastructure only:
    - `docker compose --env-file infra/.env -f infra/docker-compose.yml up -d postgres redis minio opensearch`

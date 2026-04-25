@@ -553,6 +553,15 @@ def test_get_standard_quality_report_returns_gates_metrics_and_skill_recommendat
     assert payload["report"]["gates"][0]["code"] == "section_anchor_coverage"
     assert payload["report"]["recommended_skills"][0]["skill_name"] == "mineru-standard-bundle"
     assert payload["report"]["recommended_skills"][0]["active"] is True
+    assert payload["report"]["executed_skills"] == []
+    assert any(
+        skill["skill_name"] == "mineru-standard-bundle"
+        for skill in payload["report"]["available_skills"]
+    )
+    assert any(
+        skill["skill_name"] == "standard-parse-recovery"
+        for skill in payload["report"]["disabled_parse_plugins"]
+    )
 
 
 def test_get_standard_viewer_nests_commentary_under_matching_clause(

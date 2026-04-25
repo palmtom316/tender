@@ -23,7 +23,7 @@ def test_call_with_fallback_uses_task_level_timeout_and_retries(monkeypatch) -> 
         fallback,
         "get_settings",
         lambda: SimpleNamespace(
-            default_primary_model="deepseek-chat",
+            default_primary_model="deepseek-v4-flash",
             default_fallback_model="qwen-max",
             deepseek_base_url="https://api.deepseek.com/v1",
             deepseek_api_key="deepseek-key",
@@ -40,5 +40,76 @@ def test_call_with_fallback_uses_task_level_timeout_and_retries(monkeypatch) -> 
     )
 
     assert result.content == "[]"
-    assert captured["timeout"] == 300
+    assert captured["timeout"] == 600
     assert captured["max_retries"] == 0
+
+
+def test_call_with_fallback_uses_task_profile_max_tokens(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeOpenAI:
+        def __init__(self, *, api_key, base_url, timeout, max_retries) -> None:
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+        def _create(self, **kwargs):
+            captured["max_tokens"] = kwargs["max_tokens"]
+            usage = SimpleNamespace(prompt_tokens=10, completion_tokens=20)
+            message = SimpleNamespace(content="[]")
+            choice = SimpleNamespace(message=message)
+            return SimpleNamespace(choices=[choice], usage=usage)
+
+    monkeypatch.setattr(fallback, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(
+        fallback,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_primary_model="deepseek-v4-flash",
+            default_fallback_model="qwen-max",
+            deepseek_base_url="https://api.deepseek.com/v1",
+            deepseek_api_key="deepseek-key",
+            qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            qwen_api_key="qwen-key",
+            default_timeout=60,
+            default_retry_count=2,
+        ),
+    )
+
+    fallback.call_with_fallback(
+        task_type="tag_clauses",
+        messages=[{"role": "user", "content": "test"}],
+        max_tokens=None,
+    )
+
+    assert captured["max_tokens"] == 32768
+
+
+def test_call_with_fallback_rejects_deepseek_v4_pro_override(monkeypatch) -> None:
+    monkeypatch.setattr(
+        fallback,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_primary_model="deepseek-v4-flash",
+            default_fallback_model="qwen-max",
+            deepseek_base_url="https://api.deepseek.com/v1",
+            deepseek_api_key="deepseek-key",
+            qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            qwen_api_key="qwen-key",
+            default_timeout=60,
+            default_retry_count=2,
+        ),
+    )
+
+    try:
+        fallback.call_with_fallback(
+            task_type="tag_clauses",
+            messages=[{"role": "user", "content": "test"}],
+            primary_override=SimpleNamespace(
+                base_url="https://api.deepseek.com/v1",
+                api_key="deepseek-key",
+                model="deepseek-v4-pro",
+            ),
+        )
+    except ValueError as exc:
+        assert "deepseek-v4-pro is disabled" in str(exc)
+    else:
+        raise AssertionError("deepseek-v4-pro override should be rejected")

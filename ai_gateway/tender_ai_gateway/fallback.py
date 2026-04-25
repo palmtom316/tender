@@ -83,12 +83,18 @@ def _get_providers(
     return primary, fallback
 
 
+def _reject_disallowed_model(model: str) -> None:
+    normalized = str(model or "").strip().lower()
+    if normalized in {"deepseek-v4-pro", "deepseek/deepseek-v4-pro"}:
+        raise ValueError("deepseek-v4-pro is disabled for cost control; use deepseek-v4-flash")
+
+
 def call_with_fallback(
     *,
     task_type: str,
     messages: list[dict],
     temperature: float = 0.3,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
     primary_override: Any | None = None,
     fallback_override: Any | None = None,
 ) -> CompletionResult:
@@ -98,11 +104,13 @@ def call_with_fallback(
     primary, fallback = _get_providers(task_type, primary_override, fallback_override)
     timeout = profile.get("timeout", settings.default_timeout)
     max_retries = profile.get("max_retries", settings.default_retry_count)
+    effective_max_tokens = max_tokens if max_tokens is not None else profile.get("max_tokens", 4096)
 
     for attempt, provider in enumerate([primary, fallback]):
         if not provider.api_key:
             logger.warning("skipping_provider_no_key", extra={"provider": provider.name})
             continue
+        _reject_disallowed_model(provider.model)
 
         client = OpenAI(
             api_key=provider.api_key,
@@ -117,7 +125,7 @@ def call_with_fallback(
                 model=provider.model,
                 messages=messages,  # type: ignore[arg-type]
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=effective_max_tokens,
             )
             latency_ms = int((time.perf_counter() - start) * 1000)
 

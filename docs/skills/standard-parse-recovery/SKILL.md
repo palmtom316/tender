@@ -136,6 +136,36 @@ Useful inspections:
 - If the LLM returns almost-correct JSON, salvage it with targeted extraction rather than treating the whole scope as empty.
 - Keep frontend or unrelated lockfile changes out of parsing commits.
 
+## Executable Parse Plugin Contract
+
+This skill can be exposed to the backend as the `standard-parse-recovery`
+parse plugin.
+
+Hooks:
+
+- `after_validation`
+- `recovery_diagnostics`
+
+The plugin must classify validation failures and recommend deterministic repair
+work. It must not mutate clauses during diagnostics. Any actual repair must be
+implemented as an explicit reviewed task or through the existing repair patch
+path.
+
+Automatic diagnostic rules to keep in code:
+
+- `page.missing_anchor`: classify as page provenance/backfill problem.
+- `table.missing_source_ref`: classify as table provenance/reconciliation problem.
+- duplicate clause keys: classify as boundary split or commentary pairing problem.
+- excessive validation issues: classify as parser quality gate failure.
+- high AI fallback ratio: classify as deterministic parser coverage gap.
+
+Blocking behavior:
+
+- `after_validation` may return `fail` only for blocking validation errors that
+  should prevent clause replacement.
+- `recovery_diagnostics` should attach messages and metrics but must not block
+  or mutate clauses.
+
 ## Done Criteria
 
 Only call the incident fixed when all are true:

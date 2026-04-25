@@ -43,6 +43,14 @@ class ParseProfile:
     # Clause-text sentence heuristics
     sentence_signal_pattern: re.Pattern
 
+    clause_heading_patterns: tuple[re.Pattern, ...] = field(default_factory=tuple)
+    appendix_heading_patterns: tuple[re.Pattern, ...] = field(default_factory=tuple)
+    commentary_heading_patterns: tuple[re.Pattern, ...] = field(default_factory=tuple)
+    list_item_patterns: tuple[re.Pattern, ...] = field(default_factory=tuple)
+    table_requirement_strategy: str = "parameter_limit_table"
+    deterministic_block_parser: bool = True
+    quality_thresholds: dict[str, float | int] = field(default_factory=dict)
+
     # Acceptance thresholds (used by tests and `needs_review` gating)
     min_total_clauses: int = 0
     must_have_clause_nos: tuple[str, ...] = ()
@@ -87,6 +95,29 @@ CN_GB_PROFILE = ParseProfile(
         r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b"
     ),
     list_item_code_pattern=re.compile(r"^\d+$"),
+    clause_heading_patterns=(
+        re.compile(r"^\d+(?:\.\d+){2,}$"),
+        re.compile(r"^\s*\d+(?:\.\d+){2,}\b"),
+    ),
+    appendix_heading_patterns=(
+        re.compile(r"^[A-Z]\.\d+(?:\.\d+)*$"),
+        re.compile(r"^\s*附录\s*[A-Z]\b"),
+    ),
+    commentary_heading_patterns=(
+        re.compile(r"^\s*(附[:：])?条文说明\s*$"),
+        re.compile(r"^\s*修订说明\s*$"),
+    ),
+    list_item_patterns=(
+        re.compile(r"^\d+$"),
+        re.compile(r"^\s*\d+[、.)）]\s*"),
+        re.compile(r"^\s*[（(]\d+[）)]\s*"),
+    ),
+    table_requirement_strategy="parameter_limit_table",
+    quality_thresholds={
+        "min_anchor_coverage": 0.95,
+        "max_validation_issues": 5,
+        "max_ai_fallback_ratio": 0.15,
+    },
     toc_page_ref_pattern=re.compile(r"(?:\(\d+\)|（\d+）)\s*$"),
     toc_dot_leaders_pattern=re.compile(r"[.…]{2,}"),
     sentence_signal_pattern=re.compile(r"[，。；：]|应|不得|必须|严禁|禁止|宜|可"),
@@ -96,9 +127,39 @@ CN_GB_PROFILE = ParseProfile(
     target_commentary_min=0,
 )
 
+GENERIC_ENTERPRISE_PROFILE = ParseProfile(
+    code="generic_enterprise",
+    commentary_boundary_lines=("Commentary", "Notes"),
+    commentary_appendix_only_lines=(),
+    non_normative_back_matter_lines=("References", "Bibliography"),
+    commentary_title_hints=("Commentary", "Notes"),
+    non_clause_titles=("Preface", "Foreword", "References"),
+    non_clause_text_fragments=(),
+    appendix_code_pattern=re.compile(r"^APP-[A-Z0-9]+$"),
+    leading_clause_no_pattern=re.compile(r"^\s*((?:REQ|SEC)-\d+(?:\.\d+)*)\b", re.I),
+    list_item_code_pattern=re.compile(r"^\d+$"),
+    clause_heading_patterns=(
+        re.compile(r"^(?:REQ|SEC)-\d+(?:\.\d+)*$", re.I),
+        re.compile(r"^\s*(?:REQ|SEC)-\d+(?:\.\d+)*\b", re.I),
+    ),
+    appendix_heading_patterns=(re.compile(r"^APP-[A-Z0-9]+$", re.I),),
+    commentary_heading_patterns=(re.compile(r"^\s*(Commentary|Notes)\s*$", re.I),),
+    list_item_patterns=(re.compile(r"^\d+$"), re.compile(r"^\s*\d+[.)]\s*")),
+    table_requirement_strategy="generic_table",
+    quality_thresholds={
+        "min_anchor_coverage": 0.9,
+        "max_validation_issues": 10,
+        "max_ai_fallback_ratio": 0.2,
+    },
+    toc_page_ref_pattern=re.compile(r"\s+\d+\s*$"),
+    toc_dot_leaders_pattern=re.compile(r"[.]{2,}"),
+    sentence_signal_pattern=re.compile(r"\b(shall|must|should|may|required)\b|[.;:]", re.I),
+)
+
 
 PROFILES: dict[str, ParseProfile] = {
     CN_GB_PROFILE.code: CN_GB_PROFILE,
+    GENERIC_ENTERPRISE_PROFILE.code: GENERIC_ENTERPRISE_PROFILE,
 }
 
 
