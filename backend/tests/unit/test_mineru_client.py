@@ -18,6 +18,7 @@ from tender_backend.services.parse_service.mineru_client import (
     MineruParseResult,
     MineruRequestOptions,
     MineruUploadInfo,
+    _normalize_from_zip,
 )
 from tests.unit._mineru_fixtures import make_result_zip, make_simple_middle_json
 
@@ -194,6 +195,19 @@ def test_get_parse_status_downloads_and_normalizes_zip_when_done() -> None:
     assert result.raw_payload["pages"] == result.pages
     assert result.raw_payload["tables"] == []
     assert result.raw_payload["full_markdown"] == "1 总则\n正文内容"
+
+
+def test_normalize_from_zip_accepts_layout_json_with_pdf_info_payload() -> None:
+    zip_bytes = make_result_zip(
+        make_simple_middle_json(),
+        full_md="1 总则\n正文内容",
+        middle_filename="layout.json",
+    )
+
+    normalized = _normalize_from_zip(zip_bytes)
+
+    assert normalized["pages"] == [{"page_number": 1, "markdown": "1 总则\n正文内容"}]
+    assert normalized["full_markdown"] == "1 总则\n正文内容"
 
 
 def test_get_parse_status_returns_failed_with_error_message() -> None:

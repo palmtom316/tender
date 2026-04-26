@@ -151,6 +151,17 @@ def deterministic_table_entries_from_block(
     )
 
 
+def is_sparse_table_block(block: Any) -> bool:
+    table_html = str(getattr(block, "table_html", None) or "").strip()
+    if not table_html:
+        return True
+    rows = expand_table_rows(table_html)
+    if len(rows) < 2:
+        return True
+    width = max((len(row) for row in rows), default=0)
+    return width < 2
+
+
 def _grouped_requirement_entries(
     block: Any,
     rows: list[list[str]],

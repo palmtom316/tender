@@ -10,6 +10,7 @@ import re
 from tender_backend.services.norm_service.parse_profiles import (
     CN_GB_PROFILE,
     ParseProfile,
+    extract_leading_clause_no,
     non_clause_text_pattern,
     non_clause_title_pattern,
 )
@@ -30,6 +31,7 @@ _LIST_ITEM_CODE_RE_DEFAULT = CN_GB_PROFILE.list_item_code_pattern
 _TOC_PAGE_REF_RE_DEFAULT = CN_GB_PROFILE.toc_page_ref_pattern
 _TOC_DOT_LEADERS_RE_DEFAULT = CN_GB_PROFILE.toc_dot_leaders_pattern
 _SECTION_TITLE_SENTENCE_SIGNAL_RE_DEFAULT = CN_GB_PROFILE.sentence_signal_pattern
+_COMMENTARY_LINE_FOLLOWER = r"(?=$|[\s（(：:，。；、\-－\u4e00-\u9fff])"
 
 
 @dataclass(slots=True)
@@ -63,13 +65,7 @@ def _section_label(section: dict) -> str:
 
 
 def _extract_clause_no(value: str | None) -> str | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    match = _profile().leading_clause_no_pattern.match(text)
-    if not match:
-        return None
-    return match.group(1)
+    return extract_leading_clause_no(value, profile=_profile())
 
 
 def _recover_clause_no_and_title_body(code: str, title: str) -> tuple[str | None, str]:
@@ -209,6 +205,22 @@ def _is_commentary(section: dict) -> bool:
     return any(hint in title for hint in _profile().commentary_title_hints)
 
 
+def _is_commentary_boundary_section(section: dict) -> bool:
+    clause_no = _section_clause_no(section)
+    if clause_no:
+        return False
+
+    candidates = [str(section.get("title") or "").strip(), str(section.get("text") or "").strip()]
+    for candidate in candidates:
+        for line in candidate.splitlines():
+            normalized = line.strip()
+            if not normalized:
+                continue
+            if any(pattern.match(normalized) for pattern in _profile().commentary_heading_patterns):
+                return True
+    return False
+
+
 def _is_non_clause_section(section: dict) -> bool:
     profile = _profile()
     title = str(section.get("title") or "").strip()
@@ -226,6 +238,21 @@ def _looks_like_commentary_clause(section: dict) -> bool:
     title = str(section.get("title") or "").strip()
     text = str(section.get("text") or "").strip()
     return bool(text or title)
+
+
+def _contains_inline_commentary_clauses(section: dict) -> bool:
+    clause_no = _section_clause_no(section)
+    if not clause_no:
+        return False
+    text = str(section.get("text") or "").strip()
+    if not text:
+        return False
+    return bool(
+        re.search(
+            rf"(?m)^\s*{re.escape(clause_no)}\.\d+{_COMMENTARY_LINE_FOLLOWER}",
+            text,
+        )
+    )
 
 
 def _table_text(table: dict) -> str:
@@ -289,11 +316,16 @@ def _build_blocks(sections: list[dict], tables: list[dict]) -> list[BlockSegment
             continue
         if _is_commentary(section) and (clause_no or text):
             segment_type = "commentary_block"
+        elif _is_commentary_boundary_section(section):
+            segment_type = "non_clause_block"
+            in_commentary_tail = True
         elif _is_non_clause_section(section):
             segment_type = "non_clause_block"
             if title in {"修订说明", "条文说明"}:
                 in_commentary_tail = True
-        elif in_commentary_tail and _looks_like_commentary_clause(section):
+        elif in_commentary_tail and (
+            _looks_like_commentary_clause(section) or _contains_inline_commentary_clauses(section)
+        ):
             segment_type = "commentary_block"
             if not text:
                 text = title

@@ -6,7 +6,8 @@ Contract:
 - PUT the raw PDF bytes to the signed URL. MinerU kicks off parsing once the
   upload completes.
 - GET `/extract-results/batch/{batch_id}` — poll until `state == "done"`,
-  then download `full_zip_url` which contains `full.md` + `*_middle.json`.
+  then download `full_zip_url` which contains `full.md` plus a structured JSON
+  payload with `pdf_info` (commonly `*_middle.json`, sometimes `layout.json`).
 
 `MineruParseResult` carries the canonical `normalize_mineru_payload` output
 (`parser_version`, `pages`, `tables`, `full_markdown`) so downstream code
@@ -149,10 +150,10 @@ def _progress_from_item(item: dict[str, Any]) -> tuple[int | None, int | None]:
 
 
 def _normalize_from_zip(content: bytes) -> dict[str, Any]:
-    """Extract `full.md` + `*_middle.json` from a MinerU result zip and run
-    the canonical normalizer against the middle.json.
+    """Extract `full.md` plus the canonical `pdf_info` JSON from a MinerU zip.
 
-    Raises RuntimeError when the zip is missing the canonical pdf_info payload.
+    Raises RuntimeError when the zip is missing any structured JSON payload
+    carrying the canonical `pdf_info` array.
     """
     with ZipFile(BytesIO(content)) as zf:
         names = zf.namelist()
@@ -182,8 +183,8 @@ def _normalize_from_zip(content: bytes) -> dict[str, Any]:
                 break
         if middle_json is None:
             raise RuntimeError(
-                "MinerU result zip does not contain a *_middle.json payload; "
-                "the v4 batch contract requires the canonical pdf_info structure."
+                "MinerU result zip does not contain a structured JSON payload with pdf_info; "
+                "the v4 batch contract requires a canonical MinerU payload such as layout.json or *_middle.json."
             )
 
     if md_content and "full_markdown" not in middle_json:
