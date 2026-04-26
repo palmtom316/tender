@@ -25,7 +25,8 @@ def test_validate_clauses_detects_numbering_and_hierarchy_issues() -> None:
     result = validate_clauses([
         _clause(clause_no="1", clause_text="第一章"),
         _clause(clause_no="1.3", clause_text="缺失 1.2"),
-        _clause(clause_no="2.1", clause_text="缺失父级 2"),
+        # Depth-2 parent "1.2" with a single child is still flagged (threshold 2).
+        _clause(clause_no="1.2.1", clause_text="缺失父级 1.2"),
     ])
 
     codes = {issue.code for issue in result.issues}
@@ -64,6 +65,8 @@ def test_validate_clauses_detects_page_anchor_and_table_attachment_issues() -> N
             source_type="table",
             source_ref=None,
             source_refs=[],
+            page_start=None,
+            page_end=None,
             clause_text="表格约束条款",
         ),
     ])
