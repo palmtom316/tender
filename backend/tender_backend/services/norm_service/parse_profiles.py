@@ -16,6 +16,32 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+_CN_GB_CLAUSE_NO_FOLLOWER = r"(?=$|[\s（(：:，。；、\-－\u4e00-\u9fff])"
+_CN_GB_NUMERIC_CLAUSE_NO = r"\d{1,2}(?:\.\d{1,2})*"
+_CN_GB_APPENDIX_CLAUSE_NO = r"[A-Z](?:\.\d{1,2})*"
+_CN_GB_COMPACT_CLAUSE_PREFIX_RE = re.compile(
+    r"^\s*((?:[A-Z](?:\.\d+)*|\d+(?:\.\d+)*))(.*)$"
+)
+_CN_GB_ABSORBED_UNIT_RE = re.compile(
+    r"^\s*(\d{1,4})\s*(?:kV|kW|MVar|MVA|MV·A|V|A)(?=$|[\s（(：:，。；、\-－\u4e00-\u9fff])",
+    re.IGNORECASE,
+)
+_CN_GB_COMMON_UNIT_PREFIXES = {
+    "1",
+    "3",
+    "6",
+    "10",
+    "20",
+    "35",
+    "66",
+    "110",
+    "220",
+    "330",
+    "500",
+    "750",
+    "1000",
+}
+
 
 @dataclass(frozen=True)
 class ParseProfile:
@@ -79,6 +105,7 @@ _CN_GB_NON_CLAUSE_TITLES = (
 
 _CN_GB_NON_CLAUSE_TEXT_FRAGMENTS = (
     "为便于在执行本规范条文时区别对待",
+    "为便于在执行本标准条文时区别对待",
     "条文中指明应按其他有关标准执行",
 )
 
@@ -92,7 +119,7 @@ CN_GB_PROFILE = ParseProfile(
     non_clause_text_fragments=_CN_GB_NON_CLAUSE_TEXT_FRAGMENTS,
     appendix_code_pattern=re.compile(r"^[A-Z](?:\.\d+)*$"),
     leading_clause_no_pattern=re.compile(
-        r"^\s*((?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+))\b"
+        rf"^\s*((?:{_CN_GB_APPENDIX_CLAUSE_NO}|{_CN_GB_NUMERIC_CLAUSE_NO})){_CN_GB_CLAUSE_NO_FOLLOWER}"
     ),
     list_item_code_pattern=re.compile(r"^\d+$"),
     clause_heading_patterns=(
@@ -170,6 +197,48 @@ def resolve_profile(code: str | None) -> ParseProfile:
         if profile is not None:
             return profile
     return CN_GB_PROFILE
+
+
+def extract_leading_clause_no(
+    value: str | None,
+    *,
+    profile: ParseProfile = CN_GB_PROFILE,
+) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = profile.leading_clause_no_pattern.match(text)
+    if not match:
+        if profile is not CN_GB_PROFILE:
+            return None
+        compact_match = _CN_GB_COMPACT_CLAUSE_PREFIX_RE.match(text)
+        if not compact_match:
+            return None
+        candidate = str(compact_match.group(1) or "").strip()
+        remainder = str(compact_match.group(2) or "")
+        if "." not in candidate:
+            return None
+
+        parts = candidate.split(".")
+        last_segment = parts[-1]
+        best: tuple[int, str] | None = None
+        for split_pos in range(1, len(last_segment)):
+            clause_tail = last_segment[:split_pos]
+            if not clause_tail or len(clause_tail) > 2:
+                continue
+            absorbed = last_segment[split_pos:] + remainder
+            absorbed_match = _CN_GB_ABSORBED_UNIT_RE.match(absorbed)
+            if not absorbed_match:
+                continue
+            unit_prefix = str(absorbed_match.group(1) or "").lstrip("0") or "0"
+            if unit_prefix not in _CN_GB_COMMON_UNIT_PREFIXES:
+                continue
+            resolved = ".".join(parts[:-1] + [clause_tail])
+            score = len(unit_prefix)
+            if best is None or score > best[0] or (score == best[0] and len(resolved) > len(best[1])):
+                best = (score, resolved)
+        return best[1] if best is not None else None
+    return match.group(1)
 
 
 def non_clause_title_pattern(profile: ParseProfile) -> re.Pattern:

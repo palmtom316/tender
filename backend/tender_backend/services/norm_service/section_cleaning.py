@@ -43,7 +43,8 @@ def clean_sections(
             continue
         if looks_like_suspicious_year_code(section):
             continue
-        repaired = backfill_section_anchor(section, anchor_pages)
+        repaired = repair_toc_anchored_section(section, anchor_pages)
+        repaired = backfill_section_anchor(repaired, anchor_pages)
         if looks_like_front_matter_heading_noise(repaired):
             continue
         if looks_like_unanchored_heading_noise(repaired):
@@ -213,6 +214,27 @@ def backfill_section_anchor(section: dict[str, Any], pages: list[dict[str, Any]]
             "markdown": matched.get("markdown"),
         },
     }
+
+
+def repair_toc_anchored_section(section: dict[str, Any], pages: list[dict[str, Any]]) -> dict[str, Any]:
+    raw_json = section.get("raw_json")
+    if not isinstance(raw_json, dict):
+        return section
+    markdown = str(raw_json.get("markdown") or "")
+    if not markdown or not _page_looks_like_toc({"markdown": markdown}):
+        return section
+    stripped_section = {
+        **section,
+        "page_start": None,
+        "page_end": None,
+        "raw_json": None,
+    }
+    repaired = backfill_section_anchor(stripped_section, pages)
+    if repaired.get("page_start") is None:
+        return section
+    if repaired.get("page_start") == section.get("page_start"):
+        return section
+    return repaired
 
 
 def _build_section_markdown(section: dict[str, Any]) -> str | None:

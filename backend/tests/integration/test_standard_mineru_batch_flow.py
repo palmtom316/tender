@@ -268,6 +268,92 @@ def test_parse_via_mineru_persists_canonical_payload_from_pdf_info(
     }
 
 
+def test_parse_via_mineru_cleans_toc_noise_before_persisting_sections(
+    monkeypatch, tmp_path: Path
+) -> None:
+    pdf_path = tmp_path / "spec.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7 fake pdf")
+
+    def fake_post(url: str, **kwargs):
+        if url.endswith("/file-urls/batch"):
+            return _FakeResponse(json_data={
+                "data": {
+                    "batch_id": "batch-clean",
+                    "file_urls": ["https://upload.example.com/file-clean"],
+                },
+            })
+        pytest.fail(f"unexpected POST {url}")
+
+    def fake_put(url: str, **kwargs):
+        return _FakeResponse(status_code=200)
+
+    def fake_get(url: str, **kwargs):
+        if url.endswith("/extract-results/batch/batch-clean"):
+            return _FakeResponse(json_data={
+                "data": {
+                    "extract_result": [{
+                        "state": "done",
+                        "full_zip_url": "https://download.example.com/result-clean.zip",
+                    }],
+                },
+            })
+        if url == "https://download.example.com/result-clean.zip":
+            return _FakeResponse(content=make_result_zip(
+                make_middle_json([
+                    make_pdf_info_page(0, [
+                        make_text_block("目次", block_type="title"),
+                        make_text_block("1 总则 (1)"),
+                    ]),
+                    make_pdf_info_page(1, [
+                        make_text_block("1 总则", block_type="title"),
+                        make_text_block("正文内容"),
+                    ]),
+                ]),
+                full_md="目次\n1 总则 (1)\n\n1 总则\n正文内容",
+            ))
+        pytest.fail(f"unexpected GET {url}")
+
+    persisted: dict[str, object] = {}
+
+    def fake_persist_sections(conn, *, document_id: UUID, sections: list[dict]) -> int:
+        persisted["sections"] = sections
+        return len(sections)
+
+    monkeypatch.setattr(norm_processor._agent_repo, "get_by_key", lambda conn, key: SimpleNamespace(
+        enabled=True,
+        api_key="token",
+        base_url="https://mineru.net/api/v4/extract/task",
+    ))
+    monkeypatch.setattr(norm_processor, "_get_pdf_path", lambda conn, document_id: str(pdf_path))
+    monkeypatch.setattr(norm_processor.httpx, "post", fake_post)
+    monkeypatch.setattr(norm_processor.httpx, "put", fake_put)
+    monkeypatch.setattr(norm_processor.httpx, "get", fake_get)
+    monkeypatch.setattr(norm_processor.time, "sleep", lambda _: None)
+    monkeypatch.setattr(parse_parser, "persist_sections", fake_persist_sections)
+    monkeypatch.setattr(parse_parser, "persist_tables", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(parse_parser, "update_document_parse_assets", lambda *args, **kwargs: None)
+
+    count = norm_processor._parse_via_mineru(object(), "dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+    assert count == 1
+    assert persisted["sections"] == [
+        {
+            "section_code": "1",
+            "title": "总则",
+            "level": 1,
+            "page_start": 2,
+            "page_end": 2,
+            "text": "正文内容",
+            "text_source": "mineru_markdown",
+            "sort_order": 0,
+            "raw_json": {
+                "page_number": 2,
+                "markdown": "1 总则\n正文内容",
+            },
+        },
+    ]
+
+
 def test_parse_via_mineru_uses_uuid_token_header_for_jwt_api_key(monkeypatch, tmp_path: Path) -> None:
     pdf_path = tmp_path / "spec.pdf"
     pdf_path.write_bytes(b"%PDF-1.7 fake pdf")
@@ -1251,6 +1337,47 @@ def test_backfill_clause_page_anchors_uses_table_source_refs() -> None:
     assert clauses[0]["page_end"] == 32
 
 
+def test_backfill_clause_page_anchors_matches_table_title_when_source_ref_is_missing() -> None:
+    asset = DocumentAsset(
+        document_id=UUID("bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc"),
+        parser_name="mineru",
+        parser_version="2.7.6",
+        raw_payload={},
+        pages=[],
+        tables=[
+            TableAsset(
+                source_ref="table:unknown",
+                page_start=70,
+                page_end=70,
+                table_title="续表D.0.23",
+                table_html="<table><tr><td>序号</td></tr></table>",
+                raw_json={},
+            )
+        ],
+        full_markdown="",
+    )
+    clauses = [
+        {
+            "id": uuid4(),
+            "clause_no": "D.0.23",
+            "node_type": "clause",
+            "source_type": "text",
+            "source_label": "D.0.23 10kV线路导线架设检查记录表应按本规范表D.0.23填写。",
+            "source_ref": "document_section:d023#34",
+            "source_refs": ["document_section:d023#34"],
+            "clause_text": "10kV线路导线架设检查记录表应按本规范表D.0.23填写。",
+            "page_start": None,
+            "page_end": None,
+            "parent_id": None,
+        }
+    ]
+
+    norm_processor._backfill_clause_page_anchors_from_asset(clauses, asset)
+
+    assert clauses[0]["page_start"] == 70
+    assert clauses[0]["page_end"] == 70
+
+
 def test_backfill_clause_page_anchors_ignores_toc_page_matches() -> None:
     asset = DocumentAsset(
         document_id=UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
@@ -1875,6 +2002,57 @@ def test_normalize_sections_for_processing_drops_toc_and_front_matter() -> None:
     ]
 
 
+def test_normalize_sections_for_processing_drops_toc_anchored_heading_noise_from_page_markdown() -> None:
+    sections = [
+        {
+            "id": "toc-heading",
+            "section_code": "1",
+            "title": "总则",
+            "text": "",
+            "level": 1,
+            "page_start": 7,
+            "page_end": 7,
+            "raw_json": {
+                "page_number": 7,
+                "markdown": "目次\n1 总则 (1)",
+            },
+        },
+        {
+            "id": "real-heading",
+            "section_code": "1",
+            "title": "总则",
+            "text": "",
+            "level": 1,
+            "page_start": 10,
+            "page_end": 10,
+            "raw_json": {
+                "page_number": 10,
+                "markdown": "1 总则\n1.0.1 为保证施工安装质量，制定本规范。",
+            },
+        },
+        {
+            "id": "clause",
+            "section_code": "1.0.1",
+            "title": "为保证施工安装质量，制定本规范。",
+            "text": "",
+            "level": 3,
+            "page_start": 10,
+            "page_end": 10,
+            "raw_json": {
+                "page_number": 10,
+                "markdown": "1 总则\n1.0.1 为保证施工安装质量，制定本规范。",
+            },
+        },
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("page_start")) for section in normalized] == [
+        ("1", 10),
+        ("1.0.1", 10),
+    ]
+
+
 def test_normalize_sections_for_processing_keeps_first_clause_when_chapter_heading_missing() -> None:
     sections = [
         {"title": "中华人民共和国国家标准", "text": "", "level": 1, "page_start": 1},
@@ -2287,6 +2465,353 @@ def test_normalize_sections_for_processing_keeps_wrapped_embedded_clause_title_i
     ]
     assert normalized[1]["text"].startswith("变压器、电抗器、互感器的瓷件质量，应符合现行国家标准")
     assert "1000\\\\mathrm{V}" in normalized[1]["text"]
+
+
+def test_normalize_sections_for_processing_splits_inline_sibling_clause_from_same_line_body() -> None:
+    sections = [
+        {
+            "id": "s843",
+            "section_code": "8.4.3",
+            "title": "导线或架空地线，应使用合格的电力金具配套接续管及耐张线夹进行连接。",
+            "text": (
+                "对小截面导线采用螺栓式耐张线夹及钳压管连接时，其试件应分别制作。"
+                "应。8.4.4采用液压连接，工期相近的不同工程，当采用同制造厂、同批量的导线、"
+                "架空地线、接续管、耐张线夹及钢模完全没有变化时，可免做重复性试验。"
+            ),
+            "level": 3,
+            "page_start": 40,
+            "page_end": 40,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("8.4.3", "导线或架空地线，应使用合格的电力金具配套接续管及耐张线夹进行连接。"),
+        ("8.4.4", "采用液压连接，工期相近的不同工程，当采用同制造厂、同批量的导线、架空地线、接续管、耐张线夹及钢模完全没有变化时，可免做重复性试验。"),
+    ]
+    assert normalized[0]["text"] == "对小截面导线采用螺栓式耐张线夹及钳压管连接时，其试件应分别制作。应。"
+    assert normalized[1]["text"] == "采用液压连接，工期相近的不同工程，当采用同制造厂、同批量的导线、架空地线、接续管、耐张线夹及钢模完全没有变化时，可免做重复性试验。"
+
+
+def test_normalize_sections_for_processing_repairs_compact_voltage_embedded_sibling_clauses() -> None:
+    sections = [
+        {
+            "id": "s353",
+            "section_code": "3.5.3",
+            "title": "金具的质量应符合国家现行标准的规定。",
+            "text": (
+                "3.5.435kV及以下架空电力线路金具还应符合现行行业标准的规定。\n"
+                "3.5.510kV及以下架空绝缘导线金具，应符合现行行业标准的有关规定。"
+            ),
+            "level": 3,
+            "page_start": 7,
+            "page_end": 7,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("3.5.3", "金具的质量应符合国家现行标准的规定。"),
+        ("3.5.4", "35kV及以下架空电力线路金具还应符合现行行业标准的规定。"),
+        ("3.5.5", "10kV及以下架空绝缘导线金具，应符合现行行业标准的有关规定。"),
+    ]
+
+
+def test_normalize_sections_for_processing_repairs_prefixed_embedded_first_clause() -> None:
+    sections = [
+        {
+            "id": "s66",
+            "section_code": "6.6",
+            "title": "岩石基础",
+            "text": "16.6.1岩石基础施工时,应逐基逐腿与设计地质资料核对。",
+            "level": 2,
+            "page_start": 21,
+            "page_end": 21,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("6.6", "岩石基础"),
+        ("6.6.1", "岩石基础施工时,应逐基逐腿与设计地质资料核对。"),
+    ]
+
+
+def test_normalize_sections_for_processing_rejects_front_matter_noise_as_embedded_clauses() -> None:
+    sections = [
+        {
+            "id": "frontmatter",
+            "title": "中华人民共和国住房和城乡建设部公告",
+            "text": (
+                "第409号\n"
+                "住房城乡建设部关于发布国家标准《电气装置安装工程66kV及以下架空电力线路施工及验收规范》的公告\n"
+                "中华人民共和国国家标准\n"
+                "电气装置安装工程66kV及以下架空电力线路施工及验收规范\n"
+                "GB50173-2014\n"
+                "地址：北京市西城区木樨地北里甲11号国宏大厦C座3层\n"
+                "5.5印张140千字\n"
+                "定价：33.00元\n"
+                "本规范第6.1.1(1)条(款)为强制性条文，必须严格执行。\n"
+            ),
+            "level": 1,
+            "page_start": 2,
+            "page_end": 2,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        (None, "中华人民共和国住房和城乡建设部公告"),
+    ]
+    assert "66kV及以下架空电力线路施工及验收规范" in normalized[0]["text"]
+    assert "GB50173-2014" in normalized[0]["text"]
+    assert "33.00元" in normalized[0]["text"]
+    assert "第6.1.1(1)条" in normalized[0]["text"]
+
+
+def test_normalize_sections_for_processing_repairs_compact_voltage_after_multi_clause_host() -> None:
+    sections = [
+        {
+            "id": "s102",
+            "title": "10.2电气设备的试验",
+            "text": (
+                "10.2.7金属氧化物避雷器试验项目，应包括下列内容：\n"
+                "1测量金属氧化物避雷器及基座绝缘电阻。\n"
+                "10.2.866kV及以下架空电力线路杆塔上电气设备交接试验报告统一格式，应符合本规范附录B的规定。"
+            ),
+            "level": 1,
+            "page_start": 34,
+            "page_end": 34,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert ("10.2.8", "66kV及以下架空电力线路杆塔上电气设备交接试验报告统一格式，应符合本规范附录B的规定。") in [
+        (section.get("section_code"), section.get("title"))
+        for section in normalized
+    ]
+    assert all(section.get("section_code") != "10.2.86" for section in normalized)
+
+
+def test_normalize_sections_for_processing_repairs_missing_chapter_prefix_for_embedded_clause() -> None:
+    sections = [
+        {
+            "id": "s86",
+            "title": "8.6附件安装",
+            "text": (
+                "6.3：10kV～66kV架空电力线路当采用并沟线夹连接引流线时，线夹数量不应少于2个。\n"
+                "1.6.410kV及以下架空电力线路的引流线（或跨接线)之间、引流线与主干线之间的连接，应符合下列规定：\n"
+            ),
+            "level": 2,
+            "page_start": 29,
+            "page_end": 29,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        (None, "8.6附件安装"),
+        ("8.6.3", "10kV～66kV架空电力线路当采用并沟线夹连接引流线时，线夹数量不应少于2个。"),
+        ("8.6.4", "10kV及以下架空电力线路的引流线（或跨接线)之间、引流线与主干线之间的连接，应符合下列规定："),
+    ]
+
+
+def test_normalize_sections_for_processing_recovers_missing_clause_before_following_sibling() -> None:
+    sections = [
+        {
+            "id": "s87",
+            "title": "8.7光缆架设",
+            "text": (
+                "8.7.2 光缆应直立装卸、运输及存放，不得平放。\n"
+                "应直立装卸、运输及存放，不得平放 8.7v..\n"
+                "）元现的架线施工应符合下列规定：T ，定：\n"
+                "1 光缆架线施工应采用张力放线方法。\n"
+                "2 选择放线区段长度应与线盘长度相适应，不宜两盘及以上连接后展放。\n"
+                "8.7.4 除设计另有要求外，张力放线机主卷筒槽底直径不应小于光缆直径的70倍，且不得小于1m。\n"
+            ),
+            "level": 2,
+            "page_start": 31,
+            "page_end": 31,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        (None, "8.7光缆架设"),
+        ("8.7.2", "光缆应直立装卸、运输及存放，不得平放。"),
+        ("8.7.3", "光缆架线施工应符合下列规定："),
+        ("1", "光缆架线施工应采用张力放线方法。"),
+        ("2", "选择放线区段长度应与线盘长度相适应，不宜两盘及以上连接后展放。"),
+        ("8.7.4", "除设计另有要求外，张力放线机主卷筒槽底直径不应小于光缆直径的70倍，且不得小于1m。"),
+    ]
+    assert "不得平放" in normalized[1]["text"]
+
+
+def test_normalize_sections_for_processing_does_not_promote_decimal_threshold_to_clause_no() -> None:
+    sections = [
+        {
+            "id": "s81",
+            "title": "8.1一般规定",
+            "text": (
+                "8.1.4 放线滑轮的使用应符合下列规定：\n"
+                "3 张力展放导线用的滑轮，轮槽的磨阻系数不应大于1.01。\n"
+                "4 对严重上扬、下压或垂直档距很大处的放线滑轮应进行验算，必要时应采用特制的结构。\n"
+                "5 应采用滚动轴承滑轮，使用前应进行检查并确保转动灵活。\n"
+                "8.1.5 架空绝缘导线的架设应选择在干燥的天气进行。\n"
+            ),
+            "level": 2,
+            "page_start": 23,
+            "page_end": 23,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+    codes = [section.get("section_code") for section in normalized]
+
+    assert "8.1.01" not in codes
+    assert "8.1.5" in codes
+
+
+def test_normalize_sections_for_processing_recovers_following_clauses_from_numbered_item_continuation_page() -> None:
+    sections = [
+        {
+            "id": "s8616",
+            "section_code": "8.6.16",
+            "title": "绝缘子串、导线及架空地线上的各种金具上的螺栓、穿钉及弹簧销子，除有固定的穿向外，其余穿向应统一，并应符合下列规定：",
+            "text": (
+                "1 单、双悬垂串上的弹簧销子应一律由电源侧向受电侧穿入。\n"
+                "2 耐张串上的弹簧销子、螺栓及穿钉应一律由上向下穿入。\n"
+            ),
+            "level": 3,
+            "page_start": 29,
+            "page_end": 30,
+        },
+        {
+            "id": "s8616b",
+            "section_code": "3",
+            "title": "当穿入方向与当地运行单位要求不一致时，可按运行单位的要求安装，但应在开工前明确规定。",
+            "text": (
+                ".6.17 金具上所用的闭口销的直径应与孔径相配合，且弹力应适度。\n"
+                "8.6.18 各种类型的铝质绞线，在与金具的线夹夹紧时，除并沟线夹及使用预绞丝护线条外，安装时应在铝股外缠绕铝包带，缠绕时应符合下列规定：\n"
+                "1 铝包带应缠绕紧密，其缠绕方向应与外层铝股的绞制方向一致。\n"
+                "2 所缠铝包带应露出线夹，但不应超过10mm，其端头应回缠绕于线夹内压住。\n"
+                "8.6.19 安装预绞丝护线条时，每条的中心与线夹中心应重合，对导线包裹应紧固。\n"
+                "8.6.20 防振锤及阻尼线与被连接的导线或架空地线应在同一铅垂面内，设计有特殊要求时应按设计要求安装。其安装距离偏差应为±30mm。\n"
+            ),
+            "level": 4,
+            "page_start": 30,
+            "page_end": 30,
+        },
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized] == [
+        ("8.6.16", "绝缘子串、导线及架空地线上的各种金具上的螺栓、穿钉及弹簧销子，除有固定的穿向外，其余穿向应统一，并应符合下列规定："),
+        ("1", "单、双悬垂串上的弹簧销子应一律由电源侧向受电侧穿入。"),
+        ("2", "耐张串上的弹簧销子、螺栓及穿钉应一律由上向下穿入。"),
+        ("3", "当穿入方向与当地运行单位要求不一致时，可按运行单位的要求安装，但应在开工前明确规定。"),
+        ("8.6.17", "金具上所用的闭口销的直径应与孔径相配合，且弹力应适度。"),
+        ("8.6.18", "各种类型的铝质绞线，在与金具的线夹夹紧时，除并沟线夹及使用预绞丝护线条外，安装时应在铝股外缠绕铝包带，缠绕时应符合下列规定："),
+        ("1", "铝包带应缠绕紧密，其缠绕方向应与外层铝股的绞制方向一致。"),
+        ("2", "所缠铝包带应露出线夹，但不应超过10mm，其端头应回缠绕于线夹内压住。"),
+        ("8.6.19", "安装预绞丝护线条时，每条的中心与线夹中心应重合，对导线包裹应紧固。"),
+        ("8.6.20", "防振锤及阻尼线与被连接的导线或架空地线应在同一铅垂面内，设计有特殊要求时应按设计要求安装。其安装距离偏差应为±30mm。"),
+    ]
+    assert normalized[3]["text"] == ""
+    assert normalized[5]["text"] == "各种类型的铝质绞线，在与金具的线夹夹紧时，除并沟线夹及使用预绞丝护线条外，安装时应在铝股外缠绕铝包带，缠绕时应符合下列规定："
+
+
+def test_normalize_sections_for_processing_removes_polluted_inline_reference_and_synthesizes_missing_clause_before_table() -> None:
+    sections = [
+        {
+            "id": "s62",
+            "title": "6.2现场浇筑基础",
+            "text": (
+                "6.2.12现场浇筑混凝土的养护应符合下列规定：\n"
+                "1浇筑后应在12h内开始浇水养护。\n"
+                "2对普通硅酸盐和矿渣硅酸盐水泥拌制的混凝土浇水养护，不得少于7d。\n"
+                "外露部分加遮盖物，应按规定期限继续浇水养护，养护时应使遮盖6.2.16的规定。物及基础周围的土始终保持湿润。\n"
+                "4采用养护剂养护时，应在拆模并经表面检查合格后立即涂刷，涂刷后不得浇水。\n"
+                "5日平均温度低于5℃时，不得浇水养护。\n"
+                "6.2.13基础拆模时的混凝土强度，应保证其表面及棱角不损坏。\n"
+                "6.2.15浇筑拉线基础的允许偏差应符合表6.2.15的规定。\n"
+                "表6.2.16整基基础尺寸施工允许偏差\n"
+                "<table><tr><td>项 目</td></tr></table>\n"
+                "6.2.17现场浇筑混凝土强度应以试块强度为依据。试块强度应符合设计要求。\n"
+            ),
+            "level": 2,
+            "page_start": 13,
+            "page_end": 13,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+    clause_rows = [
+        (section.get("section_code"), section.get("title"), str(section.get("text") or ""))
+        for section in normalized
+    ]
+
+    assert ("6.2.16", "整基基础尺寸施工允许偏差应符合表6.2.16的规定。", "整基基础尺寸施工允许偏差应符合表6.2.16的规定。\n<table><tr><td>项 目</td></tr></table>") in clause_rows
+    assert all(not (code == "6.2.16" and title.startswith("的规定")) for code, title, _ in clause_rows)
+    assert any("使遮盖物及基础周围的土始终保持湿润" in text for _, _, text in clause_rows)
+
+
+def test_normalize_sections_for_processing_does_not_synthesize_duplicate_clause_before_table_when_clause_already_exists() -> None:
+    sections = [
+        {
+            "id": "s675",
+            "title": "6.7冬期施工",
+            "text": (
+                "6.7.5 冬期拌制混凝土时应采用加热水的方法，拌和水及骨料的最高温度不得超过表6.7.5的规定。\n"
+                "表6.7.5拌和水及骨料的最高温度（℃）\n"
+                "<table><tr><td>项 目</td></tr></table>\n"
+                "6.7.6 水泥不应直接加热。\n"
+            ),
+            "level": 2,
+            "page_start": 17,
+            "page_end": 17,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [section.get("section_code") for section in normalized].count("6.7.5") == 1
+
+
+def test_normalize_sections_for_processing_repairs_grounding_chapter_out_of_order_duplicates() -> None:
+    sections = [
+        {
+            "id": "s90",
+            "title": "9接地工程",
+            "text": (
+                "9.0.1 接地体埋设深度和防腐应符合设计要求。\n"
+                "受地质地形条件限制时可作局部修改，但不论修改与否均应在施工质量验收记录中绘制接地装置敷设简图并标示相对位置和尺寸。\n"
+                "9.0.9 接施由阻值应符合设计要求。和尽士从重验收记录中绘制接地。\n"
+                "9.0.9 架空线路杆塔的每一腿均应与接地体引下线连接。\n"
+                "9.0.9 架空线路杆塔的每一腿均应与接地体引下线连接。环形。\n"
+                "9.0.10 接地电阻值应符合设计要求。\n"
+                "9.0.3 接地装置的连接应可靠。\n"
+                "9.0.4 采用水平敷设的接地体，应符合下列规定。\n"
+            ),
+            "level": 1,
+            "page_start": 32,
+            "page_end": 32,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+    codes = [section.get("section_code") for section in normalized]
+
+    assert codes == [None, "9.0.1", "9.0.2", "9.0.3", "9.0.4", "9.0.9", "9.0.10"]
+    assert codes.count("9.0.9") == 1
 
 
 def test_ensure_standard_ocr_reuses_existing_sections(monkeypatch) -> None:
@@ -4039,6 +4564,41 @@ def test_build_single_standard_blocks_absorbs_numbered_items_under_non_clause_ho
 
     assert [(block.segment_type, block.clause_no) for block in blocks] == [
         ("non_clause_block", None),
+    ]
+    assert "1 表示很严格，非这样做不可的：" in blocks[0].text
+    assert "2 表示严格，在正常情况下均应这样做的：" in blocks[0].text
+
+
+def test_build_single_standard_blocks_absorbs_numbered_items_under_standard_wording_note_host() -> None:
+    blocks = build_single_standard_blocks([
+        {
+            "id": "s-terms",
+            "section_code": "1",
+            "title": "为便于在执行本标准条文时区别对待，对要求严格程度不同的用词说明如下：",
+            "text": "",
+            "page_start": 45,
+            "page_end": 45,
+        },
+        {
+            "id": "s-terms-1",
+            "section_code": "1",
+            "title": "表示很严格，非这样做不可的：",
+            "text": "正面词采用“必须”，反面词采用“严禁”。",
+            "page_start": 45,
+            "page_end": 45,
+        },
+        {
+            "id": "s-terms-2",
+            "section_code": "2",
+            "title": "表示严格，在正常情况下均应这样做的：",
+            "text": "正面词采用“应”，反面词采用“不应”或“不得”。",
+            "page_start": 45,
+            "page_end": 45,
+        },
+    ], [])
+
+    assert [(block.segment_type, block.clause_no) for block in blocks] == [
+        ("non_clause_block", "1"),
     ]
     assert "1 表示很严格，非这样做不可的：" in blocks[0].text
     assert "2 表示严格，在正常情况下均应这样做的：" in blocks[0].text

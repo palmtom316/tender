@@ -127,6 +127,69 @@ def test_build_single_standard_blocks_recovers_clause_no_from_heading_when_secti
     assert blocks[0].confidence == "high"
 
 
+def test_build_single_standard_blocks_recovers_compact_heading_clause_nos_when_section_code_missing() -> None:
+    sections = [
+        {
+            "id": "s1",
+            "section_code": None,
+            "title": "2术 语",
+            "text": "2.0.1架空电力线路 overhead power line",
+            "page_start": 11,
+            "page_end": 11,
+        },
+        {
+            "id": "s2",
+            "section_code": None,
+            "title": "6.6岩石基础",
+            "text": "16.6.1岩石基础施工时,应逐基逐腿与设计地质资料核对。",
+            "page_start": 16,
+            "page_end": 16,
+        },
+        {
+            "id": "s3",
+            "section_code": None,
+            "title": "3.5.3金具的质量应符合国家现行标准的规定。",
+            "text": "",
+            "page_start": 10,
+            "page_end": 10,
+        },
+    ]
+
+    blocks = build_single_standard_blocks(sections, [])
+
+    assert [block.clause_no for block in blocks] == ["2", "6.6", "3.5.3"]
+    assert [block.segment_type for block in blocks] == [
+        "normative_clause_block",
+        "normative_clause_block",
+        "normative_clause_block",
+    ]
+
+
+def test_build_single_standard_blocks_does_not_absorb_voltage_prefix_into_compact_clause_no() -> None:
+    sections = [
+        {
+            "id": "s1",
+            "section_code": None,
+            "title": "8.5.410 kV及以下架设新导线时，弧垂应符合下列规定：",
+            "text": "",
+            "page_start": 30,
+            "page_end": 30,
+        },
+        {
+            "id": "s2",
+            "section_code": None,
+            "title": "D.0.2010 kV线路杆塔基础检查记录表应按本规范表D.0.20填写。",
+            "text": "",
+            "page_start": 70,
+            "page_end": 70,
+        },
+    ]
+
+    blocks = build_single_standard_blocks(sections, [])
+
+    assert [block.clause_no for block in blocks] == ["8.5.4", "D.0.20"]
+
+
 def test_build_single_standard_blocks_recovers_split_clause_no_from_chapter_code_and_title_prefix() -> None:
     sections = [
         {
@@ -346,6 +409,47 @@ def test_build_single_standard_blocks_marks_non_clause_tail_sections_and_comment
     ]
     assert blocks[-1].clause_no == "4.1.7"
     assert blocks[-1].text == "为确保运输安全此条规定为强制性条文。"
+
+
+def test_build_single_standard_blocks_detects_commentary_tail_from_cover_text_and_marks_inline_commentary_chapter() -> None:
+    sections = [
+        {
+            "id": "cover",
+            "section_code": None,
+            "title": "电气装置安装工程电缆线路施工及验收标准",
+            "text": "GB 50168-2018\n\n条文说明",
+            "page_start": 47,
+            "page_end": 47,
+        },
+        {
+            "id": "intro",
+            "section_code": None,
+            "title": "编制说明",
+            "text": "本标准是在上一版基础上修订而成。",
+            "page_start": 48,
+            "page_end": 48,
+        },
+        {
+            "id": "commentary",
+            "section_code": None,
+            "title": "5.1电缆导管的加工与敷设",
+            "text": (
+                "5.1.1本条提出了对电缆管选材的基本要求。\n"
+                "5.1.2对本条的规定说明如下。"
+            ),
+            "page_start": 54,
+            "page_end": 54,
+        },
+    ]
+
+    blocks = build_single_standard_blocks(sections, [])
+
+    assert [block.segment_type for block in blocks] == [
+        "non_clause_block",
+        "non_clause_block",
+        "commentary_block",
+    ]
+    assert blocks[2].clause_no == "5.1"
 
 
 def test_build_single_standard_blocks_does_not_merge_wording_note_tail_into_appendix() -> None:
