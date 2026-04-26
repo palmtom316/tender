@@ -26,8 +26,8 @@ import {
 } from "../../lib/api";
 
 const MODEL_OPTIONS = [
-  { value: "deepseek-chat", label: "DeepSeek Chat" },
-  { value: "deepseek-reasoner", label: "DeepSeek Reasoner" },
+  { value: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+  { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
   { value: "qwen-max", label: "Qwen Max" },
   { value: "qwen-plus", label: "Qwen Plus" },
   { value: "gpt-4o", label: "GPT-4o" },

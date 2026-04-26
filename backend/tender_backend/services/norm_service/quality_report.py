@@ -327,13 +327,26 @@ def build_standard_quality_report(
         )
 
     if dropped_noise_count > 0 or backfilled_anchor_count > 0:
-        cleanup_gate = _gate(
-            "ocr_cleanup",
-            "warn",
-            f"清洗阶段过滤 {dropped_noise_count} 个疑似噪声段落，并回填 {backfilled_anchor_count} 个页码锚点。",
-            metric=dropped_noise_count + backfilled_anchor_count,
-            threshold=0,
-        )
+        # Cleaning was needed, but gate the outcome rather than the activity.
+        # If section anchor coverage is already healthy (≥85%) the backfill was
+        # successful format normalization, not a quality issue.
+        if section_anchor_coverage >= 0.85 and dropped_noise_count <= max(1, len(normalized_sections) * 0.10):
+            cleanup_gate = _gate(
+                "ocr_cleanup",
+                "pass",
+                f"清洗阶段过滤 {dropped_noise_count} 个噪声段落并回填 {backfilled_anchor_count} 个锚点，"
+                f"清洗后锚点覆盖率为 {section_anchor_coverage:.1%}，格式标准化正常。",
+                metric=dropped_noise_count + backfilled_anchor_count,
+                threshold=0,
+            )
+        else:
+            cleanup_gate = _gate(
+                "ocr_cleanup",
+                "warn",
+                f"清洗阶段过滤 {dropped_noise_count} 个疑似噪声段落，并回填 {backfilled_anchor_count} 个页码锚点。",
+                metric=dropped_noise_count + backfilled_anchor_count,
+                threshold=0,
+            )
     else:
         cleanup_gate = _gate("ocr_cleanup", "pass", "OCR 清洗阶段未发现明显噪声或锚点缺口。")
 

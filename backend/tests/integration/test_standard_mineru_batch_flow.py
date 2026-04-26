@@ -853,7 +853,7 @@ def test_call_ai_gateway_uses_api_prefix(monkeypatch) -> None:
         enabled=True,
         base_url="https://api.deepseek.com/v1",
         api_key="primary-key",
-        primary_model="deepseek-chat",
+        primary_model="deepseek-v4-flash",
         fallback_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         fallback_api_key="fallback-key",
         fallback_model="qwen-plus",
@@ -878,7 +878,7 @@ def test_call_ai_gateway_uses_longer_timeout_for_reasoner(monkeypatch) -> None:
         def json(self) -> dict[str, object]:
             return {
                 "content": "[]",
-                "resolved_model": "deepseek-reasoner",
+                "resolved_model": "deepseek-v4-pro",
                 "input_tokens": 1,
                 "output_tokens": 1,
                 "used_fallback": False,
@@ -892,7 +892,7 @@ def test_call_ai_gateway_uses_longer_timeout_for_reasoner(monkeypatch) -> None:
         enabled=True,
         base_url="https://api.deepseek.com/v1",
         api_key="primary-key",
-        primary_model="deepseek-reasoner",
+        primary_model="deepseek-v4-pro",
         fallback_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         fallback_api_key="fallback-key",
         fallback_model="qwen-plus",

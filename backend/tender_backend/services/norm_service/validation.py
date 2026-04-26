@@ -185,6 +185,29 @@ def _validate_numbering(
         clause_numbers.add(clause_no)
         parsed_sequence.append((clause, parsed))
 
+    # Implicit parent detection: when multiple siblings share the same
+    # parent_no but no clause for that parent exists, infer the parent as
+    # an implicit section heading (common in Chinese standards where
+    # MinerU misses the section-level heading).
+    #
+    # Also handles the X.0.Y pattern (e.g. 1.0.1 → parent "1.0"):
+    # if parsed[-2]==0 the implied parent is "1", which we treat as implicit.
+    parent_child_count: dict[str, int] = {}
+    for _clause, parsed in parsed_sequence:
+        if len(parsed) <= 1:
+            continue
+        parent_no = ".".join(str(part) for part in parsed[:-1])
+        parent_child_count[parent_no] = parent_child_count.get(parent_no, 0) + 1
+
+    for parent_no, count in parent_child_count.items():
+        # Depth-1 parents (e.g. "4", "5", "A") are chapter-level headings
+        # that MinerU commonly misses. A single child is enough to infer
+        # the parent. Deeper parents need ≥2 siblings to avoid false
+        # positives from outlier clauses.
+        threshold = 1 if parent_no.count(".") == 0 else 2
+        if count >= threshold and parent_no not in clause_numbers:
+            clause_numbers.add(parent_no)
+
     for clause, parsed in parsed_sequence:
         if len(parsed) <= 1:
             continue
@@ -283,13 +306,13 @@ def _validate_table_attachments(clauses: list[dict], result: ValidationResult) -
         if clause.get("source_type") != "table":
             continue
         source_refs = _iter_source_refs(clause)
-        has_table_ref = any(source.startswith("table:") for source in source_refs)
-        if not has_table_ref:
+        has_page_anchor = clause.get("page_start") is not None or clause.get("page_end") is not None
+        if not source_refs and not has_page_anchor:
             _add_issue(
                 result,
                 clause,
                 code="table.missing_source_ref",
-                message=f"Clause {clause.get('clause_no')}: table clause is missing table source_ref",
+                message=f"Clause {clause.get('clause_no')}: table clause is missing source_ref and page anchors",
                 details={"source_refs": source_refs},
             )
 

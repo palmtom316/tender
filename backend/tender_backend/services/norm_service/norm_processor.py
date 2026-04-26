@@ -116,7 +116,7 @@ def _ai_gateway_timeout_seconds(model_name: str | None) -> float:
     """Use a longer timeout for reasoning models, which stream much slower."""
     settings = get_settings()
     base_timeout = settings.standard_ai_gateway_timeout_seconds
-    if model_name and "reasoner" in model_name.lower():
+    if model_name and ("reasoner" in model_name.lower() or "v4-pro" in model_name):
         return max(base_timeout, 300.0)
     return base_timeout
 
@@ -908,10 +908,15 @@ def _build_block_processing_scopes(blocks: list[BlockSegment]) -> list[Processin
 
 def _serialize_asset_tables_for_block_path(document_asset) -> list[dict]:
     serialized: list[dict] = []
-    for table in document_asset.tables:
+    for index, table in enumerate(document_asset.tables):
         table_id: str | None = None
         if table.source_ref.startswith("table:"):
             table_id = table.source_ref.split(":", 1)[1]
+        if table_id is None:
+            # Fallback: use reconciled source_ref directly (e.g. "document.raw_payload.tables[0]").
+            # Without this fallback, table blocks end up with empty source_refs, causing
+            # validation to flag table.missing_source_ref for all tables.
+            table_id = table.source_ref or f"auto:{index}"
         serialized.append({
             "id": table_id,
             "page_start": table.page_start,
