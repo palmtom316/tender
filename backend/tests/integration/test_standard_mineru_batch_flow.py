@@ -2519,6 +2519,36 @@ def test_normalize_sections_for_processing_repairs_compact_voltage_embedded_sibl
     ]
 
 
+def test_normalize_sections_for_processing_repairs_compact_first_embedded_clause_before_next_sibling() -> None:
+    sections = [
+        {
+            "id": "s41",
+            "section_code": "4.1",
+            "title": "装卸、运输与就位",
+            "text": (
+                "4.1.131.5MV·A及以上变压器和40MVar及以上的电抗器的装卸及运输，应对运输路径及两端装卸条件作充分调查，制定施工安全技术措施，并应符合下列规定：\n"
+                "1水路运输时，应做好下列工作：\n"
+                "4.1.2变压器或电抗器的装卸应符合下列规定：\n"
+                "1装卸站台、码头等地点的地面应坚实。\n"
+            ),
+            "level": 2,
+            "page_start": 15,
+            "page_end": 15,
+        }
+    ]
+
+    normalized = norm_processor._normalize_sections_for_processing(sections)
+
+    assert [(section.get("section_code"), section.get("title")) for section in normalized[:5]] == [
+        ("4.1", "装卸、运输与就位"),
+        ("4.1.1", "31.5MV·A及以上变压器和40MVar及以上的电抗器的装卸及运输，应对运输路径及两端装卸条件作充分调查，制定施工安全技术措施，并应符合下列规定："),
+        ("1", "水路运输时，应做好下列工作："),
+        ("4.1.2", "变压器或电抗器的装卸应符合下列规定："),
+        ("1", "装卸站台、码头等地点的地面应坚实。"),
+    ]
+    assert normalized[1]["text"].startswith("31.5MV·A及以上变压器和40MVar及以上的电抗器的装卸及运输")
+
+
 def test_normalize_sections_for_processing_repairs_prefixed_embedded_first_clause() -> None:
     sections = [
         {

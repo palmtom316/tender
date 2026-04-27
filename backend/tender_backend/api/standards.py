@@ -483,7 +483,10 @@ async def get_standard_pdf(
     if not file_meta or not file_meta.get("storage_key"):
         raise HTTPException(status_code=404, detail="Standard source PDF not found")
 
-    file_path = _storage.resolve_local_path(str(file_meta["storage_key"]))
+    file_path = _storage.resolve_local_path(
+        str(file_meta["storage_key"]),
+        filename=file_meta.get("filename"),
+    )
     if file_path is None:
         raise HTTPException(status_code=404, detail="Standard source PDF not found")
 

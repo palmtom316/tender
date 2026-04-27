@@ -76,6 +76,26 @@ function formatRawPreview(value: unknown): string {
   }
 }
 
+function buildSafeTableHtml(value: string | null | undefined): string | null {
+  const rawHtml = value?.trim();
+  if (!rawHtml) return null;
+  if (typeof DOMParser === "undefined") return rawHtml;
+
+  const document = new DOMParser().parseFromString(rawHtml, "text/html");
+  document.querySelectorAll("script, style, iframe, object, embed").forEach((node) => node.remove());
+  document.querySelectorAll("*").forEach((element) => {
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on") || name === "style") {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  });
+
+  const table = document.querySelector("table");
+  return table?.outerHTML ?? rawHtml;
+}
+
 function normalizeSourceLabel(value: string | null | undefined): string | null {
   if (!value) return null;
   return value.replace(/^表格[:：]\s*/u, "").trim() || null;
@@ -574,10 +594,15 @@ export function StandardViewerModal({
                                     <strong>{table.table_title ?? "未命名表格"}</strong>
                                     <span>{formatPageRange(table.page_start ?? table.page, table.page_end ?? table.page)}</span>
                                   </div>
-                                  {table.table_html && (
-                                    <p className="standard-viewer-modal__asset-text">
-                                      HTML 预览：{clampText(cleanStandardClauseText(table.table_html.replace(/\s+/g, " ")), 220)}
-                                    </p>
+                                  {table.table_html ? (
+                                    <div className="standard-viewer-modal__table-wrap">
+                                      <div
+                                        className="standard-viewer-modal__table-html"
+                                        dangerouslySetInnerHTML={{ __html: buildSafeTableHtml(table.table_html) ?? "" }}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <p className="standard-viewer-modal__asset-text">该表格暂无可渲染的 HTML 内容。</p>
                                   )}
                                   <details className="standard-viewer-modal__document-raw">
                                     <summary>查看原始解析数据</summary>

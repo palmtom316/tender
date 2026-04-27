@@ -35,6 +35,28 @@ def test_validate_clauses_detects_numbering_and_hierarchy_issues() -> None:
     assert "numbering.missing_parent" in codes
 
 
+def test_validate_clauses_keeps_starting_gap_detection_for_missing_first_child() -> None:
+    result = validate_clauses([
+        _clause(clause_no="4.1.2", clause_text="变压器或电抗器的装卸应符合下列规定："),
+        _clause(clause_no="4.1.3", clause_text="后续条文"),
+    ])
+
+    assert any(issue.code == "numbering.gap" and issue.clause_no == "4.1.2" for issue in result.issues)
+
+
+def test_validate_clauses_ignores_internal_gap_when_adjacent_clauses_embed_explicit_numbers() -> None:
+    result = validate_clauses([
+        _clause(clause_no="7.5.1", clause_text="7.5.1拉线盘的埋设深度和方向，应符合设计要求。"),
+        _clause(clause_no="7.5.2", clause_text="7.5.2拉线的安装应符合下列规定："),
+        _clause(clause_no="7.5.3", clause_text="7.5.3跨越道路的水平拉线与拉桩杆的安装应符合下列规定："),
+        _clause(clause_no="7.5.6", clause_text="7.5.6对一般杆塔的拉线应及时进行调整收紧。"),
+        _clause(clause_no="7.5.8", clause_text="7.5.8拉线应避免设在通道处。"),
+        _clause(clause_no="7.5.9", clause_text="7.5.9顶(撑)杆的安装应符合下列规定："),
+    ])
+
+    assert not any(issue.code == "numbering.gap" for issue in result.issues)
+
+
 def test_validate_clauses_accepts_outline_parent_codes_for_hierarchy_checks() -> None:
     result = validate_clauses(
         [_clause(clause_no="4.8.8", clause_text="正文")],
