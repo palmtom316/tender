@@ -28,6 +28,7 @@ PHRASE_SPECS: tuple[tuple[str, str], ...] = (
 )
 
 _CLAUSE_NO_RE = re.compile(r"^\d+(?:\.\d+)*$")
+_CLAUSE_NO_PREFIX_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)(?=$|[\s（(：:，。；、\-－\u4e00-\u9fff])")
 _DOUBLE_DOT_NUMBER_RE = re.compile(r"\d+\.\.\d+")
 _INCOMPLETE_MPA_RE = re.compile(r"(?<!\d)\d+(?:\.\d+)?\s*MP\b")
 _REPEATED_PUNCT_RE = re.compile(r"[?？!！~～。]{2,}")
@@ -167,6 +168,21 @@ def _iter_source_refs(clause: dict) -> list[str]:
     return refs
 
 
+def _clause_embeds_own_number(clause: dict) -> bool:
+    clause_no = str(clause.get("clause_no") or "").strip()
+    if not clause_no:
+        return False
+
+    for value in (clause.get("clause_text"), clause.get("source_label"), clause.get("clause_title")):
+        text = str(value or "").strip()
+        if not text:
+            continue
+        match = _CLAUSE_NO_PREFIX_RE.match(text)
+        if match and str(match.group(1) or "").strip() == clause_no:
+            return True
+    return False
+
+
 def _validate_numbering(
     clauses: list[dict],
     result: ValidationResult,
@@ -225,6 +241,7 @@ def _validate_numbering(
             )
 
     last_segment_by_parent: dict[tuple[int, ...], int] = {}
+    last_clause_by_parent: dict[tuple[int, ...], dict] = {}
     for clause, parsed in parsed_sequence:
         parent_key = parsed[:-1]
         segment = parsed[-1]
@@ -238,9 +255,11 @@ def _validate_numbering(
                     details={"previous_segment": 0, "current_segment": segment},
                 )
             last_segment_by_parent[parent_key] = segment
+            last_clause_by_parent[parent_key] = clause
             continue
 
         previous = last_segment_by_parent[parent_key]
+        previous_clause = last_clause_by_parent[parent_key]
         if segment <= previous:
             _add_issue(
                 result,
@@ -250,6 +269,10 @@ def _validate_numbering(
                 details={"previous_segment": previous, "current_segment": segment},
             )
         elif segment - previous > 1:
+            if _clause_embeds_own_number(clause) and _clause_embeds_own_number(previous_clause):
+                last_segment_by_parent[parent_key] = segment
+                last_clause_by_parent[parent_key] = clause
+                continue
             _add_issue(
                 result,
                 clause,
@@ -259,6 +282,7 @@ def _validate_numbering(
             )
 
         last_segment_by_parent[parent_key] = segment
+        last_clause_by_parent[parent_key] = clause
 
 
 def _validate_page_anchors(clauses: list[dict], result: ValidationResult) -> None:

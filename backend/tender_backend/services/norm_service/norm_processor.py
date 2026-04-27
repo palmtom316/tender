@@ -50,7 +50,6 @@ from tender_backend.services.norm_service.skill_plugins import (
 )
 from tender_backend.services.norm_service.table_requirements import (
     deterministic_table_entries_from_block as build_table_requirement_entries,
-    is_sparse_table_block,
 )
 from tender_backend.services.norm_service.ast_merger import merge_repair_patches
 from tender_backend.services.norm_service.prompt_builder import build_prompt
@@ -82,7 +81,7 @@ def _get_pdf_path(conn: Connection, document_id: str) -> str | None:
     """Look up the local file path for a document's source PDF."""
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
-            """SELECT pf.storage_key
+            """SELECT pf.storage_key, pf.filename
                FROM document d
                JOIN project_file pf ON pf.id = d.project_file_id
                WHERE d.id = %s""",
@@ -91,7 +90,10 @@ def _get_pdf_path(conn: Connection, document_id: str) -> str | None:
     if not row:
         return None
 
-    resolved = _storage.resolve_local_path(row["storage_key"])
+    resolved = _storage.resolve_local_path(
+        row["storage_key"],
+        filename=row.get("filename"),
+    )
     return str(resolved) if resolved else None
 
 
@@ -130,15 +132,39 @@ def _scope_delay_seconds() -> float:
     return delay
 
 
+_SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS = {
+    "ff2ddb6c-ba8e-4e42-862f-e75d5824437a",
+    "ad9e7b99-6c94-48cf-8bd3-269314090b6e",
+}
+_SINGLE_STANDARD_BLOCK_EXPERIMENT_CODES = {
+    "GB501482010",
+}
+
+
+def _normalized_standard_code(value: object) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
 def _should_use_single_standard_block_path(
     profile: ParseProfile,
+    *,
+    standard: dict | None = None,
+    standard_id: UUID | None = None,
     sections: list[dict] | None = None,
 ) -> bool:
     if not profile.deterministic_block_parser:
         return False
     if sections is None:
         return True
-    return any(str(section.get("section_code") or "").strip() for section in sections)
+    if standard_id is not None and str(standard_id) in _SINGLE_STANDARD_BLOCK_EXPERIMENT_IDS:
+        return True
+    if standard is not None:
+        normalized_code = _normalized_standard_code(
+            standard.get("standard_code") or standard.get("code")
+        )
+        if normalized_code in _SINGLE_STANDARD_BLOCK_EXPERIMENT_CODES:
+            return True
+    return False
 
 
 def _build_profile_blocks(
@@ -960,10 +986,6 @@ def _should_extract_normative_block_deterministically(clause_no: str, text: str)
         return False
     if "." not in clause_no and not clause_no.startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ")):
         return False
-    if "." in clause_no or clause_no.startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ")):
-        return True
-    if clause_no.startswith("2.0."):
-        return True
     if len(normalized) > 140:
         return False
     if _DETERMINISTIC_LIST_SIGNAL_RE.search(normalized):
@@ -1423,18 +1445,6 @@ def _deterministic_inline_clause_entries_from_scope(
     if scope.scope_type not in {"normative", "commentary"}:
         return []
     effective_allowed_clause_nos = _effective_scope_clause_allowlist(scope, allowed_clause_nos)
-    scope_host = _scope_host_clause_no(scope)
-    if (
-        scope.scope_type == "normative"
-        and scope_host
-        and "." not in scope_host
-        and not scope_host.startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
-        and not any(
-            clause_no.startswith(f"{scope_host}.")
-            for clause_no in (effective_allowed_clause_nos or set())
-        )
-    ):
-        return []
 
     clause_candidates = _sorted_scope_clause_candidates(scope, allowed_clause_nos)
     normalized_text = _split_inline_scope_text_by_clause_candidates(
@@ -1461,14 +1471,15 @@ def _deterministic_inline_clause_entries_from_scope(
     source_ref = scope.source_refs[0] if scope.source_refs else None
     source_label = _canonical_scope_source_label(scope.chapter_label)
     first_clause_no = clause_starts[0][1]
-    host_entry = _host_entry_from_scope_label(
-        scope,
-        first_clause_no=first_clause_no,
-        source_ref=source_ref,
-        source_label=source_label,
-    )
-    if host_entry is not None:
-        entries.append(host_entry)
+    if len(clause_starts) > 1:
+        host_entry = _host_entry_from_scope_label(
+            scope,
+            first_clause_no=first_clause_no,
+            source_ref=source_ref,
+            source_label=source_label,
+        )
+        if host_entry is not None:
+            entries.append(host_entry)
 
     for offset, (start_index, clause_no, first_body) in enumerate(clause_starts):
         next_index = clause_starts[offset + 1][0] if offset + 1 < len(clause_starts) else len(lines)
@@ -1542,6 +1553,15 @@ def _supplement_scope_entries_with_deterministic_inline(
     ]
     if not missing_entries:
         return entries
+    scope_host = _scope_host_clause_no(scope)
+    if scope_host:
+        missing_non_host_entries = [
+            entry
+            for entry in missing_entries
+            if str(entry.get("clause_no") or "").strip() != scope_host
+        ]
+        if not missing_non_host_entries:
+            return entries
     return missing_entries + entries
 
 
@@ -1557,15 +1577,11 @@ def _should_supplement_direct_scope_entries(
     if block is not None and block.segment_type == "appendix_block":
         return False
     host_clause_no = _resolved_block_clause_no(block) if block is not None else _scope_host_clause_no(scope)
-    if not host_clause_no:
-        return False
-    return "." in host_clause_no or host_clause_no.startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+    return bool(host_clause_no)
 
 
 def _should_skip_block_for_ai(block: BlockSegment) -> bool:
     if block.segment_type in {"heading_only_block", "non_clause_block"}:
-        return True
-    if block.segment_type == "table_requirement_block" and is_sparse_table_block(block):
         return True
     if block.segment_type in {"commentary_block", "appendix_block"} and not block.text.strip():
         return True
@@ -1722,6 +1738,41 @@ def _next_related_clause_code(
     return None
 
 
+def _repair_compact_embedded_heading_from_next_clause(
+    line: str,
+    *,
+    parent_code: str,
+    next_clause_no: str | None,
+    seen_clause_nos: set[str],
+) -> str | None:
+    normalized_parent = str(parent_code or "").strip()
+    normalized_line = str(line or "").strip()
+    normalized_next = str(next_clause_no or "").strip()
+    if not normalized_parent or not normalized_line or not normalized_next:
+        return None
+    if not normalized_line.startswith(f"{normalized_parent}."):
+        return None
+    try:
+        next_segment = int(normalized_next.split(".")[-1])
+    except ValueError:
+        return None
+    if next_segment <= 1:
+        return None
+
+    inferred_clause_no = f"{normalized_parent}.{next_segment - 1}"
+    if inferred_clause_no in seen_clause_nos or not normalized_line.startswith(inferred_clause_no):
+        return None
+
+    remainder = normalized_line[len(inferred_clause_no):].strip()
+    if not remainder:
+        return None
+    if remainder[0] in "：:。；，、)]）":
+        return None
+    if not re.search(r"[\u4e00-\u9fffA-Za-z]", remainder):
+        return None
+    return f"{inferred_clause_no} {remainder}"
+
+
 def _repair_embedded_clause_candidate_lines(
     text_lines: list[str],
     parent_code: str,
@@ -1748,6 +1799,21 @@ def _repair_embedded_clause_candidate_lines(
                 seen_clause_nos.add(heading[0])
 
         compact_line = re.sub(r"\s+", "", line)
+        if normalized_parent and index + 1 < len(text_lines):
+            next_clause_no = _next_related_clause_code(text_lines, index + 1, normalized_parent)
+            repaired_compact_heading = _repair_compact_embedded_heading_from_next_clause(
+                line,
+                parent_code=normalized_parent,
+                next_clause_no=next_clause_no,
+                seen_clause_nos=seen_clause_nos,
+            )
+            if repaired_compact_heading is not None:
+                repaired.append(repaired_compact_heading)
+                inferred_clause_no = repaired_compact_heading.split(" ", 1)[0]
+                seen_clause_nos.add(inferred_clause_no)
+                index += 1
+                continue
+
         if (
             normalized_parent
             and index + 1 < len(text_lines)
@@ -2433,6 +2499,8 @@ def _collect_outline_clause_nos(sections: list[dict]) -> set[str]:
     for section in sections:
         raw_code = section.get("section_code")
         if raw_code is None:
+            if str(section.get("text") or "").strip():
+                continue
             code = extract_leading_clause_no(str(section.get("title") or "").strip(), profile=CN_GB_PROFILE) or ""
         else:
             code = str(raw_code).strip()
@@ -2996,7 +3064,12 @@ def process_standard_ai(
             active_skill_names=active_skill_names,
         ))
         profile = resolve_standard_profile(standard, document_asset)
-        use_single_standard_block_path = _should_use_single_standard_block_path(profile, raw_sections)
+        use_single_standard_block_path = _should_use_single_standard_block_path(
+            profile,
+            standard=standard,
+            standard_id=standard_id,
+            sections=raw_sections,
+        )
         sections = _normalize_sections_for_processing(raw_sections)
         if not sections:
             raise ValueError("No normalized sections available for processing")
@@ -3044,6 +3117,7 @@ def process_standard_ai(
         all_entries: list[dict] = list(deterministic_entries)
         ai_artifacts: list[AiResponseArtifact] = []
         ai_fallback_count = 0
+        deterministic_candidate_block_count = 0
         for i, scope in enumerate(scopes):
             current_block = blocks[i] if use_single_standard_block_path else None
             if current_block is not None and _should_skip_block_for_ai(current_block):
@@ -3057,7 +3131,7 @@ def process_standard_ai(
                 )
                 continue
 
-            direct_entries = (
+            raw_direct_entries = (
                 _deterministic_entries_from_block(
                     current_block,
                     table_strategy=profile.table_requirement_strategy,
@@ -3068,12 +3142,14 @@ def process_standard_ai(
                     table_strategy=profile.table_requirement_strategy,
                 )
             )
+            if current_block is not None and raw_direct_entries:
+                deterministic_candidate_block_count += 1
             direct_entries = _sanitize_scope_entries(
                 scope,
-                direct_entries,
+                raw_direct_entries,
                 allowed_clause_nos=known_clause_nos,
             )
-            if _should_supplement_direct_scope_entries(scope, current_block):
+            if raw_direct_entries and _should_supplement_direct_scope_entries(scope, current_block):
                 direct_entries = _supplement_scope_entries_with_deterministic_inline(
                     scope,
                     direct_entries,
@@ -3098,12 +3174,16 @@ def process_standard_ai(
                 chapter=scope.chapter_label,
             )
 
-            ai_fallback_count += 1
+            if current_block is not None and raw_direct_entries:
+                ai_fallback_count += 1
             entries = _process_scope_collecting_artifacts(
                 conn,
                 scope,
                 ai_artifacts=ai_artifacts,
             )
+            for entry in entries:
+                if isinstance(entry, dict):
+                    _apply_scope_defaults(entry, scope)
             entries = _sanitize_scope_entries(
                 scope,
                 entries,
@@ -3176,7 +3256,7 @@ def process_standard_ai(
             warnings=combined_warnings,
             executed_skills=_serialize_executed_skills(executed_skills),
             ai_fallback_count=ai_fallback_count,
-            total_parser_block_count=len(scopes) if use_single_standard_block_path else 0,
+            total_parser_block_count=deterministic_candidate_block_count,
             max_ai_fallback_ratio=float(
                 profile.quality_thresholds.get("max_ai_fallback_ratio", 0.15)
             ),

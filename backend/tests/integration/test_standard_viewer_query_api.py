@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -672,6 +672,40 @@ def test_get_standard_pdf_streams_uploaded_pdf(client: TestClient, tmp_path: Pat
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/pdf")
     assert response.content == seeded["pdf_bytes"].encode("latin1")
+
+
+def test_get_standard_pdf_falls_back_to_filename_when_storage_key_is_container_path(
+    client: TestClient,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_url = _db_url()
+    assert db_url is not None
+    seeded = _seed_standard(
+        db_url=db_url,
+        tmp_path=tmp_path,
+        filename="GB 50148-2010 电气装置安装工程电力变压器、油浸电抗器、互感器施工及验收规范.pdf",
+    )
+
+    fallback_dir = tmp_path / "fallback-pdfs"
+    fallback_dir.mkdir()
+    fallback_pdf = fallback_dir / "GB 50148-2010 电气装置安装工程 电力变压器、油浸电抗器、互感器施工及验收规范.pdf"
+    fallback_bytes = b"%PDF-1.7 fallback"
+    fallback_pdf.write_bytes(fallback_bytes)
+    monkeypatch.setenv("STANDARD_PDF_FALLBACK_DIRS", str(fallback_dir))
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute(
+            "UPDATE project_file SET storage_key = %s WHERE id = %s",
+            ("/workspace/data/standards/missing-upload.pdf", UUID(seeded["project_file_id"])),
+        )
+        conn.commit()
+
+    response = client.get(f"/api/standards/{seeded['standard_id']}/pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.content == fallback_bytes
 
 
 def test_standard_search_returns_enriched_hits_with_db_fallback(

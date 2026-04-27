@@ -602,6 +602,39 @@
   font-size: var(--text-sm);
 }
 
+.standard-viewer-modal__table-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(120, 104, 84, 0.12);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.standard-viewer-modal__table-html table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.standard-viewer-modal__table-html th,
+.standard-viewer-modal__table-html td {
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 104, 84, 0.14);
+  vertical-align: top;
+  text-align: left;
+  line-height: 1.55;
+}
+
+.standard-viewer-modal__table-html th {
+  background: rgba(226, 176, 79, 0.14);
+  font-weight: 700;
+}
+
+.standard-viewer-modal__table-html tr:nth-child(even) td {
+  background: rgba(120, 104, 84, 0.04);
+}
+
 .standard-viewer-modal__asset-raw {
   margin: 0;
   padding: var(--space-3);

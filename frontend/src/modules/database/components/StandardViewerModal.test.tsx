@@ -189,7 +189,9 @@ describe("StandardViewerModal diagnostics", () => {
     expect(screen.getByText("4.2.3 混凝土强度等级")).toBeInTheDocument();
     expect(screen.queryByText("4.2.2 钢筋保护层")).not.toBeInTheDocument();
     expect(screen.getByText("text_source: mineru_markdown · sort_order: 2")).toBeInTheDocument();
-    expect(screen.getByText(/HTML 预览：.*C30/)).toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByText("C30")).toBeInTheDocument();
+    expect(screen.queryByText(/HTML 预览/u)).not.toBeInTheDocument();
     expect(screen.queryByText("钢筋保护层厚度")).not.toBeInTheDocument();
     expect(screen.getAllByText("查看原始解析数据")).toHaveLength(2);
     expect(screen.getByText(/section-hit-raw/)).not.toBeVisible();

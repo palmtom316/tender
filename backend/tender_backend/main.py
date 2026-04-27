@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from tender_backend.core.threadpool_compat import apply_threadpool_compat
@@ -33,7 +35,13 @@ def create_app() -> FastAPI:
     json_logs = settings.app_env != "development"
     setup_logging(json_output=json_logs)
 
-    app = FastAPI(title=settings.app_name, version=settings.version)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if settings.database_url:
+            ensure_standard_processing_scheduler_started()
+        yield
+
+    app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
     app.add_middleware(RequestContextMiddleware)
     app.include_router(health_router, prefix=settings.api_prefix)
     app.include_router(projects_router, prefix=settings.api_prefix)
@@ -51,11 +59,6 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(users_router, prefix=settings.api_prefix)
     app.include_router(standards_router, prefix=settings.api_prefix)
-
-    @app.on_event("startup")
-    def _start_standard_processing_scheduler() -> None:
-        if settings.database_url:
-            ensure_standard_processing_scheduler_started()
 
     return app
 

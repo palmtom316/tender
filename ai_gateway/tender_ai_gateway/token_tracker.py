@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class TokenRecord:
     output_tokens: int
     estimated_cost: float
     latency_ms: int
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
