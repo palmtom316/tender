@@ -11,6 +11,7 @@ import type {
   TemplateFieldMappingMode,
   TemplateFieldMappingSuggestionGroup,
   TemplateItem,
+  TemplatePackageCategory,
   TemplatePackageRenderContextItem,
   TemplateSelectionMode,
   TemplateSourceType,
@@ -23,6 +24,7 @@ import {
   fetchTemplateItemRenderContext,
   fetchTemplatePackageDetail,
   fetchTemplatePackageRenderContext,
+  listTemplatePackageCategories,
   listTemplatePackages,
   updateTemplateBindingRule,
 } from "../../../lib/api";
@@ -207,15 +209,21 @@ function summarizeSuggestion(group: TemplateFieldMappingSuggestionGroup): string
 
 export function TemplateFieldWorkbench() {
   const queryClient = useQueryClient();
+  const [selectedCategoryCode, setSelectedCategoryCode] = useState<string>("");
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [selectedBindingId, setSelectedBindingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<BindingDraft>(createEmptyDraft(null));
   const [saveError, setSaveError] = useState("");
 
+  const categoriesQuery = useQuery({
+    queryKey: ["template-package-categories"],
+    queryFn: () => listTemplatePackageCategories(),
+  });
+
   const packagesQuery = useQuery({
-    queryKey: ["template-packages"],
-    queryFn: () => listTemplatePackages(),
+    queryKey: ["template-packages", selectedCategoryCode],
+    queryFn: () => listTemplatePackages({ categoryCode: selectedCategoryCode || undefined }),
   });
 
   const packageDetailQuery = useQuery({
@@ -249,8 +257,13 @@ export function TemplateFieldWorkbench() {
   });
 
   useEffect(() => {
-    if (!selectedPackageId && packagesQuery.data && packagesQuery.data.length > 0) {
-      setSelectedPackageId(packagesQuery.data[0].id);
+    const packages = packagesQuery.data ?? [];
+    if (packages.length === 0) {
+      setSelectedPackageId(null);
+      return;
+    }
+    if (!selectedPackageId || !packages.some((pkg) => pkg.id === selectedPackageId)) {
+      setSelectedPackageId(packages[0].id);
     }
   }, [packagesQuery.data, selectedPackageId]);
 
@@ -376,6 +389,7 @@ export function TemplateFieldWorkbench() {
 
   const itemContextPreview = prettyJson(itemContextQuery.data?.context ?? {});
   const itemBindingsPreview = prettyJson(itemContextQuery.data?.bindings ?? []);
+  const selectedCategory = (categoriesQuery.data ?? []).find((item) => item.code === selectedCategoryCode) ?? null;
 
   return (
     <div className="template-field-shell">
@@ -387,6 +401,24 @@ export function TemplateFieldWorkbench() {
               <h2>目录视图</h2>
             </div>
             <Badge variant="info">{packagesQuery.data?.length ?? 0}</Badge>
+          </div>
+          <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+            <label className="form-label">模板类别</label>
+            <select
+              className="clay-input"
+              value={selectedCategoryCode}
+              onChange={(event) => {
+                setSelectedCategoryCode(event.target.value);
+                setSelectedPackageId(null);
+                setSelectedItemId(null);
+                setSelectedBindingId(null);
+              }}
+            >
+              <option value="">全部模板类别</option>
+              {(categoriesQuery.data ?? []).map((category: TemplatePackageCategory) => (
+                <option key={category.code} value={category.code}>{category.display_name}</option>
+              ))}
+            </select>
           </div>
           {packagesQuery.isLoading && <div className="spinner" />}
           {packagesQuery.isError && <p className="text-error">{(packagesQuery.error as Error).message}</p>}
@@ -403,9 +435,16 @@ export function TemplateFieldWorkbench() {
                 }}
               >
                 <span className="template-list__title">{pkg.display_name}</span>
-                <span className="template-list__meta">{pkg.item_count} 个模板项</span>
+                <span className="template-list__meta">
+                  {(categoriesQuery.data ?? []).find((category) => category.code === pkg.category_code)?.display_name ?? "未分类"} / {pkg.item_count} 个模板项
+                </span>
               </button>
             ))}
+            {(packagesQuery.data?.length ?? 0) === 0 && (
+              <div className="template-strip-empty">
+                {selectedCategory ? `${selectedCategory.display_name} 下暂无模板包。` : "当前没有模板包。"}
+              </div>
+            )}
           </div>
         </section>
 
