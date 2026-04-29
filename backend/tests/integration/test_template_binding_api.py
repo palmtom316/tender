@@ -233,6 +233,11 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert package_render.json()["ready_item_count"] == 2
         assert package_render.json()["total_item_count"] == 2
 
+        rendered = client.post(f"/api/template-items/{basic_item_id}/render-docx")
+        assert rendered.status_code == 200
+        assert rendered.json()["ready"] is True
+        assert rendered.json()["output_path"].endswith(".docx")
+
         updated = client.put(
             f"/api/template-bindings/{binding2_id}",
             json={"selection_mode": "first"},

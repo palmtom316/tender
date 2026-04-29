@@ -17,6 +17,7 @@ from tender_backend.services.template_service.context_preview import (
     validate_selection_mode,
     validate_source_type,
 )
+from tender_backend.services.template_service.docx_renderer import render_template_item_docx
 
 
 router = APIRouter(tags=["template-bindings"])
@@ -157,6 +158,19 @@ async def get_item_render_context(template_item_id: UUID, conn: Connection = Dep
 async def get_package_render_context(package_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
     try:
         return build_package_render_context(conn, package_id=package_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/template-items/{template_item_id}/render-docx")
+async def render_template_item_docx_endpoint(
+    template_item_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> dict[str, object]:
+    try:
+        return render_template_item_docx(conn, item_id=template_item_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
