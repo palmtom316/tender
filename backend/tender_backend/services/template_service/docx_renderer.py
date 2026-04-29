@@ -241,6 +241,7 @@ def render_template_item_docx(
     *,
     item_id: UUID,
     output_dir: Path | None = None,
+    output_filename: str | None = None,
 ) -> dict[str, object]:
     repo = BidTemplatePackageRepository()
     item = repo.get_item_by_id(conn, item_id=item_id)
@@ -273,7 +274,7 @@ def render_template_item_docx(
 
     root = output_dir or _RENDER_ROOT
     root.mkdir(parents=True, exist_ok=True)
-    filename = _sanitize_filename(f"{item_code or 'item'}_{item.item_name}.docx")
+    filename = output_filename or _sanitize_filename(f"{item_code or 'item'}_{item.item_name}.docx")
     output_path = root / filename
     doc.save(str(output_path))
 

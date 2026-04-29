@@ -238,6 +238,29 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert rendered.json()["ready"] is True
         assert rendered.json()["output_path"].endswith(".docx")
 
+        bundle = client.post(
+            f"/api/template-packages/{package_id}/render-bundle",
+            json={"include_zip": False},
+        )
+        assert bundle.status_code == 200
+        bundle_body = bundle.json()
+        assert bundle_body["rendered_count"] == 2
+        assert bundle_body["failed_count"] == 0
+        assert Path(bundle_body["output_dir"]).exists()
+        assert bundle_body["items"][0]["output_path"].endswith(".docx")
+        assert Path(bundle_body["items"][0]["output_path"]).exists()
+        assert bundle_body["zip_path"] is None
+
+        zipped_bundle = client.post(
+            f"/api/template-packages/{package_id}/render-bundle",
+            json={"include_zip": True},
+        )
+        assert zipped_bundle.status_code == 200
+        zipped_body = zipped_bundle.json()
+        assert zipped_body["zip_path"] is not None
+        assert zipped_body["zip_path"].endswith(".zip")
+        assert Path(zipped_body["zip_path"]).exists()
+
         updated = client.put(
             f"/api/template-bindings/{binding2_id}",
             json={"selection_mode": "first"},

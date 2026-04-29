@@ -18,6 +18,7 @@ from tender_backend.services.template_service.context_preview import (
     validate_source_type,
 )
 from tender_backend.services.template_service.docx_renderer import render_template_item_docx
+from tender_backend.services.template_service.package_renderer import render_template_package_bundle
 
 
 router = APIRouter(tags=["template-bindings"])
@@ -55,6 +56,10 @@ class BindingRuleOut(BindingRuleBase):
     template_item_id: UUID
     created_at: str
     updated_at: str
+
+
+class RenderBundleBody(BaseModel):
+    include_zip: bool = False
 
 
 def _binding_out(row) -> BindingRuleOut:
@@ -171,6 +176,20 @@ async def render_template_item_docx_endpoint(
 ) -> dict[str, object]:
     try:
         return render_template_item_docx(conn, item_id=template_item_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/template-packages/{package_id}/render-bundle")
+async def render_template_package_bundle_endpoint(
+    package_id: UUID,
+    payload: RenderBundleBody,
+    conn: Connection = Depends(get_db_conn),
+) -> dict[str, object]:
+    try:
+        return render_template_package_bundle(conn, package_id=package_id, include_zip=payload.include_zip)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
