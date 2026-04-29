@@ -18,6 +18,8 @@ class BidTemplateBindingRuleRow:
     source_type: str
     selection_mode: str
     source_filters: dict[str, Any]
+    field_mappings: list[dict[str, Any]]
+    field_mapping_mode: str
     output_key: str
     required: bool
     sort_order: int
@@ -27,11 +29,11 @@ class BidTemplateBindingRuleRow:
 
 _COLUMNS = (
     "id, template_item_id, binding_name, source_type, selection_mode, "
-    "source_filters, output_key, required, sort_order, created_at, updated_at"
+    "source_filters, field_mappings, field_mapping_mode, output_key, required, sort_order, created_at, updated_at"
 )
 _ALIASED_COLUMNS = (
     "r.id, r.template_item_id, r.binding_name, r.source_type, r.selection_mode, "
-    "r.source_filters, r.output_key, r.required, r.sort_order, r.created_at, r.updated_at"
+    "r.source_filters, r.field_mappings, r.field_mapping_mode, r.output_key, r.required, r.sort_order, r.created_at, r.updated_at"
 )
 
 
@@ -43,6 +45,8 @@ def _to_row(row: dict[str, Any]) -> BidTemplateBindingRuleRow:
         source_type=row["source_type"],
         selection_mode=row["selection_mode"],
         source_filters=dict(row["source_filters"] or {}),
+        field_mappings=list(row["field_mappings"] or []),
+        field_mapping_mode=row["field_mapping_mode"],
         output_key=row["output_key"],
         required=row["required"],
         sort_order=row["sort_order"],
@@ -96,6 +100,8 @@ class BidTemplateBindingRepository:
         source_type: str,
         selection_mode: str,
         source_filters: dict[str, Any],
+        field_mappings: list[dict[str, Any]],
+        field_mapping_mode: str,
         output_key: str,
         required: bool,
         sort_order: int,
@@ -105,9 +111,9 @@ class BidTemplateBindingRepository:
                 f"""
                 INSERT INTO bid_template_binding_rule (
                   id, template_item_id, binding_name, source_type, selection_mode,
-                  source_filters, output_key, required, sort_order
+                  source_filters, field_mappings, field_mapping_mode, output_key, required, sort_order
                 )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s)
                 RETURNING {_COLUMNS}
                 """,
                 (
@@ -117,6 +123,8 @@ class BidTemplateBindingRepository:
                     source_type,
                     selection_mode,
                     json.dumps(source_filters or {}, ensure_ascii=False),
+                    json.dumps(field_mappings or [], ensure_ascii=False),
+                    field_mapping_mode,
                     output_key,
                     required,
                     sort_order,
@@ -132,6 +140,8 @@ class BidTemplateBindingRepository:
             "source_type",
             "selection_mode",
             "source_filters",
+            "field_mappings",
+            "field_mapping_mode",
             "output_key",
             "required",
             "sort_order",
@@ -142,9 +152,12 @@ class BidTemplateBindingRepository:
             if field not in fields:
                 continue
             value = fields[field]
-            if field == "source_filters":
+            if field in {"source_filters", "field_mappings"}:
                 sets.append(f"{field} = %s::jsonb")
-                values.append(json.dumps(value or {}, ensure_ascii=False))
+                if field == "source_filters":
+                    values.append(json.dumps(value or {}, ensure_ascii=False))
+                else:
+                    values.append(json.dumps(value or [], ensure_ascii=False))
             else:
                 sets.append(f"{field} = %s")
                 values.append(value)

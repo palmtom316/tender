@@ -54,6 +54,8 @@ def _apply_schema(conn: psycopg.Connection) -> None:
       source_type VARCHAR(64) NOT NULL,
       selection_mode VARCHAR(32) NOT NULL DEFAULT 'all',
       source_filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+      field_mappings JSONB NOT NULL DEFAULT '[]'::jsonb,
+      field_mapping_mode VARCHAR(16) NOT NULL DEFAULT 'augment',
       output_key TEXT NOT NULL,
       required BOOLEAN NOT NULL DEFAULT TRUE,
       sort_order INT NOT NULL DEFAULT 0,
@@ -158,6 +160,14 @@ def _apply_schema(conn: psycopg.Connection) -> None:
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     """)
+    conn.execute("""
+    ALTER TABLE bid_template_binding_rule
+      ADD COLUMN IF NOT EXISTS field_mappings JSONB NOT NULL DEFAULT '[]'::jsonb;
+    """)
+    conn.execute("""
+    ALTER TABLE bid_template_binding_rule
+      ADD COLUMN IF NOT EXISTS field_mapping_mode VARCHAR(16) NOT NULL DEFAULT 'augment';
+    """)
     conn.commit()
 
 
@@ -249,6 +259,10 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
                 "binding_name": "company_basic",
                 "source_type": "company_profile",
                 "selection_mode": "latest",
+                "field_mappings": [
+                    {"target_field": "company_title", "source_field": "company_name"},
+                    {"target_field": "contact_summary", "source_fields": ["contact_name", "contact_phone"], "transform": "join", "join_with": " / "},
+                ],
                 "output_key": "company",
             },
         )
@@ -285,6 +299,8 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert preview.status_code == 200
         body = preview.json()
         assert body["items"][0]["bindings"][0]["data"]["company_name"] == "REDACTED"
+        assert body["items"][0]["bindings"][0]["data"]["company_title"] == "REDACTED"
+        assert body["items"][0]["bindings"][0]["data"]["contact_summary"] == "王莉莉"
         assert body["items"][1]["bindings"][0]["matched_count"] == 1
         assert body["items"][2]["bindings"][0]["matched_count"] == 1
 
@@ -292,6 +308,8 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert item_render.status_code == 200
         assert item_render.json()["ready"] is True
         assert item_render.json()["context"]["company"]["company_name"] == "REDACTED"
+        assert item_render.json()["context"]["company"]["company_title"] == "REDACTED"
+        assert item_render.json()["bindings"][0]["field_mapping_mode"] == "augment"
 
         package_render = client.get(f"/api/template-packages/{package_id}/render-context")
         assert package_render.status_code == 200

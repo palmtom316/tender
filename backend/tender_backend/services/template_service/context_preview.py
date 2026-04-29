@@ -22,6 +22,8 @@ _VALID_SOURCE_TYPES = {
     "evidence_asset",
 }
 _VALID_SELECTION_MODES = {"all", "latest", "first", "by_id"}
+_VALID_FIELD_MAPPING_MODES = {"augment", "replace"}
+_VALID_FIELD_MAPPING_TRANSFORMS = {"copy", "join", "date", "number"}
 
 
 def validate_source_type(value: str) -> str:
@@ -34,6 +36,32 @@ def validate_selection_mode(value: str) -> str:
     if value not in _VALID_SELECTION_MODES:
         raise ValueError(f"Unsupported selection_mode: {value}")
     return value
+
+
+def validate_field_mapping_mode(value: str) -> str:
+    if value not in _VALID_FIELD_MAPPING_MODES:
+        raise ValueError(f"Unsupported field_mapping_mode: {value}")
+    return value
+
+
+def validate_field_mappings(mappings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            raise ValueError("field_mappings must contain objects")
+        target_field = str(mapping.get("target_field") or "").strip()
+        if not target_field:
+            raise ValueError("field_mappings.target_field is required")
+        transform = str(mapping.get("transform") or "copy")
+        if transform not in _VALID_FIELD_MAPPING_TRANSFORMS:
+            raise ValueError(f"Unsupported field_mapping transform: {transform}")
+        source_field = str(mapping.get("source_field") or "").strip()
+        source_fields = mapping.get("source_fields")
+        if transform == "join":
+            if not isinstance(source_fields, list) or not source_fields:
+                raise ValueError("join field mapping requires source_fields")
+        elif not source_field:
+            raise ValueError("field mapping requires source_field")
+    return mappings
 
 
 def _normalize_value(value: Any) -> Any:
@@ -107,6 +135,102 @@ def _load_source_rows(conn: Connection, *, source_type: str) -> list[dict[str, A
     return [_normalize_value(row) for row in rows]
 
 
+def _get_nested_value(record: dict[str, Any], path: str) -> Any:
+    current: Any = record
+    for part in path.split("."):
+        if isinstance(current, dict):
+            current = current.get(part)
+        else:
+            return None
+    return current
+
+
+def _coerce_date_text(value: Any, output_format: str | None) -> Any:
+    if value in {None, ""}:
+        return value
+    raw = str(value)
+    normalized = raw.split("T", 1)[0]
+    if output_format in {None, "", "%Y-%m-%d"}:
+        return normalized
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(f"{normalized}T00:00:00")
+        except ValueError:
+            return normalized
+    return parsed.strftime(output_format)
+
+
+def _coerce_number_text(value: Any, decimals: int | None) -> Any:
+    if value in {None, ""}:
+        return value
+    if isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        try:
+            number = float(str(value))
+        except ValueError:
+            return value
+    if decimals is None:
+        if number.is_integer():
+            return str(int(number))
+        return str(number)
+    return f"{number:.{decimals}f}"
+
+
+def _apply_field_mapping_to_record(
+    record: dict[str, Any],
+    mappings: list[dict[str, Any]],
+    *,
+    mode: str,
+) -> dict[str, Any]:
+    base = {} if mode == "replace" else dict(record)
+    for mapping in mappings:
+        target_field = str(mapping["target_field"]).strip()
+        transform = str(mapping.get("transform") or "copy")
+        default_value = mapping.get("default_value")
+        if transform == "join":
+            raw_fields = mapping.get("source_fields") or []
+            values = [
+                _get_nested_value(record, str(field))
+                for field in raw_fields
+            ]
+            join_with = str(mapping.get("join_with") or "")
+            non_empty = [str(value) for value in values if value not in {None, ""}]
+            value = join_with.join(non_empty)
+        else:
+            value = _get_nested_value(record, str(mapping.get("source_field") or ""))
+            if transform == "date":
+                value = _coerce_date_text(value, mapping.get("date_format"))
+            elif transform == "number":
+                decimals = mapping.get("decimals")
+                value = _coerce_number_text(value, decimals if isinstance(decimals, int) else None)
+        if value in {None, ""} and "default_value" in mapping:
+            value = default_value
+        base[target_field] = value
+    return base
+
+
+def _apply_field_mappings(
+    data: Any,
+    mappings: list[dict[str, Any]],
+    *,
+    mode: str,
+) -> Any:
+    if not mappings:
+        return data
+    if isinstance(data, dict):
+        return _apply_field_mapping_to_record(data, mappings, mode=mode)
+    if isinstance(data, list):
+        return [
+            _apply_field_mapping_to_record(item, mappings, mode=mode)
+            if isinstance(item, dict) else item
+            for item in data
+        ]
+    return data
+
+
 def _resolve_binding_payloads(
     conn: Connection,
     *,
@@ -118,22 +242,28 @@ def _resolve_binding_payloads(
     for binding in bindings:
         source_type = validate_source_type(binding.source_type)
         selection_mode = validate_selection_mode(binding.selection_mode)
+        field_mapping_mode = validate_field_mapping_mode(binding.field_mapping_mode)
+        field_mappings = validate_field_mappings(binding.field_mappings)
         if source_type not in cache:
             cache[source_type] = _load_source_rows(conn, source_type=source_type)
         filtered = [
             record for record in cache[source_type]
             if _matches_filters(record, binding.source_filters)
         ]
+        selected = _select_records(filtered, selection_mode)
+        mapped = _apply_field_mappings(selected, field_mappings, mode=field_mapping_mode)
         resolved_bindings.append({
             "binding_id": str(binding.id),
             "binding_name": binding.binding_name,
             "source_type": source_type,
             "selection_mode": selection_mode,
+            "field_mappings": field_mappings,
+            "field_mapping_mode": field_mapping_mode,
             "output_key": binding.output_key,
             "required": binding.required,
             "filters": binding.source_filters,
             "matched_count": len(filtered),
-            "data": _select_records(filtered, selection_mode),
+            "data": mapped,
         })
     return resolved_bindings
 

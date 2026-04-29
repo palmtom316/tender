@@ -14,6 +14,8 @@ from tender_backend.services.template_service.context_preview import (
     build_item_render_context,
     build_package_context_preview,
     build_package_render_context,
+    validate_field_mapping_mode,
+    validate_field_mappings,
     validate_selection_mode,
     validate_source_type,
 )
@@ -32,6 +34,8 @@ class BindingRuleBase(BaseModel):
     source_type: str
     selection_mode: str = "all"
     source_filters: dict[str, Any] = Field(default_factory=dict)
+    field_mappings: list[dict[str, Any]] = Field(default_factory=list)
+    field_mapping_mode: str = "augment"
     output_key: str = Field(min_length=1)
     required: bool = True
     sort_order: int = 0
@@ -46,6 +50,8 @@ class BindingRuleUpdate(BaseModel):
     source_type: str | None = None
     selection_mode: str | None = None
     source_filters: dict[str, Any] | None = None
+    field_mappings: list[dict[str, Any]] | None = None
+    field_mapping_mode: str | None = None
     output_key: str | None = None
     required: bool | None = None
     sort_order: int | None = None
@@ -70,6 +76,8 @@ def _binding_out(row) -> BindingRuleOut:
         source_type=row.source_type,
         selection_mode=row.selection_mode,
         source_filters=row.source_filters,
+        field_mappings=row.field_mappings,
+        field_mapping_mode=row.field_mapping_mode,
         output_key=row.output_key,
         required=row.required,
         sort_order=row.sort_order,
@@ -84,6 +92,10 @@ def _validate_payload(payload: BindingRuleBase | BindingRuleUpdate) -> None:
         validate_source_type(raw["source_type"])
     if "selection_mode" in raw and raw["selection_mode"] is not None:
         validate_selection_mode(raw["selection_mode"])
+    if "field_mapping_mode" in raw and raw["field_mapping_mode"] is not None:
+        validate_field_mapping_mode(raw["field_mapping_mode"])
+    if "field_mappings" in raw and raw["field_mappings"] is not None:
+        validate_field_mappings(raw["field_mappings"])
 
 
 @router.get("/template-items/{template_item_id}/bindings", response_model=list[BindingRuleOut])
