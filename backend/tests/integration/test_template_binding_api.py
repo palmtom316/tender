@@ -223,6 +223,16 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert body["items"][0]["bindings"][0]["data"]["company_name"] == "REDACTED"
         assert body["items"][1]["bindings"][0]["matched_count"] == 1
 
+        item_render = client.get(f"/api/template-items/{basic_item_id}/render-context")
+        assert item_render.status_code == 200
+        assert item_render.json()["ready"] is True
+        assert item_render.json()["context"]["company"]["company_name"] == "REDACTED"
+
+        package_render = client.get(f"/api/template-packages/{package_id}/render-context")
+        assert package_render.status_code == 200
+        assert package_render.json()["ready_item_count"] == 2
+        assert package_render.json()["total_item_count"] == 2
+
         updated = client.put(
             f"/api/template-bindings/{binding2_id}",
             json={"selection_mode": "first"},

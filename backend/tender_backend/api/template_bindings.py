@@ -11,7 +11,9 @@ from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_template_binding_repo import BidTemplateBindingRepository
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import (
+    build_item_render_context,
     build_package_context_preview,
+    build_package_render_context,
     validate_selection_mode,
     validate_source_type,
 )
@@ -135,6 +137,26 @@ async def delete_binding_rule(rule_id: UUID, conn: Connection = Depends(get_db_c
 async def get_package_context_preview(package_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
     try:
         return build_package_context_preview(conn, package_id=package_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/template-items/{template_item_id}/render-context")
+async def get_item_render_context(template_item_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
+    try:
+        return build_item_render_context(conn, item_id=template_item_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/template-packages/{package_id}/render-context")
+async def get_package_render_context(package_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
+    try:
+        return build_package_render_context(conn, package_id=package_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
