@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
+from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.package_importer import (
@@ -13,7 +14,7 @@ from tender_backend.services.template_service.package_importer import (
 )
 
 
-router = APIRouter(tags=["template-packages"])
+router = APIRouter(tags=["template-packages"], dependencies=[Depends(get_current_user)])
 
 _repo = BidTemplatePackageRepository()
 
@@ -116,10 +117,7 @@ async def list_template_packages(
     packages = _repo.list_all(conn)
     if category_code:
         packages = [package for package in packages if package.category_code == category_code]
-    items_by_package = {
-        package.id: len(_repo.list_items(conn, package_id=package.id))
-        for package in packages
-    }
+    items_by_package = _repo.count_items_by_package(conn, package_ids=[package.id for package in packages])
     return [
         TemplatePackageOut(
             id=package.id,
@@ -128,7 +126,7 @@ async def list_template_packages(
             package_type=package.package_type,
             category_code=package.category_code,
             source_root=package.source_root,
-            item_count=items_by_package[package.id],
+            item_count=items_by_package.get(package.id, 0),
         )
         for package in packages
     ]

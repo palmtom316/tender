@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,6 +9,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_prefix: str = "/api"
     database_url: str | None = None
+    evidence_upload_dir: Path = Path(__file__).resolve().parents[2] / "data" / "master_data_assets"
+    evidence_upload_max_bytes: int = 50 * 1024 * 1024
+    template_render_root: Path = Path("/tmp/tender_template_renders")
+    template_bundle_root: Path = Path("/tmp/tender_template_bundles")
     standard_ocr_worker_count: int = 1
     standard_mineru_model_version: str = "vlm"
     standard_mineru_language: str = "ch"
@@ -29,6 +34,7 @@ class Settings(BaseSettings):
     vl_repair_page_dpi: int = 200
     vl_repair_page_delay_ms: int = 0
     vl_repair_ai_gateway_timeout_seconds: float = 300.0
+    template_import_roots: str = ""
     version: str = "0.1.0"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

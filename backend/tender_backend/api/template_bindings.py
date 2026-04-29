@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
+from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_template_binding_repo import BidTemplateBindingRepository
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
@@ -21,10 +22,13 @@ from tender_backend.services.template_service.context_preview import (
     validate_source_type,
 )
 from tender_backend.services.template_service.docx_renderer import render_template_item_docx
-from tender_backend.services.template_service.package_renderer import render_template_package_bundle
+from tender_backend.services.template_service.package_renderer import (
+    preflight_template_package_bundle,
+    render_template_package_bundle,
+)
 
 
-router = APIRouter(tags=["template-bindings"])
+router = APIRouter(tags=["template-bindings"], dependencies=[Depends(get_current_user)])
 
 _bindings = BidTemplateBindingRepository()
 _packages = BidTemplatePackageRepository()
@@ -186,6 +190,16 @@ async def get_item_field_mapping_suggestions(template_item_id: UUID, conn: Conne
 async def get_package_render_context(package_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
     try:
         return build_package_render_context(conn, package_id=package_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/template-packages/{package_id}/render-preflight")
+async def get_package_render_preflight(package_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
+    try:
+        return preflight_template_package_bundle(conn, package_id=package_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

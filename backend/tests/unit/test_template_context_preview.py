@@ -5,6 +5,7 @@ from tender_backend.services.template_service.context_preview import (
     _build_render_context_from_bindings,
     _matches_filters,
     _select_records,
+    _suggest_field_mapping_group,
     suggest_field_mappings,
     validate_field_mapping_mode,
     validate_field_mappings,
@@ -26,11 +27,50 @@ def test_matches_filters_supports_equals_contains_and_record_ids() -> None:
 
 
 def test_select_records_handles_all_latest_first_and_by_id() -> None:
-    records = [{"id": "1"}, {"id": "2"}]
+    records = [
+        {"id": "1", "created_at": "2024-01-01T00:00:00"},
+        {"id": "2", "created_at": "2024-02-01T00:00:00"},
+    ]
     assert _select_records(records, "all") == records
-    assert _select_records(records, "latest") == {"id": "1"}
-    assert _select_records(records, "first") == {"id": "1"}
-    assert _select_records(records, "by_id") == {"id": "1"}
+    assert _select_records(records, "latest", source_type="company_profile") == {"id": "2", "created_at": "2024-02-01T00:00:00"}
+    assert _select_records(records, "first") == {"id": "1", "created_at": "2024-01-01T00:00:00"}
+    assert _select_records(records, "by_id", filters={"record_ids": ["2", "1"]}) == {
+        "id": "2",
+        "created_at": "2024-02-01T00:00:00",
+    }
+
+
+def test_select_records_latest_uses_source_specific_sort_keys() -> None:
+    performances = [
+        {"id": "p1", "ended_on": "2024-03-01", "started_on": "2023-01-01"},
+        {"id": "p2", "ended_on": "2024-06-01", "started_on": "2022-01-01"},
+    ]
+    certificates = [
+        {"id": "c1", "valid_to": "2025-12-31", "valid_from": "2023-01-01"},
+        {"id": "c2", "valid_to": "2027-12-31", "valid_from": "2024-01-01"},
+    ]
+    financials = [
+        {"id": "f1", "fiscal_year": 2022, "updated_at": "2024-01-01T00:00:00"},
+        {"id": "f2", "fiscal_year": 2024, "updated_at": "2023-01-01T00:00:00"},
+    ]
+    evidence_assets = [
+        {"id": "e1", "issued_on": "2024-01-01", "sort_order": 10},
+        {"id": "e2", "issued_on": "2024-05-01", "sort_order": 1},
+    ]
+
+    assert _select_records(performances, "latest", source_type="project_performance") == performances[1]
+    assert _select_records(certificates, "latest", source_type="qualification_certificate") == certificates[1]
+    assert _select_records(financials, "latest", source_type="financial_statement") == financials[1]
+    assert _select_records(evidence_assets, "latest", source_type="evidence_asset") == evidence_assets[1]
+
+
+def test_select_records_by_id_requires_record_ids() -> None:
+    try:
+        _select_records([{"id": "1"}], "by_id", filters={})
+    except ValueError as exc:
+        assert "record_ids" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 def test_selection_and_source_validation_reject_unknown_values() -> None:
@@ -140,3 +180,13 @@ def test_suggest_field_mappings_returns_item_specific_presets() -> None:
 
     performances = suggest_field_mappings(item_name="业绩情况", item_code="5", source_type="project_performance")
     assert any(mapping["target_field"] == "project_title" for mapping in performances)
+
+
+def test_suggest_field_mapping_group_exposes_confidence() -> None:
+    group = _suggest_field_mapping_group(
+        item_name="基本情况表",
+        item_code="5.1",
+        source_type="company_profile",
+    )
+    assert group["confidence"] > 0.8
+    assert group["field_mapping_mode"] == "augment"

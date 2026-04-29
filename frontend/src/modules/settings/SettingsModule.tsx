@@ -3,6 +3,7 @@ import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { Icon } from "../../components/ui/Icon";
 import {
   fetchAgentConfigs,
@@ -66,6 +67,7 @@ function UserManagement() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
+  const [pendingDeleteUser, setPendingDeleteUser] = useState<SystemUser | null>(null);
 
   const loadUsers = async (signal?: AbortSignal) => {
     try {
@@ -99,7 +101,6 @@ function UserManagement() {
   };
 
   const handleDelete = async (userId: string) => {
-    if (!confirm("确定删除该用户？")) return;
     try {
       await deleteUser(userId);
       setUsers((prev) => prev.filter((u) => u.id !== userId));
@@ -167,7 +168,7 @@ function UserManagement() {
                 <button
                   className="user-menu-item user-menu-danger"
                   style={{ padding: "var(--space-1) var(--space-2)", width: "auto" }}
-                  onClick={() => handleDelete(user.id)}
+                  onClick={() => setPendingDeleteUser(user)}
                   title="删除"
                 >
                   <Icon name="trash" size={16} />
@@ -177,6 +178,19 @@ function UserManagement() {
           </Card>
         ))}
       </div>
+      <ConfirmDialog
+        open={pendingDeleteUser !== null}
+        title="删除用户"
+        description={pendingDeleteUser ? `确定删除用户“${pendingDeleteUser.display_name}”吗？` : "确定删除该用户吗？"}
+        confirmLabel="确认删除"
+        onCancel={() => setPendingDeleteUser(null)}
+        onConfirm={() => {
+          const user = pendingDeleteUser;
+          if (!user) return;
+          setPendingDeleteUser(null);
+          void handleDelete(user.id);
+        }}
+      />
     </div>
   );
 }
@@ -505,6 +519,7 @@ function SkillsSettings() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingSkill, setEditingSkill] = useState<SkillDefinition | null>(null);
+  const [pendingDeleteSkillName, setPendingDeleteSkillName] = useState<string | null>(null);
 
   const loadSkills = async (signal?: AbortSignal) => {
     try {
@@ -556,7 +571,6 @@ function SkillsSettings() {
   };
 
   const handleDelete = async (skillName: string) => {
-    if (!confirm(`确定删除 skill “${skillName}”？`)) return;
     try {
       await deleteSkillDefinition(skillName);
       setSkills((prev) => prev.filter((item) => item.skill_name !== skillName));
@@ -651,7 +665,7 @@ function SkillsSettings() {
                 </ClayButton>
                 <ClayButton
                   size="sm"
-                  onClick={() => handleDelete(skill.skill_name)}
+                  onClick={() => setPendingDeleteSkillName(skill.skill_name)}
                 >
                   删除
                 </ClayButton>
@@ -660,6 +674,19 @@ function SkillsSettings() {
           </Card>
         ))}
       </div>
+      <ConfirmDialog
+        open={pendingDeleteSkillName !== null}
+        title="删除 Skill"
+        description={pendingDeleteSkillName ? `确定删除 skill “${pendingDeleteSkillName}”吗？` : "确定删除该 skill 吗？"}
+        confirmLabel="确认删除"
+        onCancel={() => setPendingDeleteSkillName(null)}
+        onConfirm={() => {
+          const skillName = pendingDeleteSkillName;
+          if (!skillName) return;
+          setPendingDeleteSkillName(null);
+          void handleDelete(skillName);
+        }}
+      />
     </div>
   );
 }

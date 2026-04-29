@@ -12,6 +12,11 @@ from enum import StrEnum
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
+from psycopg import Connection
+from psycopg.errors import UndefinedTable
+
+from tender_backend.db.deps import get_db_conn
+from tender_backend.db.repositories.user_repository import SessionRepository
 
 
 class Role(StrEnum):
@@ -51,6 +56,7 @@ def _load_token_map() -> dict[str, CurrentUser]:
 
 
 _token_map: dict[str, CurrentUser] | None = None
+_sessions = SessionRepository()
 
 
 def _get_token_map() -> dict[str, CurrentUser]:
@@ -60,16 +66,28 @@ def _get_token_map() -> dict[str, CurrentUser]:
     return _token_map
 
 
-def get_current_user(request: Request) -> CurrentUser:
+def get_current_user(request: Request, conn: Connection = Depends(get_db_conn)) -> CurrentUser:
     """Extract and validate Bearer token from Authorization header."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
     token = auth[7:]
-    user = _get_token_map().get(token)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return user
+    static_user = _get_token_map().get(token)
+    if static_user is not None:
+        return static_user
+
+    try:
+        session_user = _sessions.get_user_by_token(conn, token)
+    except UndefinedTable:
+        session_user = None
+    if session_user is not None:
+        try:
+            role = Role(session_user.role)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail="Invalid user role") from exc
+        return CurrentUser(token=token, role=role, display_name=session_user.display_name)
+
+    raise HTTPException(status_code=401, detail="Invalid token")
 
 
 def require_role(*allowed_roles: Role):

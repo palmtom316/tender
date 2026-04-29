@@ -13,6 +13,9 @@ from tender_backend.main import app
 from tender_backend.test_support.asgi_client import SyncASGIClient
 
 
+_AUTH_HEADERS = {"Authorization": "Bearer dev-token"}
+
+
 def _db_url() -> str | None:
     return os.environ.get("DATABASE_URL")
 
@@ -78,22 +81,27 @@ def _clear_settings_cache() -> None:
     get_settings.cache_clear()
 
 
-def test_import_and_list_template_packages(tmp_path: Path) -> None:
+def test_import_and_list_template_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_url = _db_url()
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
 
-    source_dir = tmp_path / "20258B商务文件"
+    import_root = tmp_path / "imports"
+    import_root.mkdir()
+    source_dir = import_root / "20258B商务文件"
     source_dir.mkdir()
     (source_dir / "1.商务偏差表.docx").write_bytes(b"docx")
     (source_dir / "5.1.基本情况表.docx").write_bytes(b"docx")
     (source_dir / "23.1.保证金明细表.docx").write_bytes(b"docx")
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    get_settings.cache_clear()
 
     with psycopg.connect(db_url) as conn:
         _apply_template_schema(conn)
         _reset_template_tables(conn)
 
     client = SyncASGIClient(app)
+    client.headers.update(_AUTH_HEADERS)
     try:
         response = client.post(
             "/api/template-packages/import",
@@ -114,6 +122,10 @@ def test_import_and_list_template_packages(tmp_path: Path) -> None:
         detail = client.get(f"/api/template-packages/{package_id}")
         assert detail.status_code == 200
         assert detail.json()["items"][2]["item_name"] == "保证金明细表"
+
+        anon_client = SyncASGIClient(app)
+        anon_response = anon_client.get("/api/template-packages")
+        assert anon_response.status_code == 401
     finally:
         client.close()
         with psycopg.connect(db_url) as conn:

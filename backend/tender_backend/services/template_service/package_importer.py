@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from tender_backend.core.config import get_settings
+from tender_backend.core.path_safety import ensure_path_within_roots, parse_root_list
 from tender_backend.db.repositories.bid_template_package_repo import (
     BidTemplateItemCreate,
     BidTemplatePackageRepository,
@@ -84,7 +86,12 @@ def _sort_key(path: Path) -> tuple[tuple[int, ...], str]:
 
 
 def build_template_items_from_directory(source_dir: str | Path) -> list[BidTemplateItemCreate]:
-    root = Path(source_dir).expanduser().resolve()
+    settings = get_settings()
+    allowed_roots = parse_root_list(settings.template_import_roots)
+    if not allowed_roots:
+        raise ValueError("template import roots are not configured")
+
+    root = ensure_path_within_roots(source_dir, allowed_roots, label="template source directory")
     if not root.exists():
         raise FileNotFoundError(f"Template source directory not found: {root}")
     if not root.is_dir():
@@ -129,28 +136,33 @@ def import_template_package_from_directory(
     package_type: str | None = None,
     category_code: str | None = None,
 ) -> ImportedTemplatePackage:
-    root = Path(source_dir).expanduser().resolve()
-    items = build_template_items_from_directory(root)
+    items = build_template_items_from_directory(source_dir)
+    root_dir = ensure_path_within_roots(
+        source_dir,
+        parse_root_list(get_settings().template_import_roots),
+        label="template source directory",
+    )
 
-    resolved_display_name = (display_name or root.name).strip()
+    resolved_display_name = (display_name or root_dir.name).strip()
     resolved_package_type = (package_type or infer_package_type(resolved_display_name)).strip() or "unknown"
-    resolved_package_key = (package_key or _default_package_key(root, resolved_package_type)).strip()
+    resolved_package_key = (package_key or _default_package_key(root_dir, resolved_package_type)).strip()
 
     repo = BidTemplatePackageRepository()
-    package = repo.upsert_package(
-        conn,
-        package_key=resolved_package_key,
-        display_name=resolved_display_name,
-        package_type=resolved_package_type,
-        category_code=(category_code or "").strip() or None,
-        source_root=str(root),
-        source_manifest={
-            "file_count": len(items),
-            "source_dir_name": root.name,
-            "relative_paths": [item.relative_path for item in items],
-        },
-    )
-    repo.replace_items(conn, package_id=package.id, items=items)
+    with conn.transaction():
+        package = repo.upsert_package(
+            conn,
+            package_key=resolved_package_key,
+            display_name=resolved_display_name,
+            package_type=resolved_package_type,
+            category_code=(category_code or "").strip() or None,
+            source_root=str(root_dir),
+            source_manifest={
+                "file_count": len(items),
+                "source_dir_name": root_dir.name,
+                "relative_paths": [item.relative_path for item in items],
+            },
+        )
+        repo.replace_items(conn, package_id=package.id, items=items)
     return ImportedTemplatePackage(
         package_id=str(package.id),
         package_key=package.package_key,

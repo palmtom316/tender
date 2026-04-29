@@ -12,13 +12,13 @@ from docx import Document
 from docx.shared import Inches
 from psycopg import Connection
 
+from tender_backend.core.config import get_settings
+from tender_backend.core.path_safety import ensure_path_within_root
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import build_item_render_context
 from tender_backend.services.template_service.docx_renderer import render_template_item_docx
 from tender_backend.services.vision_service.pdf_renderer import render_pdf_to_pages
 
-
-_RENDER_BUNDLE_ROOT = Path("/tmp/tender_template_bundles")
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
 _PDF_SUFFIXES = {".pdf"}
 _LICENSE_MARKERS = ("营业执照", "法人证书", "登记证书", "开户许可证", "账户信息")
@@ -124,10 +124,23 @@ def _collect_evidence_assets(value: object) -> list[dict[str, object]]:
     return collected
 
 
-def _copy_attachment_file(asset: dict[str, object], attachment_dir: Path) -> tuple[Path, str]:
-    source_path = Path(str(asset["file_path"])).expanduser()
+def _validated_asset_source_path(asset: dict[str, object]) -> Path:
+    settings = get_settings()
+    try:
+        source_path = ensure_path_within_root(
+            str(asset["file_path"]),
+            settings.evidence_upload_dir,
+            label="attachment file path",
+        )
+    except ValueError as exc:
+        raise FileNotFoundError(str(exc)) from exc
     if not source_path.is_file():
         raise FileNotFoundError(f"attachment file not found: {source_path}")
+    return source_path
+
+
+def _copy_attachment_file(asset: dict[str, object], attachment_dir: Path) -> tuple[Path, str]:
+    source_path = _validated_asset_source_path(asset)
 
     file_name = _sanitize_path_segment(str(asset.get("file_name") or source_path.name))
     if "." not in file_name and source_path.suffix:
@@ -334,7 +347,7 @@ def _render_attachment_manifest(
     evidence_rows: list[dict[str, object]] = []
 
     for asset in assets:
-        source_path = Path(str(asset["file_path"])).expanduser()
+        source_path = _validated_asset_source_path(asset)
         copied_path, original_name = _copy_attachment_file(asset, attachment_dir)
         relative_export = copied_path.relative_to(output_docx_path.parent)
         copied_assets.append(
@@ -418,6 +431,118 @@ def _render_attachment_item(
     }
 
 
+def preflight_template_package_bundle(
+    conn: Connection,
+    *,
+    package_id: UUID,
+) -> dict[str, object]:
+    repo = BidTemplatePackageRepository()
+    package = repo.get_by_id(conn, package_id=package_id)
+    if package is None:
+        raise LookupError("template package not found")
+
+    items = repo.list_items(conn, package_id=package_id)
+    item_results: list[dict[str, object]] = []
+    ready_item_count = 0
+    blocked_item_count = 0
+    total_issue_count = 0
+
+    for item in items:
+        issues: list[dict[str, object]] = []
+        missing_required_bindings: list[str] = []
+        asset_count = 0
+        valid_asset_count = 0
+        invalid_asset_count = 0
+        context_keys: list[str] = []
+
+        try:
+            _safe_relative_path(item.relative_path)
+        except ValueError as exc:
+            issues.append({"code": "unsafe_relative_path", "message": str(exc)})
+
+        try:
+            render_context = build_item_render_context(conn, item_id=item.id)
+            missing_required_bindings = list(render_context["missing_required_bindings"])
+            context_keys = sorted(render_context["context"].keys())
+            if missing_required_bindings:
+                issues.append(
+                    {
+                        "code": "missing_required_bindings",
+                        "message": f"missing required bindings: {', '.join(missing_required_bindings)}",
+                        "bindings": missing_required_bindings,
+                    }
+                )
+
+            if item.render_mode == "attachment" or item.item_type == "evidence":
+                assets = _collect_evidence_assets(render_context["context"])
+                asset_count = len(assets)
+                if not assets:
+                    issues.append(
+                        {
+                            "code": "missing_evidence_assets",
+                            "message": "attachment item has no evidence assets to export",
+                        }
+                    )
+                for asset in assets:
+                    try:
+                        _validated_asset_source_path(asset)
+                        valid_asset_count += 1
+                    except FileNotFoundError as exc:
+                        invalid_asset_count += 1
+                        issues.append(
+                            {
+                                "code": "invalid_evidence_asset",
+                                "message": str(exc),
+                                "asset_id": str(asset.get("id") or ""),
+                                "asset_name": str(asset.get("asset_name") or ""),
+                                "file_name": str(asset.get("file_name") or ""),
+                            }
+                        )
+        except LookupError as exc:
+            issues.append({"code": "lookup_error", "message": str(exc)})
+        except ValueError as exc:
+            issues.append({"code": "context_error", "message": str(exc)})
+
+        ready = not issues
+        if ready:
+            ready_item_count += 1
+        else:
+            blocked_item_count += 1
+            total_issue_count += len(issues)
+
+        item_results.append(
+            {
+                "item_id": str(item.id),
+                "item_name": item.item_name,
+                "filename": item.filename,
+                "relative_path": item.relative_path,
+                "render_mode": item.render_mode,
+                "item_type": item.item_type,
+                "ready": ready,
+                "issue_count": len(issues),
+                "issues": issues,
+                "missing_required_bindings": missing_required_bindings,
+                "asset_count": asset_count,
+                "valid_asset_count": valid_asset_count,
+                "invalid_asset_count": invalid_asset_count,
+                "context_keys": context_keys,
+            }
+        )
+
+    return {
+        "package_id": str(package.id),
+        "package_key": package.package_key,
+        "display_name": package.display_name,
+        "package_type": package.package_type,
+        "total_item_count": len(items),
+        "ready_item_count": ready_item_count,
+        "blocked_item_count": blocked_item_count,
+        "issue_count": total_issue_count,
+        "ready": blocked_item_count == 0,
+        "items": item_results,
+    }
+
+
 def render_template_package_bundle(
     conn: Connection,
     *,
@@ -431,7 +556,7 @@ def render_template_package_bundle(
         raise LookupError("template package not found")
 
     items = repo.list_items(conn, package_id=package_id)
-    bundle_root = output_root or _RENDER_BUNDLE_ROOT
+    bundle_root = output_root or get_settings().template_bundle_root
     bundle_dir = bundle_root / _bundle_dir_name(package.display_name, package.package_key)
     bundle_dir.mkdir(parents=True, exist_ok=True)
 

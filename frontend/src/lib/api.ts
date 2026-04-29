@@ -426,10 +426,50 @@ export interface TemplatePackageRenderContext {
   items: TemplatePackageRenderContextItem[];
 }
 
+export interface TemplateRenderPreflightIssue {
+  code: string;
+  message: string;
+  bindings?: string[];
+  asset_id?: string;
+  asset_name?: string;
+  file_name?: string;
+}
+
+export interface TemplatePackageRenderPreflightItem {
+  item_id: string;
+  item_name: string;
+  filename: string;
+  relative_path: string;
+  render_mode: string;
+  item_type: string;
+  ready: boolean;
+  issue_count: number;
+  issues: TemplateRenderPreflightIssue[];
+  missing_required_bindings: string[];
+  asset_count: number;
+  valid_asset_count: number;
+  invalid_asset_count: number;
+  context_keys: string[];
+}
+
+export interface TemplatePackageRenderPreflight {
+  package_id: string;
+  package_key: string;
+  display_name: string;
+  package_type: string;
+  total_item_count: number;
+  ready_item_count: number;
+  blocked_item_count: number;
+  issue_count: number;
+  ready: boolean;
+  items: TemplatePackageRenderPreflightItem[];
+}
+
 export interface TemplateFieldMappingSuggestionGroup {
   source_type: TemplateSourceType;
   field_mapping_mode: TemplateFieldMappingMode;
   field_mappings: TemplateFieldMapping[];
+  confidence: number;
 }
 
 export interface TemplateFieldMappingSuggestions {
@@ -482,6 +522,15 @@ export function fetchTemplatePackageRenderContext(
   options?: { signal?: AbortSignal },
 ): Promise<TemplatePackageRenderContext> {
   return request<TemplatePackageRenderContext>(`/template-packages/${packageId}/render-context`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchTemplatePackageRenderPreflight(
+  packageId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TemplatePackageRenderPreflight> {
+  return request<TemplatePackageRenderPreflight>(`/template-packages/${packageId}/render-preflight`, {
     signal: options?.signal,
   });
 }
@@ -604,7 +653,6 @@ export interface EvidenceAsset {
   asset_category: string;
   asset_type: string;
   file_name: string;
-  file_path: string;
   media_type: string | null;
   issuer_name: string | null;
   issued_on: string | null;

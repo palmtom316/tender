@@ -6,14 +6,17 @@ from pathlib import Path
 from uuid import uuid4
 
 import fitz  # PyMuPDF
+import pytest
 from docx import Document
 
+from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemRow, BidTemplatePackageRow
 from tender_backend.services.template_service.package_renderer import (
     _attachment_display_title,
     _attachment_template_kind,
     _bundle_dir_name,
     _collect_evidence_assets,
+    preflight_template_package_bundle,
     _render_attachment_manifest,
     render_template_package_bundle,
 )
@@ -41,6 +44,7 @@ def test_render_template_package_bundle_writes_relative_files_and_zip(
         package_key="pkg-key",
         display_name="20258B商务文件",
         package_type="business",
+        category_code=None,
         source_root="/tmp/source",
         source_manifest={},
         created_at=datetime.now(),
@@ -127,7 +131,12 @@ def test_attachment_template_kind_classifies_common_evidence_types() -> None:
     assert _attachment_template_kind("投标保证金缴纳证明材料（汇款底单或保函）", []) == "contract"
 
 
-def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path) -> None:
+def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir()
+    monkeypatch.setenv("EVIDENCE_UPLOAD_DIR", str(upload_root))
+    get_settings.cache_clear()
     image_path = tmp_path / "license.png"
     image_path.write_bytes(_PNG_1X1)
 
@@ -138,6 +147,11 @@ def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path
         page.insert_text((72, 72), f"Page {page_no + 1}", fontsize=24)
     pdf.save(pdf_path)
     pdf.close()
+
+    managed_image_path = upload_root / image_path.name
+    managed_image_path.write_bytes(image_path.read_bytes())
+    managed_pdf_path = upload_root / pdf_path.name
+    managed_pdf_path.write_bytes(pdf_path.read_bytes())
 
     output_docx_path = tmp_path / "7.1.资质证书证明材料.docx"
     attachment_dir = tmp_path / "7.1.资质证书证明材料_attachments"
@@ -150,16 +164,16 @@ def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path
             {
                 "id": "img-1",
                 "asset_name": "营业执照",
-                "file_name": image_path.name,
-                "file_path": str(image_path),
+                "file_name": managed_image_path.name,
+                "file_path": str(managed_image_path),
                 "media_type": "image/png",
                 "owner_type": "company_profile",
             },
             {
                 "id": "pdf-1",
                 "asset_name": "质量认证证书",
-                "file_name": pdf_path.name,
-                "file_path": str(pdf_path),
+                "file_name": managed_pdf_path.name,
+                "file_path": str(managed_pdf_path),
                 "media_type": "application/pdf",
                 "owner_type": "qualification_certificate",
             },
@@ -171,5 +185,107 @@ def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path
     assert saved.paragraphs[0].text == "（一）资质证书证明材料"
     assert copied_assets[0]["preview_embedded"] is True
     assert copied_assets[1]["preview_embedded"] is True
-    assert (attachment_dir / image_path.name).exists()
-    assert (attachment_dir / pdf_path.name).exists()
+    assert (attachment_dir / managed_image_path.name).exists()
+    assert (attachment_dir / managed_pdf_path.name).exists()
+
+
+def test_render_attachment_manifest_rejects_assets_outside_upload_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir()
+    monkeypatch.setenv("EVIDENCE_UPLOAD_DIR", str(upload_root))
+    get_settings.cache_clear()
+
+    external_file = tmp_path / "external.pdf"
+    external_file.write_bytes(b"%PDF-1.7\n")
+
+    with pytest.raises(FileNotFoundError, match="must be within"):
+        _render_attachment_manifest(
+            item_name="资质证书证明材料",
+            item_code="7.1",
+            output_docx_path=tmp_path / "out.docx",
+            attachment_dir=tmp_path / "attachments",
+            assets=[
+                {
+                    "id": "pdf-1",
+                    "asset_name": "质量认证证书",
+                    "file_name": external_file.name,
+                    "file_path": str(external_file),
+                    "media_type": "application/pdf",
+                    "owner_type": "qualification_certificate",
+                }
+            ],
+        )
+
+
+def test_preflight_template_package_bundle_reports_attachment_issues(monkeypatch: pytest.MonkeyPatch) -> None:
+    package_id = uuid4()
+    item_id = uuid4()
+    package = BidTemplatePackageRow(
+        id=package_id,
+        package_key="pkg-key",
+        display_name="资质文件包",
+        package_type="business",
+        category_code=None,
+        source_root="/tmp/source",
+        source_manifest={},
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    item = BidTemplateItemRow(
+        id=item_id,
+        package_id=package_id,
+        item_code="7.1",
+        item_name="资质证书证明材料",
+        filename="7.1.资质证书证明材料.docx",
+        relative_path="sections/7.1.资质证书证明材料.docx",
+        source_kind="docx",
+        item_type="evidence",
+        render_mode="attachment",
+        is_required=True,
+        sort_order=1,
+        created_at=datetime.now(),
+    )
+
+    class _Repo:
+        def get_by_id(self, conn, *, package_id):
+            return package
+
+        def list_items(self, conn, *, package_id):
+            return [item]
+
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.package_renderer.BidTemplatePackageRepository",
+        lambda: _Repo(),
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.package_renderer.build_item_render_context",
+        lambda conn, *, item_id: {
+            "ready": True,
+            "missing_required_bindings": [],
+            "context": {
+                "assets": [
+                    {
+                        "id": "asset-1",
+                        "asset_name": "缺失证书",
+                        "file_name": "missing.pdf",
+                        "file_path": "/tmp/missing.pdf",
+                    }
+                ]
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.package_renderer._validated_asset_source_path",
+        lambda asset: (_ for _ in ()).throw(FileNotFoundError("attachment file not found: /tmp/missing.pdf")),
+    )
+
+    result = preflight_template_package_bundle(None, package_id=package_id)
+
+    assert result["ready"] is False
+    assert result["ready_item_count"] == 0
+    assert result["blocked_item_count"] == 1
+    assert result["issue_count"] == 1
+    assert result["items"][0]["asset_count"] == 1
+    assert result["items"][0]["invalid_asset_count"] == 1
+    assert result["items"][0]["issues"][0]["code"] == "invalid_evidence_asset"

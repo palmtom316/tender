@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "../../../components/ui/Badge";
 import { ClayButton } from "../../../components/ui/ClayButton";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Icon } from "../../../components/ui/Icon";
 import type {
   TemplateBindingPayload,
@@ -12,6 +13,7 @@ import type {
   TemplateFieldMappingSuggestionGroup,
   TemplateItem,
   TemplatePackageCategory,
+  TemplatePackageRenderPreflightItem,
   TemplatePackageRenderContextItem,
   TemplateSelectionMode,
   TemplateSourceType,
@@ -23,6 +25,7 @@ import {
   fetchTemplateItemBindings,
   fetchTemplateItemRenderContext,
   fetchTemplatePackageDetail,
+  fetchTemplatePackageRenderPreflight,
   fetchTemplatePackageRenderContext,
   listTemplatePackageCategories,
   listTemplatePackages,
@@ -103,6 +106,17 @@ function createEmptyFieldMapping(): TemplateFieldMapping {
   };
 }
 
+function withFieldMappingDefaults(mapping: TemplateFieldMapping): TemplateFieldMapping {
+  const transform = mapping.transform ?? "copy";
+  return {
+    ...mapping,
+    transform,
+    join_with: transform === "join" ? mapping.join_with ?? "" : undefined,
+    date_format: transform === "date" ? mapping.date_format ?? "%Y-%m-%d" : undefined,
+    decimals: transform === "number" ? mapping.decimals ?? 2 : undefined,
+  };
+}
+
 function createEmptyDraft(item: TemplateItem | null): BindingDraft {
   return {
     binding_name: item ? `${item.item_code ?? "item"}_binding` : "",
@@ -123,7 +137,7 @@ function draftFromBinding(rule: TemplateBindingRule): BindingDraft {
     source_type: rule.source_type,
     selection_mode: rule.selection_mode,
     source_filters: prettyJson(rule.source_filters),
-    field_mappings: rule.field_mappings,
+    field_mappings: rule.field_mappings.map(withFieldMappingDefaults),
     field_mapping_mode: rule.field_mapping_mode,
     output_key: rule.output_key,
     required: rule.required,
@@ -136,6 +150,16 @@ function itemStatusVariant(item: TemplatePackageRenderContextItem | undefined) {
   if (item.ready) return "success" as const;
   if (item.binding_count === 0) return "warning" as const;
   return "danger" as const;
+}
+
+function preflightStatusVariant(item: TemplatePackageRenderPreflightItem | null | undefined) {
+  if (!item) return "default" as const;
+  return item.ready ? "success" : "warning";
+}
+
+function preflightStatusLabel(item: TemplatePackageRenderPreflightItem | null | undefined) {
+  if (!item) return "未预检";
+  return item.ready ? "可导出" : "需修复";
 }
 
 function parseObjectJson(text: string, label: string): Record<string, unknown> {
@@ -207,12 +231,18 @@ function summarizeSuggestion(group: TemplateFieldMappingSuggestionGroup): string
   return group.field_mappings.map((mapping) => mapping.target_field).join(" / ");
 }
 
+function formatConfidence(confidence: number): string {
+  return `${Math.round(confidence * 100)}%`;
+}
+
 export function TemplateFieldWorkbench() {
   const queryClient = useQueryClient();
   const [selectedCategoryCode, setSelectedCategoryCode] = useState<string>("");
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [selectedBindingId, setSelectedBindingId] = useState<string | null>(null);
+  const [showOnlyBlockedItems, setShowOnlyBlockedItems] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [draft, setDraft] = useState<BindingDraft>(createEmptyDraft(null));
   const [saveError, setSaveError] = useState("");
 
@@ -235,6 +265,12 @@ export function TemplateFieldWorkbench() {
   const packageContextQuery = useQuery({
     queryKey: ["template-package-context", selectedPackageId],
     queryFn: () => fetchTemplatePackageRenderContext(selectedPackageId!),
+    enabled: Boolean(selectedPackageId),
+  });
+
+  const packagePreflightQuery = useQuery({
+    queryKey: ["template-package-preflight", selectedPackageId],
+    queryFn: () => fetchTemplatePackageRenderPreflight(selectedPackageId!),
     enabled: Boolean(selectedPackageId),
   });
 
@@ -301,6 +337,24 @@ export function TemplateFieldWorkbench() {
     () => packageContextQuery.data?.items.find((item) => item.item_id === selectedItemId),
     [packageContextQuery.data?.items, selectedItemId],
   );
+  const preflightItem = useMemo(
+    () => packagePreflightQuery.data?.items.find((item) => item.item_id === selectedItemId) ?? null,
+    [packagePreflightQuery.data?.items, selectedItemId],
+  );
+  const filteredPackageItems = useMemo(() => {
+    const items = packageDetailQuery.data?.items ?? [];
+    if (!showOnlyBlockedItems) return items;
+    const blockedIds = new Set(
+      (packagePreflightQuery.data?.items ?? [])
+        .filter((item) => !item.ready)
+        .map((item) => item.item_id),
+    );
+    return items.filter((item) => blockedIds.has(item.id));
+  }, [packageDetailQuery.data?.items, packagePreflightQuery.data?.items, showOnlyBlockedItems]);
+  const blockedPreflightItems = useMemo(
+    () => (packagePreflightQuery.data?.items ?? []).filter((item) => !item.ready),
+    [packagePreflightQuery.data?.items],
+  );
 
   useEffect(() => {
     if (selectedBinding) {
@@ -312,10 +366,20 @@ export function TemplateFieldWorkbench() {
     setSaveError("");
   }, [selectedBinding, selectedItem]);
 
+  useEffect(() => {
+    if (!showOnlyBlockedItems) return;
+    if (filteredPackageItems.length === 0) return;
+    if (!selectedItemId || !filteredPackageItems.some((item) => item.id === selectedItemId)) {
+      setSelectedItemId(filteredPackageItems[0].id);
+      setSelectedBindingId(null);
+    }
+  }, [filteredPackageItems, selectedItemId, showOnlyBlockedItems]);
+
   const refreshItemQueries = () => {
     void queryClient.invalidateQueries({ queryKey: ["template-item-bindings", selectedItemId] });
     void queryClient.invalidateQueries({ queryKey: ["template-item-context", selectedItemId] });
     void queryClient.invalidateQueries({ queryKey: ["template-package-context", selectedPackageId] });
+    void queryClient.invalidateQueries({ queryKey: ["template-package-preflight", selectedPackageId] });
   };
 
   const saveMutation = useMutation({
@@ -454,12 +518,23 @@ export function TemplateFieldWorkbench() {
               <p className="template-panel__eyebrow">模板项</p>
               <h2>{packageDetailQuery.data?.display_name ?? "未选择模板包"}</h2>
             </div>
-            <Badge variant="default">{packageDetailQuery.data?.items.length ?? 0}</Badge>
+            <Badge variant="default">{filteredPackageItems.length}</Badge>
+          </div>
+          <div className="template-inline-actions template-inline-actions--compact">
+            <ClayButton
+              variant={showOnlyBlockedItems ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => setShowOnlyBlockedItems((current) => !current)}
+              disabled={!packagePreflightQuery.data}
+            >
+              {showOnlyBlockedItems ? "显示全部" : "只看待修复项"}
+            </ClayButton>
           </div>
           {packageDetailQuery.isLoading && <div className="spinner" />}
           <div className="template-list">
-            {(packageDetailQuery.data?.items ?? []).map((item) => {
+            {filteredPackageItems.map((item) => {
               const contextItem = packageContextQuery.data?.items.find((row) => row.item_id === item.id);
+              const preflightListItem = packagePreflightQuery.data?.items.find((row) => row.item_id === item.id) ?? null;
               return (
                 <button
                   key={item.id}
@@ -472,15 +547,21 @@ export function TemplateFieldWorkbench() {
                 >
                   <div className="template-list__row">
                     <span className="template-list__code">{item.item_code ?? "-"}</span>
-                    <Badge variant={itemStatusVariant(contextItem)}>
-                      {contextItem?.ready ? "已就绪" : contextItem?.binding_count ? "待完善" : "未绑定"}
+                    <Badge variant={preflightListItem ? preflightStatusVariant(preflightListItem) : itemStatusVariant(contextItem)}>
+                      {preflightListItem ? preflightStatusLabel(preflightListItem) : contextItem?.ready ? "已就绪" : contextItem?.binding_count ? "待完善" : "未绑定"}
                     </Badge>
                   </div>
                   <span className="template-list__title">{item.item_name}</span>
-                  <span className="template-list__meta">{item.render_mode} / {item.item_type}</span>
+                  <span className="template-list__meta">
+                    {item.render_mode} / {item.item_type}
+                    {preflightListItem && preflightListItem.issue_count > 0 ? ` / ${preflightListItem.issue_count} 个问题` : ""}
+                  </span>
                 </button>
               );
             })}
+            {showOnlyBlockedItems && filteredPackageItems.length === 0 && (
+              <div className="template-strip-empty">当前模板包没有待修复项。</div>
+            )}
           </div>
         </section>
       </aside>
@@ -508,6 +589,10 @@ export function TemplateFieldWorkbench() {
                 <div className="template-summary__pill">
                   <span>缺失项</span>
                   <strong>{itemContext?.missing_required_bindings.length ?? 0}</strong>
+                </div>
+                <div className="template-summary__pill">
+                  <span>预检状态</span>
+                  <strong>{packagePreflightQuery.data?.ready ? "可导出" : "需修复"}</strong>
                 </div>
               </div>
             )}
@@ -537,11 +622,7 @@ export function TemplateFieldWorkbench() {
                     variant="danger"
                     size="sm"
                     disabled={!selectedBindingId || deleteMutation.isPending}
-                    onClick={() => {
-                      if (selectedBindingId && window.confirm("删除该绑定规则？")) {
-                        deleteMutation.mutate();
-                      }
-                    }}
+                    onClick={() => setDeleteDialogOpen(true)}
                   >
                     <Icon name="trash" size={14} /> 删除
                   </ClayButton>
@@ -707,7 +788,7 @@ export function TemplateFieldWorkbench() {
                                   source_field: nextTransform === "join" ? undefined : current.source_field,
                                   source_fields: nextTransform === "join" ? current.source_fields ?? [] : undefined,
                                   join_with: nextTransform === "join" ? current.join_with ?? "" : undefined,
-                                  date_format: nextTransform === "date" ? current.date_format ?? "YYYY-MM-DD" : undefined,
+                                  date_format: nextTransform === "date" ? current.date_format ?? "%Y-%m-%d" : undefined,
                                   decimals: nextTransform === "number" ? current.decimals ?? 2 : undefined,
                                 }));
                               }}
@@ -766,7 +847,7 @@ export function TemplateFieldWorkbench() {
                               <label className="form-label">日期格式</label>
                               <input
                                 className="clay-input"
-                                placeholder="YYYY-MM-DD"
+                                placeholder="%Y-%m-%d"
                                 value={mapping.date_format ?? ""}
                                 onChange={(event) => updateFieldMapping(index, (current) => ({
                                   ...current,
@@ -844,6 +925,69 @@ export function TemplateFieldWorkbench() {
               <section className="template-panel">
                 <div className="template-panel__header">
                   <div>
+                    <p className="template-panel__eyebrow">渲染预检</p>
+                    <h2>导出前检查</h2>
+                  </div>
+                  <Badge variant={packagePreflightQuery.data?.ready ? "success" : "warning"}>
+                    {packagePreflightQuery.data?.ready ? "可导出" : "待修复"}
+                  </Badge>
+                </div>
+                {packagePreflightQuery.isLoading && <div className="spinner" />}
+                {packagePreflightQuery.isError && (
+                  <p className="text-error">{(packagePreflightQuery.error as Error).message}</p>
+                )}
+                {packagePreflightQuery.data && (
+                  <>
+                    <div className="template-preflight-summary">
+                      <div className="template-preflight-summary__card">
+                        <span>已就绪模板项</span>
+                        <strong>{packagePreflightQuery.data.ready_item_count}</strong>
+                      </div>
+                      <div className="template-preflight-summary__card">
+                        <span>待修复模板项</span>
+                        <strong>{packagePreflightQuery.data.blocked_item_count}</strong>
+                      </div>
+                      <div className="template-preflight-summary__card">
+                        <span>问题总数</span>
+                        <strong>{packagePreflightQuery.data.issue_count}</strong>
+                      </div>
+                    </div>
+                    {blockedPreflightItems.length > 0 && (
+                      <div className="template-preflight-locator">
+                        <div className="template-preflight-locator__header">
+                          <strong>待修复模板项</strong>
+                          <span>{blockedPreflightItems.length} 项</span>
+                        </div>
+                        <div className="template-preflight-locator__list">
+                          {blockedPreflightItems.map((item) => (
+                            <button
+                              key={item.item_id}
+                              type="button"
+                              className={`template-preflight-locator__item ${selectedItemId === item.item_id ? "is-active" : ""}`}
+                              onClick={() => {
+                                setSelectedItemId(item.item_id);
+                                setSelectedBindingId(null);
+                              }}
+                            >
+                              <span>{item.item_name}</span>
+                              <Badge variant="warning">{item.issue_count}</Badge>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {selectedItem && preflightItem ? (
+                      <TemplatePreflightDetail item={preflightItem} />
+                    ) : (
+                      <div className="template-mapping-empty">选择模板项后查看该项的预检详情。</div>
+                    )}
+                  </>
+                )}
+              </section>
+
+              <section className="template-panel">
+                <div className="template-panel__header">
+                  <div>
                     <p className="template-panel__eyebrow">映射建议</p>
                     <h2>推荐字段</h2>
                   </div>
@@ -859,7 +1003,12 @@ export function TemplateFieldWorkbench() {
                     >
                       <div className="template-suggestion__top">
                         <strong>{SOURCE_TYPE_OPTIONS.find((option) => option.value === group.source_type)?.label ?? group.source_type}</strong>
-                        <Badge variant="info">{group.field_mapping_mode}</Badge>
+                        <div className="template-suggestion__badges">
+                          <Badge variant="info">{group.field_mapping_mode}</Badge>
+                          <Badge variant={group.confidence >= 0.8 ? "success" : group.confidence >= 0.5 ? "warning" : "default"}>
+                            {formatConfidence(group.confidence)}
+                          </Badge>
+                        </div>
                       </div>
                       <p>{summarizeSuggestion(group)}</p>
                     </button>
@@ -898,7 +1047,55 @@ export function TemplateFieldWorkbench() {
             </div>
           </section>
         )}
+        <ConfirmDialog
+          open={deleteDialogOpen}
+          title="删除绑定规则"
+          description="删除后，该模板项的字段映射与数据绑定配置将立即失效。"
+          confirmLabel="确认删除"
+          busy={deleteMutation.isPending}
+          onCancel={() => setDeleteDialogOpen(false)}
+          onConfirm={() => {
+            setDeleteDialogOpen(false);
+            deleteMutation.mutate();
+          }}
+        />
       </main>
+    </div>
+  );
+}
+
+function TemplatePreflightDetail({ item }: { item: TemplatePackageRenderPreflightItem }) {
+  return (
+    <div className="template-preflight-detail">
+      <div className="template-preflight-detail__header">
+        <div>
+          <h3>{item.item_name}</h3>
+          <p>{item.relative_path}</p>
+        </div>
+        <Badge variant={item.ready ? "success" : "warning"}>
+          {item.ready ? "通过" : "阻塞"}
+        </Badge>
+      </div>
+      <div className="template-preflight-meta">
+        <span>{item.render_mode} / {item.item_type}</span>
+        <span>附件 {item.valid_asset_count}/{item.asset_count}</span>
+        <span>问题 {item.issue_count}</span>
+      </div>
+      {item.issues.length === 0 ? (
+        <div className="template-mapping-empty">该模板项预检通过，可直接参与包渲染。</div>
+      ) : (
+        <div className="template-preflight-issues">
+          {item.issues.map((issue, index) => (
+            <div key={`${issue.code}-${index}`} className="template-preflight-issue">
+              <div className="template-preflight-issue__top">
+                <strong>{issue.code}</strong>
+                {issue.asset_name && <Badge variant="warning">{issue.asset_name}</Badge>}
+              </div>
+              <p>{issue.message}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

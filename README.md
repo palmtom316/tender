@@ -18,6 +18,7 @@ AI-assisted tender document authoring system for technical bids.
 2. Copy `infra/.env.example` to `infra/.env` and adjust secrets if needed.
    - `tag_clauses` defaults to DeepSeek `deepseek-v4-flash` primary and Qwen fallback in code/migrations.
    - Keep `DEEPSEEK_API_KEY` and `SILICONFLOW_API_KEY` only in your private `infra/.env`, never in git.
+   - For template-package and master-data flows, also review the backend path settings in `backend/README.md` before importing templates or uploading evidence assets.
 3. Start infrastructure only:
    - `docker compose --env-file infra/.env -f infra/docker-compose.yml up -d postgres redis minio opensearch`
 4. Run backend locally:

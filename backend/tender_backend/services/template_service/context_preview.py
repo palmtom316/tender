@@ -127,6 +127,38 @@ def suggest_field_mappings(*, item_name: str, item_code: str | None, source_type
     return mappings
 
 
+def _suggest_field_mapping_group(
+    *,
+    item_name: str,
+    item_code: str | None,
+    source_type: str,
+) -> dict[str, Any]:
+    mappings = suggest_field_mappings(item_name=item_name, item_code=item_code, source_type=source_type)
+    confidence = 0.15
+
+    if source_type == "company_profile" and ("基本情况表" in item_name or (item_code or "").startswith("5")):
+        confidence = 0.85
+    elif source_type == "person_profile" and ("人员" in item_name or "团队" in item_name or (item_code or "").startswith("6")):
+        confidence = 0.82
+    elif source_type == "project_performance" and ("业绩" in item_name or (item_code or "").startswith("5")):
+        confidence = 0.8
+    elif source_type == "qualification_certificate" and ("证书" in item_name or "认证" in item_name):
+        confidence = 0.83
+    elif source_type == "financial_statement" and ("财务" in item_name or (item_code or "").startswith("8")):
+        confidence = 0.76
+    elif source_type == "evidence_asset":
+        confidence = 0.55
+    elif mappings:
+        confidence = 0.4
+
+    return {
+        "source_type": source_type,
+        "field_mapping_mode": "augment",
+        "field_mappings": mappings,
+        "confidence": confidence,
+    }
+
+
 def _normalize_value(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
@@ -165,7 +197,65 @@ def _matches_filters(record: dict[str, Any], filters: dict[str, Any]) -> bool:
     return True
 
 
-def _select_records(records: list[dict[str, Any]], selection_mode: str) -> Any:
+def _latest_sort_key(record: dict[str, Any], *, source_type: str) -> tuple[Any, ...]:
+    if source_type == "company_profile":
+        return (
+            record.get("updated_at") or "",
+            record.get("created_at") or "",
+            str(record.get("id") or ""),
+        )
+    if source_type == "person_profile":
+        return (
+            record.get("updated_at") or "",
+            record.get("created_at") or "",
+            str(record.get("id") or ""),
+        )
+    if source_type == "project_performance":
+        return (
+            record.get("ended_on") or "",
+            record.get("started_on") or "",
+            record.get("updated_at") or "",
+            record.get("created_at") or "",
+            str(record.get("id") or ""),
+        )
+    if source_type == "qualification_certificate":
+        return (
+            record.get("valid_to") or "",
+            record.get("valid_from") or "",
+            record.get("updated_at") or "",
+            record.get("created_at") or "",
+            str(record.get("id") or ""),
+        )
+    if source_type == "financial_statement":
+        return (
+            record.get("fiscal_year") or -1,
+            record.get("updated_at") or "",
+            record.get("created_at") or "",
+            str(record.get("id") or ""),
+        )
+    if source_type == "evidence_asset":
+        return (
+            record.get("issued_on") or "",
+            record.get("expires_on") or "",
+            record.get("updated_at") or "",
+            record.get("created_at") or "",
+            record.get("sort_order") or -1,
+            str(record.get("id") or ""),
+        )
+    return (
+        record.get("updated_at") or "",
+        record.get("created_at") or "",
+        str(record.get("id") or ""),
+    )
+
+
+def _select_records(
+    records: list[dict[str, Any]],
+    selection_mode: str,
+    *,
+    source_type: str | None = None,
+    filters: dict[str, Any] | None = None,
+) -> Any:
     if selection_mode == "all":
         return records
     if not records:
@@ -173,9 +263,17 @@ def _select_records(records: list[dict[str, Any]], selection_mode: str) -> Any:
     if selection_mode == "first":
         return records[0]
     if selection_mode == "latest":
-        return records[0]
+        return max(records, key=lambda record: _latest_sort_key(record, source_type=source_type or ""))
     if selection_mode == "by_id":
-        return records[0]
+        record_ids = (filters or {}).get("record_ids")
+        if not isinstance(record_ids, list) or not record_ids:
+            raise ValueError("selection_mode 'by_id' requires source_filters.record_ids")
+        by_id = {str(record.get("id")): record for record in records}
+        for record_id in record_ids:
+            selected = by_id.get(str(record_id))
+            if selected is not None:
+                return selected
+        return None
     return records
 
 
@@ -313,7 +411,7 @@ def _resolve_binding_payloads(
             record for record in cache[source_type]
             if _matches_filters(record, binding.source_filters)
         ]
-        selected = _select_records(filtered, selection_mode)
+        selected = _select_records(filtered, selection_mode, source_type=source_type, filters=binding.source_filters)
         mapped = _apply_field_mappings(selected, field_mappings, mode=field_mapping_mode)
         resolved_bindings.append({
             "binding_id": str(binding.id),
@@ -467,15 +565,11 @@ def build_item_field_mapping_suggestions(conn: Connection, *, item_id: UUID) -> 
     bindings = binding_repo.list_by_item(conn, template_item_id=item.id)
     source_types = [binding.source_type for binding in bindings] or sorted(_VALID_SOURCE_TYPES)
     suggestions = [
-        {
-            "source_type": source_type,
-            "field_mapping_mode": "augment",
-            "field_mappings": suggest_field_mappings(
-                item_name=item.item_name,
-                item_code=item.item_code,
-                source_type=source_type,
-            ),
-        }
+        _suggest_field_mapping_group(
+            item_name=item.item_name,
+            item_code=item.item_code,
+            source_type=source_type,
+        )
         for source_type in source_types
     ]
     return {

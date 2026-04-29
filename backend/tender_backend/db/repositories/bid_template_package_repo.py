@@ -165,6 +165,21 @@ class BidTemplatePackageRepository:
             ).fetchall()
         return [_to_item(row) for row in rows]
 
+    def count_items_by_package(self, conn: Connection, *, package_ids: list[UUID]) -> dict[UUID, int]:
+        if not package_ids:
+            return {}
+        with conn.cursor() as cur:
+            rows = cur.execute(
+                """
+                SELECT package_id, COUNT(*)
+                FROM bid_template_item
+                WHERE package_id = ANY(%s)
+                GROUP BY package_id
+                """,
+                (package_ids,),
+            ).fetchall()
+        return {row[0]: int(row[1]) for row in rows}
+
     def get_item_by_id(self, conn: Connection, *, item_id: UUID) -> BidTemplateItemRow | None:
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
@@ -221,34 +236,73 @@ class BidTemplatePackageRepository:
         package_id: UUID,
         items: list[BidTemplateItemCreate],
     ) -> list[BidTemplateItemRow]:
+        existing = {row.relative_path: row for row in self.list_items(conn, package_id=package_id)}
+        incoming_paths = {item.relative_path for item in items}
+
         with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute("DELETE FROM bid_template_item WHERE package_id = %s", (package_id,))
             created: list[BidTemplateItemRow] = []
-            for item in items:
-                row = cur.execute(
-                    f"""
-                    INSERT INTO bid_template_item (
-                      id, package_id, item_code, item_name, filename, relative_path,
-                      source_kind, item_type, render_mode, is_required, sort_order
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING {_ITEM_COLUMNS}
+            removed_paths = set(existing) - incoming_paths
+            if removed_paths:
+                cur.execute(
+                    """
+                    DELETE FROM bid_template_item
+                    WHERE package_id = %s AND relative_path = ANY(%s)
                     """,
-                    (
-                        uuid4(),
-                        package_id,
-                        item.item_code,
-                        item.item_name,
-                        item.filename,
-                        item.relative_path,
-                        item.source_kind,
-                        item.item_type,
-                        item.render_mode,
-                        item.is_required,
-                        item.sort_order,
-                    ),
-                ).fetchone()
+                    (package_id, sorted(removed_paths)),
+                )
+            for item in items:
+                existing_row = existing.get(item.relative_path)
+                if existing_row is None:
+                    row = cur.execute(
+                        f"""
+                        INSERT INTO bid_template_item (
+                          id, package_id, item_code, item_name, filename, relative_path,
+                          source_kind, item_type, render_mode, is_required, sort_order
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING {_ITEM_COLUMNS}
+                        """,
+                        (
+                            uuid4(),
+                            package_id,
+                            item.item_code,
+                            item.item_name,
+                            item.filename,
+                            item.relative_path,
+                            item.source_kind,
+                            item.item_type,
+                            item.render_mode,
+                            item.is_required,
+                            item.sort_order,
+                        ),
+                    ).fetchone()
+                else:
+                    row = cur.execute(
+                        f"""
+                        UPDATE bid_template_item
+                        SET item_code = %s,
+                            item_name = %s,
+                            filename = %s,
+                            source_kind = %s,
+                            item_type = %s,
+                            render_mode = %s,
+                            is_required = %s,
+                            sort_order = %s
+                        WHERE id = %s
+                        RETURNING {_ITEM_COLUMNS}
+                        """,
+                        (
+                            item.item_code,
+                            item.item_name,
+                            item.filename,
+                            item.source_kind,
+                            item.item_type,
+                            item.render_mode,
+                            item.is_required,
+                            item.sort_order,
+                            existing_row.id,
+                        ),
+                    ).fetchone()
                 assert row is not None
                 created.append(_to_item(row))
-        conn.commit()
         return created

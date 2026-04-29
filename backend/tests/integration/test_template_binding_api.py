@@ -15,6 +15,9 @@ from tender_backend.main import app
 from tender_backend.test_support.asgi_client import SyncASGIClient
 
 
+_AUTH_HEADERS = {"Authorization": "Bearer dev-token"}
+
+
 def _db_url() -> str | None:
     return os.environ.get("DATABASE_URL")
 
@@ -240,22 +243,30 @@ def _clear_settings_cache() -> None:
     get_settings.cache_clear()
 
 
-def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
+def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_url = _db_url()
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
 
-    source_dir = tmp_path / "20258B商务文件"
+    import_root = tmp_path / "imports"
+    import_root.mkdir()
+    source_dir = import_root / "20258B商务文件"
     source_dir.mkdir()
     (source_dir / "5.1.基本情况表.docx").write_bytes(b"docx")
     (source_dir / "6.1.人员汇总表及人员简历表.docx").write_bytes(b"docx")
     (source_dir / "7.1.资质证书证明材料.docx").write_bytes(b"docx")
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir()
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    monkeypatch.setenv("EVIDENCE_UPLOAD_DIR", str(upload_root))
+    get_settings.cache_clear()
 
     with psycopg.connect(db_url) as conn:
         _apply_schema(conn)
         _reset_schema(conn)
 
     client = SyncASGIClient(app)
+    client.headers.update(_AUTH_HEADERS)
     try:
         imported = client.post("/api/template-packages/import", json={"source_dir": str(source_dir)})
         assert imported.status_code == 200
@@ -285,7 +296,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         )
         assert certificate.status_code == 201
         certificate_id = UUID(certificate.json()["id"])
-        attachment_file = tmp_path / "quality-cert.pdf"
+        attachment_file = upload_root / "quality-cert.pdf"
         pdf = fitz.open()
         page = pdf.new_page(width=595, height=842)
         page.insert_text((72, 72), "Quality Certificate", fontsize=24)
@@ -318,6 +329,16 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
             },
         )
         assert binding1.status_code == 201
+
+        reimported = client.post("/api/template-packages/import", json={"source_dir": str(source_dir)})
+        assert reimported.status_code == 200
+        reimported_body = reimported.json()
+        assert UUID(reimported_body["id"]) == package_id
+        assert UUID(reimported_body["items"][0]["id"]) == basic_item_id
+
+        preserved_bindings = client.get(f"/api/template-items/{basic_item_id}/bindings")
+        assert preserved_bindings.status_code == 200
+        assert [row["binding_name"] for row in preserved_bindings.json()] == ["company_basic"]
 
         binding2 = client.post(
             f"/api/template-items/{people_item_id}/bindings",
@@ -374,6 +395,17 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert package_render.json()["ready_item_count"] == 3
         assert package_render.json()["total_item_count"] == 3
 
+        preflight = client.get(f"/api/template-packages/{package_id}/render-preflight")
+        assert preflight.status_code == 200
+        preflight_body = preflight.json()
+        assert preflight_body["ready"] is True
+        assert preflight_body["ready_item_count"] == 3
+        assert preflight_body["blocked_item_count"] == 0
+        evidence_preflight = [item for item in preflight_body["items"] if item["item_id"] == str(evidence_item_id)]
+        assert len(evidence_preflight) == 1
+        assert evidence_preflight[0]["asset_count"] == 1
+        assert evidence_preflight[0]["invalid_asset_count"] == 0
+
         rendered = client.post(f"/api/template-items/{basic_item_id}/render-docx")
         assert rendered.status_code == 200
         assert rendered.json()["ready"] is True
@@ -426,6 +458,10 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         deleted = client.delete(f"/api/template-bindings/{binding2_id}")
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
+
+        anon_client = SyncASGIClient(app)
+        unauthorized = anon_client.get(f"/api/template-items/{people_item_id}/bindings")
+        assert unauthorized.status_code == 401
     finally:
         client.close()
         with psycopg.connect(db_url) as conn:

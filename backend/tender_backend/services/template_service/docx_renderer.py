@@ -7,11 +7,9 @@ from uuid import UUID
 from docx import Document
 from psycopg import Connection
 
+from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import build_item_render_context
-
-
-_RENDER_ROOT = Path("/tmp/tender_template_renders")
 
 
 def _sanitize_filename(value: str) -> str:
@@ -302,7 +300,7 @@ def render_template_item_docx(
     else:
         _render_generic_context(doc, context)
 
-    root = output_dir or _RENDER_ROOT
+    root = output_dir or get_settings().template_render_root
     root.mkdir(parents=True, exist_ok=True)
     filename = output_filename or _sanitize_filename(f"{item_code or 'item'}_{item.item_name}.docx")
     output_path = root / filename

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from uuid import UUID
 
 import psycopg
@@ -12,6 +13,9 @@ from tender_backend.main import app
 from tender_backend.test_support.asgi_client import SyncASGIClient
 
 
+_AUTH_HEADERS = {"Authorization": "Bearer dev-token"}
+
+
 def _db_url() -> str | None:
     return os.environ.get("DATABASE_URL")
 
@@ -19,6 +23,24 @@ def _db_url() -> str | None:
 def _apply_master_data_schema(conn: psycopg.Connection) -> None:
     conn.execute(load_initial_schema_sql())
     conn.execute("""
+    CREATE TABLE IF NOT EXISTS app_user (
+      id UUID PRIMARY KEY,
+      username VARCHAR(50) NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      display_name VARCHAR(100) NOT NULL,
+      role VARCHAR(20) NOT NULL DEFAULT 'editor',
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS user_session (
+      token VARCHAR(64) PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '7 days'
+    );
+
     CREATE TABLE IF NOT EXISTS library_company (
       id UUID PRIMARY KEY,
       company_key TEXT NOT NULL UNIQUE,
@@ -169,6 +191,8 @@ def _reset_master_data_tables(conn: psycopg.Connection) -> None:
     conn.execute("DELETE FROM person_profile;")
     conn.execute("DELETE FROM company_profile;")
     conn.execute("DELETE FROM library_company;")
+    conn.execute("DELETE FROM user_session;")
+    conn.execute("DELETE FROM app_user;")
     conn.commit()
 
 
@@ -177,16 +201,22 @@ def _clear_settings_cache() -> None:
     get_settings.cache_clear()
 
 
-def test_master_data_crud_flow() -> None:
+def test_master_data_crud_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     db_url = _db_url()
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    upload_root = Path.cwd() / "tmp" / "test_master_data_uploads"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("EVIDENCE_UPLOAD_DIR", str(upload_root))
+    get_settings.cache_clear()
 
     with psycopg.connect(db_url) as conn:
         _apply_master_data_schema(conn)
         _reset_master_data_tables(conn)
 
     client = SyncASGIClient(app)
+    client.headers.update(_AUTH_HEADERS)
     try:
         company = client.post(
             "/api/master-data/company-profiles",
@@ -253,6 +283,8 @@ def test_master_data_crud_flow() -> None:
         assert certificate.status_code == 201
         certificate_id = UUID(certificate.json()["id"])
 
+        managed_asset = upload_root / "iso-001.pdf"
+        managed_asset.write_bytes(b"%PDF-1.7\n")
         evidence = client.post(
             "/api/master-data/evidence-assets",
             json={
@@ -260,13 +292,14 @@ def test_master_data_crud_flow() -> None:
                 "owner_id": str(certificate_id),
                 "asset_name": "质量认证扫描件",
                 "file_name": "iso-001.pdf",
-                "file_path": "/tmp/iso-001.pdf",
+                "file_path": str(managed_asset),
                 "asset_type": "certificate_scan",
                 "sort_order": 1,
             },
         )
         assert evidence.status_code == 201
         evidence_id = UUID(evidence.json()["id"])
+        assert "file_path" not in evidence.json()
 
         statement = client.post(
             "/api/master-data/financial-statements",
@@ -293,6 +326,7 @@ def test_master_data_crud_flow() -> None:
         evidence_list = client.get("/api/master-data/evidence-assets")
         assert evidence_list.status_code == 200
         assert any(UUID(row["id"]) == evidence_id for row in evidence_list.json())
+        assert all("file_path" not in row for row in evidence_list.json())
 
         updated_evidence = client.put(
             f"/api/master-data/evidence-assets/{evidence_id}",
@@ -326,6 +360,54 @@ def test_master_data_crud_flow() -> None:
 
         deleted_company = client.delete(f"/api/master-data/company-profiles/{company_id}")
         assert deleted_company.status_code == 200
+
+        anon_client = SyncASGIClient(app)
+        unauthorized = anon_client.get("/api/master-data/company-profiles")
+        assert unauthorized.status_code == 401
+    finally:
+        client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_master_data_tables(conn)
+
+
+def test_login_session_token_can_access_protected_master_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = _db_url()
+    if not db_url:
+        pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    upload_root = Path.cwd() / "tmp" / "test_master_data_uploads_session"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("EVIDENCE_UPLOAD_DIR", str(upload_root))
+    get_settings.cache_clear()
+
+    with psycopg.connect(db_url) as conn:
+        _apply_master_data_schema(conn)
+        _reset_master_data_tables(conn)
+
+    client = SyncASGIClient(app)
+    try:
+        created_user = client.post(
+            "/api/users",
+            json={
+                "username": "editor01",
+                "password": "secret123",
+                "display_name": "Editor 01",
+                "role": "editor",
+            },
+        )
+        assert created_user.status_code == 201
+
+        login = client.post(
+            "/api/auth/login",
+            json={"username": "editor01", "password": "secret123"},
+        )
+        assert login.status_code == 200
+        token = login.json()["token"]
+
+        session_client = SyncASGIClient(app)
+        session_client.headers.update({"Authorization": f"Bearer {token}"})
+        protected = session_client.get("/api/master-data/company-profiles")
+        assert protected.status_code == 200
     finally:
         client.close()
         with psycopg.connect(db_url) as conn:
