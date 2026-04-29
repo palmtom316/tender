@@ -323,6 +323,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert evidence_manifest.exists()
         assert (evidence_manifest.parent / f"{evidence_manifest.stem}_attachments" / "quality-cert.pdf").exists()
         embedded_doc = Document(str(evidence_manifest))
+        assert embedded_doc.paragraphs[0].text == "（一）资质证书证明材料"
         assert len(embedded_doc.inline_shapes) >= 1
 
         zipped_bundle = client.post(

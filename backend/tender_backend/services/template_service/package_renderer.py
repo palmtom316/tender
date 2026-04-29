@@ -21,6 +21,59 @@ from tender_backend.services.vision_service.pdf_renderer import render_pdf_to_pa
 _RENDER_BUNDLE_ROOT = Path("/tmp/tender_template_bundles")
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
 _PDF_SUFFIXES = {".pdf"}
+_LICENSE_MARKERS = ("营业执照", "法人证书", "登记证书", "开户许可证", "账户信息")
+_CERTIFICATE_MARKERS = ("证书", "认证", "资质", "高新技术", "绿证", "许可证")
+_AUTHORIZATION_MARKERS = ("授权", "委托", "身份证明", "承诺函", "说明")
+_CONTRACT_MARKERS = ("合同", "保函", "保单", "汇款", "底单", "凭证")
+
+
+def _to_cn_numeral(value: int) -> str:
+    numerals = {
+        1: "一",
+        2: "二",
+        3: "三",
+        4: "四",
+        5: "五",
+        6: "六",
+        7: "七",
+        8: "八",
+        9: "九",
+        10: "十",
+        11: "十一",
+        12: "十二",
+        13: "十三",
+        14: "十四",
+        15: "十五",
+        16: "十六",
+        17: "十七",
+        18: "十八",
+        19: "十九",
+        20: "二十",
+    }
+    return numerals.get(value, str(value))
+
+
+def _attachment_display_title(item_name: str, item_code: str | None) -> str:
+    if item_code and "." in item_code:
+        tail = item_code.split(".")[-1]
+        if tail.isdigit():
+            return f"（{_to_cn_numeral(int(tail))}）{item_name}"
+    return item_name
+
+
+def _attachment_template_kind(item_name: str, assets: list[dict[str, object]]) -> str:
+    haystack = " ".join(
+        [item_name, *(str(asset.get("asset_name") or "") for asset in assets), *(str(asset.get("asset_type") or "") for asset in assets)]
+    )
+    if any(marker in haystack for marker in _LICENSE_MARKERS):
+        return "license"
+    if any(marker in haystack for marker in _AUTHORIZATION_MARKERS):
+        return "authorization"
+    if any(marker in haystack for marker in _CONTRACT_MARKERS):
+        return "contract"
+    if any(marker in haystack for marker in _CERTIFICATE_MARKERS):
+        return "certificate"
+    return "generic"
 
 
 def _sanitize_path_segment(value: str) -> str:
@@ -120,34 +173,170 @@ def _embed_asset_preview(doc: Document, *, source_path: Path, asset: dict[str, o
     return False
 
 
+def _get_asset_meta(asset: dict[str, object], key: str) -> str:
+    metadata = asset.get("metadata_json")
+    if isinstance(metadata, dict):
+        value = metadata.get(key)
+        if value is not None:
+            return str(value)
+    value = asset.get(key)
+    return "" if value is None else str(value)
+
+
+def _add_summary_table(doc: Document, headers: list[str], rows: list[list[str]]) -> None:
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style = "Table Grid"
+    for idx, header in enumerate(headers):
+        table.rows[0].cells[idx].text = header
+    for values in rows:
+        row = table.add_row().cells
+        for idx, value in enumerate(values):
+            row[idx].text = value
+
+
+def _add_evidence_page(
+    doc: Document,
+    *,
+    asset: dict[str, object],
+    source_path: Path,
+    relative_export: Path,
+) -> bool:
+    doc.add_page_break()
+    doc.add_heading(str(asset.get("asset_name") or source_path.name), level=2)
+    doc.add_paragraph(f"源文件: {source_path.name}")
+    doc.add_paragraph(f"导出位置: {relative_export}")
+    preview_embedded = _embed_asset_preview(doc, source_path=source_path, asset=asset)
+    if not preview_embedded:
+        doc.add_paragraph("该文件类型暂不支持直接嵌入预览，请打开同级附件文件。")
+    return preview_embedded
+
+
+def _render_license_template(
+    doc: Document,
+    *,
+    item_name: str,
+    item_code: str | None,
+    evidence_rows: list[dict[str, object]],
+) -> None:
+    doc.add_heading(_attachment_display_title(item_name, item_code), level=1)
+    doc.add_paragraph("以下附企业主体资格证照材料。")
+    rows = [
+        [
+            str(row["asset"].get("asset_name") or ""),
+            _get_asset_meta(row["asset"], "holder_name"),
+            _get_asset_meta(row["asset"], "unified_social_credit_code"),
+            _get_asset_meta(row["asset"], "registered_address"),
+            str(row["asset"].get("expires_on") or ""),
+        ]
+        for row in evidence_rows
+    ]
+    _add_summary_table(doc, ["证照名称", "主体名称", "统一社会信用代码", "注册地址", "有效期止"], rows)
+
+
+def _render_certificate_template(
+    doc: Document,
+    *,
+    item_name: str,
+    item_code: str | None,
+    evidence_rows: list[dict[str, object]],
+) -> None:
+    doc.add_heading(_attachment_display_title(item_name, item_code), level=1)
+    doc.add_paragraph("以下附资质、体系认证或专项证书材料。")
+    rows = [
+        [
+            str(row["asset"].get("asset_name") or ""),
+            _get_asset_meta(row["asset"], "certificate_no"),
+            _get_asset_meta(row["asset"], "holder_name"),
+            _get_asset_meta(row["asset"], "issuer_name"),
+            str(row["asset"].get("expires_on") or ""),
+        ]
+        for row in evidence_rows
+    ]
+    _add_summary_table(doc, ["证书名称", "证书编号", "持有人", "发证机构", "有效期止"], rows)
+
+
+def _render_authorization_template(
+    doc: Document,
+    *,
+    item_name: str,
+    item_code: str | None,
+    evidence_rows: list[dict[str, object]],
+) -> None:
+    doc.add_heading(_attachment_display_title(item_name, item_code), level=1)
+    doc.add_paragraph("以下附授权、委托或承诺类文件。")
+    rows = [
+        [
+            str(row["asset"].get("asset_name") or ""),
+            _get_asset_meta(row["asset"], "principal_name"),
+            _get_asset_meta(row["asset"], "agent_name"),
+            _get_asset_meta(row["asset"], "authorization_scope"),
+            str(row["asset"].get("issued_on") or ""),
+        ]
+        for row in evidence_rows
+    ]
+    _add_summary_table(doc, ["文件名称", "授权主体", "被授权人", "授权事项", "签发日期"], rows)
+
+
+def _render_contract_template(
+    doc: Document,
+    *,
+    item_name: str,
+    item_code: str | None,
+    evidence_rows: list[dict[str, object]],
+) -> None:
+    doc.add_heading(_attachment_display_title(item_name, item_code), level=1)
+    doc.add_paragraph("以下附合同、保函、保单或缴款凭证等材料。")
+    rows = [
+        [
+            str(row["asset"].get("asset_name") or ""),
+            _get_asset_meta(row["asset"], "contract_no"),
+            _get_asset_meta(row["asset"], "party_a"),
+            _get_asset_meta(row["asset"], "party_b"),
+            str(row["asset"].get("issued_on") or ""),
+        ]
+        for row in evidence_rows
+    ]
+    _add_summary_table(doc, ["材料名称", "编号", "甲方/付款方", "乙方/收款方", "日期"], rows)
+
+
+def _render_generic_attachment_template(
+    doc: Document,
+    *,
+    item_name: str,
+    item_code: str | None,
+    evidence_rows: list[dict[str, object]],
+) -> None:
+    doc.add_heading(_attachment_display_title(item_name, item_code), level=1)
+    doc.add_paragraph("附件材料清单")
+    rows = [
+        [
+            str(row["asset"].get("asset_name") or ""),
+            row["original_name"],
+            str(row["asset"].get("owner_type") or ""),
+            str(row["asset"].get("expires_on") or ""),
+            str(row["relative_export"]),
+        ]
+        for row in evidence_rows
+    ]
+    _add_summary_table(doc, ["材料名称", "文件名", "归属类型", "有效期止", "导出位置"], rows)
+
+
 def _render_attachment_manifest(
     *,
     item_name: str,
+    item_code: str | None,
     output_docx_path: Path,
     attachment_dir: Path,
     assets: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     attachment_dir.mkdir(parents=True, exist_ok=True)
     copied_assets: list[dict[str, object]] = []
-    doc = Document()
-    doc.add_heading(item_name, level=1)
-    doc.add_paragraph("附件材料清单")
-
-    table = doc.add_table(rows=1, cols=6)
-    table.style = "Table Grid"
-    header = table.rows[0].cells
-    header[0].text = "材料名称"
-    header[1].text = "文件名"
-    header[2].text = "归属类型"
-    header[3].text = "归属记录"
-    header[4].text = "有效期止"
-    header[5].text = "导出位置"
+    evidence_rows: list[dict[str, object]] = []
 
     for asset in assets:
         source_path = Path(str(asset["file_path"])).expanduser()
         copied_path, original_name = _copy_attachment_file(asset, attachment_dir)
         relative_export = copied_path.relative_to(output_docx_path.parent)
-        preview_embedded = False
         copied_assets.append(
             {
                 "asset_id": str(asset.get("id") or ""),
@@ -155,25 +344,40 @@ def _render_attachment_manifest(
                 "file_name": original_name,
                 "output_path": str(copied_path),
                 "relative_output_path": str(relative_export),
-                "preview_embedded": preview_embedded,
+                "preview_embedded": False,
             }
         )
-        row = table.add_row().cells
-        row[0].text = str(asset.get("asset_name") or "")
-        row[1].text = original_name
-        row[2].text = str(asset.get("owner_type") or "")
-        row[3].text = str(asset.get("owner_id") or "")
-        row[4].text = str(asset.get("expires_on") or "")
-        row[5].text = str(relative_export)
+        evidence_rows.append(
+            {
+                "asset": asset,
+                "source_path": source_path,
+                "copied_path": copied_path,
+                "original_name": original_name,
+                "relative_export": relative_export,
+            }
+        )
 
-        doc.add_page_break()
-        doc.add_heading(str(asset.get("asset_name") or original_name), level=2)
-        doc.add_paragraph(f"源文件: {original_name}")
-        doc.add_paragraph(f"导出位置: {relative_export}")
-        preview_embedded = _embed_asset_preview(doc, source_path=source_path, asset=asset)
-        if not preview_embedded:
-            doc.add_paragraph("该文件类型暂不支持直接嵌入预览，请打开同级附件文件。")
-        copied_assets[-1]["preview_embedded"] = preview_embedded
+    doc = Document()
+    template_kind = _attachment_template_kind(item_name, assets)
+    if template_kind == "license":
+        _render_license_template(doc, item_name=item_name, item_code=item_code, evidence_rows=evidence_rows)
+    elif template_kind == "certificate":
+        _render_certificate_template(doc, item_name=item_name, item_code=item_code, evidence_rows=evidence_rows)
+    elif template_kind == "authorization":
+        _render_authorization_template(doc, item_name=item_name, item_code=item_code, evidence_rows=evidence_rows)
+    elif template_kind == "contract":
+        _render_contract_template(doc, item_name=item_name, item_code=item_code, evidence_rows=evidence_rows)
+    else:
+        _render_generic_attachment_template(doc, item_name=item_name, item_code=item_code, evidence_rows=evidence_rows)
+
+    for idx, row in enumerate(evidence_rows):
+        preview_embedded = _add_evidence_page(
+            doc,
+            asset=row["asset"],
+            source_path=row["source_path"],
+            relative_export=row["relative_export"],
+        )
+        copied_assets[idx]["preview_embedded"] = preview_embedded
 
     output_docx_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_docx_path))
@@ -200,6 +404,7 @@ def _render_attachment_item(
     attachment_dir = output_docx_path.parent / f"{output_docx_path.stem}_attachments"
     copied_assets = _render_attachment_manifest(
         item_name=item.item_name,
+        item_code=item.item_code,
         output_docx_path=output_docx_path,
         attachment_dir=attachment_dir,
         assets=assets,

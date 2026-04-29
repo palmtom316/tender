@@ -10,6 +10,8 @@ from docx import Document
 
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemRow, BidTemplatePackageRow
 from tender_backend.services.template_service.package_renderer import (
+    _attachment_display_title,
+    _attachment_template_kind,
     _bundle_dir_name,
     _collect_evidence_assets,
     _render_attachment_manifest,
@@ -112,6 +114,19 @@ def test_collect_evidence_assets_finds_nested_asset_rows() -> None:
     assert assets[0]["asset_name"] == "认证证书扫描件"
 
 
+def test_attachment_display_title_uses_chinese_subsection_number() -> None:
+    assert _attachment_display_title("能源管理体系认证证书", "12.1") == "（一）能源管理体系认证证书"
+    assert _attachment_display_title("投标保证金缴纳证明材料", "23.2") == "（二）投标保证金缴纳证明材料"
+    assert _attachment_display_title("企业营业执照", "3") == "企业营业执照"
+
+
+def test_attachment_template_kind_classifies_common_evidence_types() -> None:
+    assert _attachment_template_kind("企业营业执照（或事业单位法人证书）", []) == "license"
+    assert _attachment_template_kind("能源管理体系认证证书", []) == "certificate"
+    assert _attachment_template_kind("法定代表人授权委托书", []) == "authorization"
+    assert _attachment_template_kind("投标保证金缴纳证明材料（汇款底单或保函）", []) == "contract"
+
+
 def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path) -> None:
     image_path = tmp_path / "license.png"
     image_path.write_bytes(_PNG_1X1)
@@ -128,6 +143,7 @@ def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path
     attachment_dir = tmp_path / "7.1.资质证书证明材料_attachments"
     copied_assets = _render_attachment_manifest(
         item_name="资质证书证明材料",
+        item_code="7.1",
         output_docx_path=output_docx_path,
         attachment_dir=attachment_dir,
         assets=[
@@ -152,6 +168,7 @@ def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path
 
     saved = Document(str(output_docx_path))
     assert len(saved.inline_shapes) == 3
+    assert saved.paragraphs[0].text == "（一）资质证书证明材料"
     assert copied_assets[0]["preview_embedded"] is True
     assert copied_assets[1]["preview_embedded"] is True
     assert (attachment_dir / image_path.name).exists()
