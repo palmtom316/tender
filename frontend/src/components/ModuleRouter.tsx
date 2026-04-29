@@ -1,11 +1,26 @@
 import { Suspense, lazy } from "react";
 
 import { useNavigation } from "../lib/NavigationContext";
-import { ProjectsModule } from "../modules/projects/ProjectsModule";
-import { AuthoringModule } from "../modules/authoring/AuthoringModule";
-import { ReviewModule } from "../modules/review/ReviewModule";
-import { ExportModule } from "../modules/export/ExportModule";
-import { SettingsModule } from "../modules/settings/SettingsModule";
+
+const ProjectsModule = lazy(async () => import("../modules/projects/ProjectsModule").then((module) => ({
+  default: module.ProjectsModule,
+})));
+
+const AuthoringModule = lazy(async () => import("../modules/authoring/AuthoringModule").then((module) => ({
+  default: module.AuthoringModule,
+})));
+
+const ReviewModule = lazy(async () => import("../modules/review/ReviewModule").then((module) => ({
+  default: module.ReviewModule,
+})));
+
+const ExportModule = lazy(async () => import("../modules/export/ExportModule").then((module) => ({
+  default: module.ExportModule,
+})));
+
+const SettingsModule = lazy(async () => import("../modules/settings/SettingsModule").then((module) => ({
+  default: module.SettingsModule,
+})));
 
 const DatabaseModule = lazy(async () => import("../modules/database/DatabaseModule").then((module) => ({
   default: module.DatabaseModule,
@@ -13,34 +28,44 @@ const DatabaseModule = lazy(async () => import("../modules/database/DatabaseModu
 
 function ModuleLoadingFallback() {
   return (
-    <div className="empty-state" style={{ padding: "var(--space-12)" }}>
-      <div className="spinner" />
-      <p>模块加载中...</p>
+    <div className="skeleton-stack" aria-label="模块加载中">
+      <div className="skeleton-card" />
+      <div className="skeleton-line" />
+      <div className="skeleton-line" />
     </div>
   );
 }
 
 export function ModuleRouter() {
   const { module } = useNavigation();
+  let ActiveModule = ProjectsModule;
 
   switch (module) {
     case "projects":
-      return <ProjectsModule />;
+      ActiveModule = ProjectsModule;
+      break;
     case "database":
-      return (
-        <Suspense fallback={<ModuleLoadingFallback />}>
-          <DatabaseModule />
-        </Suspense>
-      );
+      ActiveModule = DatabaseModule;
+      break;
     case "authoring":
-      return <AuthoringModule />;
+      ActiveModule = AuthoringModule;
+      break;
     case "review":
-      return <ReviewModule />;
+      ActiveModule = ReviewModule;
+      break;
     case "export":
-      return <ExportModule />;
+      ActiveModule = ExportModule;
+      break;
     case "settings":
-      return <SettingsModule />;
+      ActiveModule = SettingsModule;
+      break;
     default:
-      return <ProjectsModule />;
+      ActiveModule = ProjectsModule;
   }
+
+  return (
+    <Suspense fallback={<ModuleLoadingFallback />}>
+      <ActiveModule />
+    </Suspense>
+  );
 }

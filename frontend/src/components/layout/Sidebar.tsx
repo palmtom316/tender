@@ -50,7 +50,7 @@ export function Sidebar() {
   const initial = displayName.charAt(0).toUpperCase();
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" aria-label="主侧边栏">
       <div className="sidebar-logo">
         <Icon name="sparkles" size={28} className="logo-icon" />
         <span>Tender AI</span>
@@ -60,17 +60,20 @@ export function Sidebar() {
         className="sidebar-toggle"
         onClick={toggleSidebar}
         title={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+        aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+        aria-expanded={!sidebarCollapsed}
       >
         <Icon name={sidebarCollapsed ? "menu" : "chevron-left"} size={18} />
       </button>
 
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" aria-label="主功能导航">
         {MODULE_CONFIG.map((m) => (
           <button
             key={m.id}
             className={`sidebar-item ${module === m.id ? "active" : ""}`}
             onClick={() => setModule(m.id as ModuleId)}
             title={m.label}
+            aria-current={module === m.id ? "page" : undefined}
           >
             <Icon name={m.icon} size={20} className="item-icon" />
             <span>{m.label}</span>
@@ -83,24 +86,26 @@ export function Sidebar() {
           className="sidebar-avatar"
           onClick={() => setShowMenu((v) => !v)}
           title={displayName}
-          style={{ border: "none", background: "transparent", cursor: "pointer", width: "100%" }}
+          aria-label={`打开用户菜单，当前用户 ${displayName}`}
+          aria-expanded={showMenu}
+          aria-haspopup="menu"
         >
           <span className="avatar-circle">{initial}</span>
           <span>{displayName}</span>
         </button>
 
         {showMenu && (
-          <div className="sidebar-user-menu">
+          <div className="sidebar-user-menu" role="menu" aria-label="用户菜单">
             <div className="user-menu-header">
               <strong>{displayName}</strong>
               <span className="user-menu-role">{currentUser?.role ?? ""}</span>
             </div>
             <div className="user-menu-divider" />
-            <button className="user-menu-item" onClick={handleUserManage}>
+            <button className="user-menu-item" role="menuitem" onClick={handleUserManage}>
               <Icon name="users" size={16} />
               <span>用户管理</span>
             </button>
-            <button className="user-menu-item user-menu-danger" onClick={handleLogout}>
+            <button className="user-menu-item user-menu-danger" role="menuitem" onClick={handleLogout}>
               <Icon name="log-out" size={16} />
               <span>退出登录</span>
             </button>

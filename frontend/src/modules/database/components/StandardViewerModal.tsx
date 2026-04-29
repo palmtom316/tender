@@ -376,9 +376,9 @@ export function StandardViewerModal({
         <div className="standard-viewer-modal__body">
           <div className="standard-viewer-modal__pdf">
             <Suspense fallback={(
-              <div className="empty-state">
-                <div className="spinner" />
-                <p>PDF 组件加载中...</p>
+              <div className="skeleton-stack" aria-label="PDF 组件加载中">
+                <div className="skeleton-card" />
+                <div className="skeleton-card" />
               </div>
             )}
             >

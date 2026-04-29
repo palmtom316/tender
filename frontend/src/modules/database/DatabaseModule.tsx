@@ -56,12 +56,13 @@ export function DatabaseModule() {
     <div>
       <h1 className="section-heading">投标资料库</h1>
       <Card>
-        <div className="empty-state" style={{ padding: "var(--space-12)" }}>
-          <p style={{ fontSize: "var(--text-lg)", marginBottom: "var(--space-2)", color: "var(--color-text)" }}>
+        <div className="empty-state empty-state--spacious">
+          <span className="empty-state__icon">库</span>
+          <p className="empty-state__title">
             {TAB_DESCRIPTIONS[tab] ?? "资料库"}
           </p>
-          <p style={{ color: "var(--color-text-muted)" }}>
-            此模块正在开发中，敬请期待
+          <p className="empty-state__description">
+            后续这里会沉淀可复用的投标资料。当前可先使用规范、模板、公司和人员资料库。
           </p>
         </div>
       </Card>

@@ -250,16 +250,16 @@ function UserForm({ user, onSaved, onCancel }: UserFormProps) {
       {!isEdit && (
         <div className="form-group">
           <label className="form-label">用户名</label>
-          <input className="clay-input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" />
+          <input className="clay-input" aria-label="用户名" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" />
         </div>
       )}
       <div className="form-group">
         <label className="form-label">显示名称</label>
-        <input className="clay-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="张三" />
+        <input className="clay-input" aria-label="显示名称" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="张三" />
       </div>
       <div className="form-group">
         <label className="form-label">角色</label>
-        <select className="clay-input" value={role} onChange={(e) => setRole(e.target.value)}>
+        <select className="clay-input" aria-label="角色" value={role} onChange={(e) => setRole(e.target.value)}>
           {ROLE_OPTIONS.map((r) => (
             <option key={r.value} value={r.value}>{r.label}</option>
           ))}
@@ -267,12 +267,12 @@ function UserForm({ user, onSaved, onCancel }: UserFormProps) {
       </div>
       <div className="form-group">
         <label className="form-label">{isEdit ? "新密码 (留空不修改)" : "密码"}</label>
-        <input className="clay-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={isEdit ? "留空保持不变" : "请输入密码"} />
+        <input className="clay-input" aria-label={isEdit ? "新密码" : "密码"} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={isEdit ? "留空保持不变" : "请输入密码"} />
       </div>
       {isEdit && (
         <div className="form-group">
           <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", cursor: "pointer" }}>
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            <input type="checkbox" aria-label="启用账号" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
             <span className="form-label" style={{ margin: 0 }}>启用账号</span>
           </label>
         </div>
@@ -439,16 +439,16 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
       <div className="agent-form-grid">
         <div className="form-group" style={{ margin: 0 }}>
           <label className="form-label">Base URL</label>
-          <input className="clay-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" style={{ fontSize: "var(--text-sm)" }} />
+          <input className="clay-input" aria-label={`${config.display_name} Base URL`} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" style={{ fontSize: "var(--text-sm)" }} />
         </div>
         <div className="form-group" style={{ margin: 0 }}>
           <label className="form-label">API Key</label>
-          <input className="clay-input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={config.api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
+          <input className="clay-input" aria-label={`${config.display_name} API Key`} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={config.api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
         </div>
         {!isOcr && (
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">主模型</label>
-            <select className="clay-input" value={primaryModel} onChange={(e) => setPrimaryModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
+            <select className="clay-input" aria-label={`${config.display_name} 主模型`} value={primaryModel} onChange={(e) => setPrimaryModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
               <option value="">-- 选择 --</option>
               {MODEL_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -467,15 +467,15 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
           <div className="agent-form-grid" style={{ marginTop: "var(--space-2)" }}>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Fallback URL</label>
-              <input className="clay-input" value={fallbackBaseUrl} onChange={(e) => setFallbackBaseUrl(e.target.value)} placeholder="https://..." style={{ fontSize: "var(--text-sm)" }} />
+              <input className="clay-input" aria-label={`${config.display_name} Fallback URL`} value={fallbackBaseUrl} onChange={(e) => setFallbackBaseUrl(e.target.value)} placeholder="https://..." style={{ fontSize: "var(--text-sm)" }} />
             </div>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Fallback Key</label>
-              <input className="clay-input" type="password" value={fallbackApiKey} onChange={(e) => setFallbackApiKey(e.target.value)} placeholder={config.fallback_api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
+              <input className="clay-input" aria-label={`${config.display_name} Fallback Key`} type="password" value={fallbackApiKey} onChange={(e) => setFallbackApiKey(e.target.value)} placeholder={config.fallback_api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
             </div>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">备选模型</label>
-              <select className="clay-input" value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
+              <select className="clay-input" aria-label={`${config.display_name} 备选模型`} value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
                 <option value="">-- 选择 --</option>
                 {MODEL_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -766,9 +766,10 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
       <h3 style={{ marginBottom: "var(--space-4)" }}>{isEdit ? "编辑 Skill" : "新增 Skill"}</h3>
       <div className="form-group">
         <label className="form-label">Skill 名称</label>
-        <input
-          className="clay-input"
-          value={skillName}
+          <input
+            className="clay-input"
+            aria-label="Skill 名称"
+            value={skillName}
           onChange={(e) => setSkillName(e.target.value)}
           disabled={isEdit}
           placeholder="generate_section"
@@ -776,9 +777,10 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
       </div>
       <div className="form-group">
         <label className="form-label">描述</label>
-        <textarea
-          className="clay-input"
-          value={description}
+          <textarea
+            className="clay-input"
+            aria-label="Skill 描述"
+            value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
           placeholder="说明这个 skill 负责什么工作"
@@ -786,9 +788,10 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
       </div>
       <div className="form-group">
         <label className="form-label">工具名称</label>
-        <textarea
-          className="clay-input"
-          value={toolNamesText}
+          <textarea
+            className="clay-input"
+            aria-label="工具名称"
+            value={toolNamesText}
           onChange={(e) => setToolNamesText(e.target.value)}
           rows={3}
           placeholder="用逗号或换行分隔，例如：load_project_facts, llm_generate_section"
@@ -799,6 +802,7 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
           <label className="form-label">Prompt Template ID</label>
           <input
             className="clay-input"
+            aria-label="Prompt Template ID"
             value={promptTemplateId}
             onChange={(e) => setPromptTemplateId(e.target.value)}
             placeholder="可选 UUID"
@@ -808,6 +812,7 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
           <label className="form-label">版本</label>
           <input
             className="clay-input"
+            aria-label="版本"
             value={version}
             onChange={(e) => setVersion(e.target.value)}
             inputMode="numeric"
@@ -816,7 +821,7 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
       </div>
       <div className="form-group">
         <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", cursor: "pointer" }}>
-          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+          <input type="checkbox" aria-label="启用 Skill" checked={active} onChange={(e) => setActive(e.target.checked)} />
           <span className="form-label" style={{ margin: 0 }}>启用 Skill</span>
         </label>
       </div>

@@ -1,9 +1,15 @@
+import type { CSSProperties } from "react";
+
 import type { Standard } from "../../../lib/api";
 
 type StandardProgressBarProps = {
   processingStatus: string;
   ocrStatus: string | null;
   aiStatus: string | null;
+};
+
+type ProgressFillStyle = CSSProperties & {
+  "--standard-progress-percent": string;
 };
 
 function progressMeta(
@@ -54,7 +60,10 @@ export function StandardProgressBar({
         <span className="standard-progress__percent">{meta.percent}%</span>
       </div>
       <div className="standard-progress__track">
-        <div className="standard-progress__fill" style={{ width: `${meta.percent}%` }} />
+        <div
+          className="standard-progress__fill"
+          style={{ "--standard-progress-percent": `${meta.percent}%` } as ProgressFillStyle}
+        />
       </div>
       <div className="standard-progress__hint">{meta.hint}</div>
     </div>

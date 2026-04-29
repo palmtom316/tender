@@ -100,19 +100,20 @@ export function UploadForm({ onUploaded }: { onUploaded: () => void }) {
       <form onSubmit={handleSubmit}>
         <div className="standard-upload-header">
           <div>
-            <h3 style={{ marginBottom: "var(--space-1)", fontWeight: 600 }}>
+            <h3 className="standard-upload-title">
               <Icon name="upload-cloud" size={18} /> 批量上传规范文件
             </h3>
             <p className="standard-upload-subtitle">一次可选多个 PDF，提交前必须逐条填写规范编号和规范名称。</p>
           </div>
-          <label className="standard-upload-picker">
-            <input
-              key={fileInputKey}
-              type="file"
-              accept=".pdf"
-              multiple
-              onChange={handleFilesSelected}
-            />
+              <label className="standard-upload-picker">
+                <input
+                  key={fileInputKey}
+                  type="file"
+                  accept=".pdf"
+                  multiple
+                  onChange={handleFilesSelected}
+                  aria-label="选择规范 PDF 文件"
+                />
             <span>选择 PDF 文件</span>
           </label>
         </div>
@@ -138,26 +139,30 @@ export function UploadForm({ onUploaded }: { onUploaded: () => void }) {
                   value={row.standard_code}
                   onChange={(event) => updateRow(row.id, "standard_code", event.target.value)}
                   placeholder="如 GB 50010-2010"
+                  aria-label={`${row.file.name} 的规范编号`}
                 />
                 <input
                   className="clay-input"
                   value={row.standard_name}
                   onChange={(event) => updateRow(row.id, "standard_name", event.target.value)}
                   placeholder="如 混凝土结构设计规范"
+                  aria-label={`${row.file.name} 的规范名称`}
                 />
                 <input
                   className="clay-input"
                   value={row.version_year}
                   onChange={(event) => updateRow(row.id, "version_year", event.target.value)}
                   placeholder="如 2010"
+                  aria-label={`${row.file.name} 的版本年份`}
                 />
                 <input
                   className="clay-input"
                   value={row.specialty}
                   onChange={(event) => updateRow(row.id, "specialty", event.target.value)}
                   placeholder="如 结构"
+                  aria-label={`${row.file.name} 的专业类别`}
                 />
-                <ClayButton type="button" variant="ghost" size="sm" onClick={() => removeRow(row.id)}>
+                <ClayButton type="button" variant="ghost" size="sm" onClick={() => removeRow(row.id)} aria-label={`移除 ${row.file.name}`}>
                   移除
                 </ClayButton>
               </div>
@@ -170,7 +175,7 @@ export function UploadForm({ onUploaded }: { onUploaded: () => void }) {
           </div>
         )}
 
-        {error && <p className="text-error" style={{ marginBottom: "var(--space-2)" }}>{error}</p>}
+        {error && <p className="text-error text-error--spaced">{error}</p>}
 
         <div className="standard-upload-actions">
           <ClayButton type="submit" disabled={!canSubmit || uploading}>

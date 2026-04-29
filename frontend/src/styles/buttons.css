@@ -10,6 +10,7 @@
   font-size: var(--text-base);
   font-weight: 600;
   white-space: nowrap;
+  min-height: 44px;
   transition:
     background var(--transition-fast),
     box-shadow var(--transition-fast),
@@ -75,7 +76,7 @@
 }
 
 .clay-btn--danger:hover {
-  background: #B04D43;
+  background: var(--color-danger-hover);
 }
 
 .clay-btn--danger:active {
@@ -88,6 +89,7 @@
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-sm);
   border-radius: var(--radius-sm);
+  min-height: 36px;
 }
 
 .clay-btn--lg {

@@ -466,10 +466,11 @@ export function TemplateFieldWorkbench() {
             </div>
             <Badge variant="info">{packagesQuery.data?.length ?? 0}</Badge>
           </div>
-          <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+          <div className="form-group form-group--tight">
             <label className="form-label">模板类别</label>
             <select
               className="clay-input"
+              aria-label="模板类别"
               value={selectedCategoryCode}
               onChange={(event) => {
                 setSelectedCategoryCode(event.target.value);
@@ -484,7 +485,12 @@ export function TemplateFieldWorkbench() {
               ))}
             </select>
           </div>
-          {packagesQuery.isLoading && <div className="spinner" />}
+          {packagesQuery.isLoading && (
+            <div className="skeleton-stack" aria-label="模板包加载中">
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+            </div>
+          )}
           {packagesQuery.isError && <p className="text-error">{(packagesQuery.error as Error).message}</p>}
           <div className="template-list">
             {(packagesQuery.data ?? []).map((pkg) => (
@@ -530,7 +536,12 @@ export function TemplateFieldWorkbench() {
               {showOnlyBlockedItems ? "显示全部" : "只看待修复项"}
             </ClayButton>
           </div>
-          {packageDetailQuery.isLoading && <div className="spinner" />}
+          {packageDetailQuery.isLoading && (
+            <div className="skeleton-stack" aria-label="模板项加载中">
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+            </div>
+          )}
           <div className="template-list">
             {filteredPackageItems.map((item) => {
               const contextItem = packageContextQuery.data?.items.find((row) => row.item_id === item.id);
@@ -650,6 +661,7 @@ export function TemplateFieldWorkbench() {
                   <label className="form-label">绑定名称</label>
                   <input
                     className="clay-input"
+                    aria-label="绑定名称"
                     value={draft.binding_name}
                     onChange={(event) => setDraft((current) => ({ ...current, binding_name: event.target.value }))}
                   />
@@ -658,6 +670,7 @@ export function TemplateFieldWorkbench() {
                   <label className="form-label">输出键</label>
                   <input
                     className="clay-input"
+                    aria-label="输出键"
                     value={draft.output_key}
                     onChange={(event) => setDraft((current) => ({ ...current, output_key: event.target.value }))}
                   />
@@ -666,6 +679,7 @@ export function TemplateFieldWorkbench() {
                   <label className="form-label">来源类型</label>
                   <select
                     className="clay-input"
+                    aria-label="来源类型"
                     value={draft.source_type}
                     onChange={(event) => {
                       const sourceType = event.target.value as TemplateSourceType;
@@ -687,6 +701,7 @@ export function TemplateFieldWorkbench() {
                   <label className="form-label">选择模式</label>
                   <select
                     className="clay-input"
+                    aria-label="选择模式"
                     value={draft.selection_mode}
                     onChange={(event) => setDraft((current) => ({ ...current, selection_mode: event.target.value as TemplateSelectionMode }))}
                   >
@@ -699,6 +714,7 @@ export function TemplateFieldWorkbench() {
                   <label className="form-label">映射模式</label>
                   <select
                     className="clay-input"
+                    aria-label="映射模式"
                     value={draft.field_mapping_mode}
                     onChange={(event) => setDraft((current) => ({ ...current, field_mapping_mode: event.target.value as TemplateFieldMappingMode }))}
                   >
@@ -711,6 +727,7 @@ export function TemplateFieldWorkbench() {
                   <label className="form-label">排序</label>
                   <input
                     className="clay-input"
+                    aria-label="排序"
                     type="number"
                     value={draft.sort_order}
                     onChange={(event) => setDraft((current) => ({ ...current, sort_order: event.target.value }))}
@@ -722,6 +739,7 @@ export function TemplateFieldWorkbench() {
                 <label className="template-toggle">
                   <input
                     type="checkbox"
+                    aria-label="必填绑定"
                     checked={draft.required}
                     onChange={(event) => setDraft((current) => ({ ...current, required: event.target.checked }))}
                   />
@@ -733,6 +751,7 @@ export function TemplateFieldWorkbench() {
                 <label className="form-label">来源筛选 JSON</label>
                 <textarea
                   className="clay-textarea template-json"
+                  aria-label="来源筛选 JSON"
                   rows={8}
                   value={draft.source_filters}
                   onChange={(event) => setDraft((current) => ({ ...current, source_filters: event.target.value }))}
@@ -740,7 +759,7 @@ export function TemplateFieldWorkbench() {
               </div>
               <div className="form-group">
                 <div className="template-mapping-header">
-                  <label className="form-label" style={{ marginBottom: 0 }}>字段映射</label>
+                  <label className="form-label template-label-inline">字段映射</label>
                   <Badge variant="info">{draft.field_mappings.length}</Badge>
                 </div>
                 <div className="template-mapping-list">
@@ -768,6 +787,7 @@ export function TemplateFieldWorkbench() {
                             <label className="form-label">目标字段</label>
                             <input
                               className="clay-input"
+                              aria-label={`字段映射 ${index + 1} 目标字段`}
                               value={mapping.target_field}
                               onChange={(event) => updateFieldMapping(index, (current) => ({
                                 ...current,
@@ -779,6 +799,7 @@ export function TemplateFieldWorkbench() {
                             <label className="form-label">转换方式</label>
                             <select
                               className="clay-input"
+                              aria-label={`字段映射 ${index + 1} 转换方式`}
                               value={transform}
                               onChange={(event) => {
                                 const nextTransform = event.target.value as TemplateFieldTransform;
@@ -804,6 +825,7 @@ export function TemplateFieldWorkbench() {
                                 <label className="form-label">来源字段列表</label>
                                 <input
                                   className="clay-input"
+                                  aria-label={`字段映射 ${index + 1} 来源字段列表`}
                                   placeholder="例如：certificate_name, grade, specialty"
                                   value={(mapping.source_fields ?? []).join(", ")}
                                   onChange={(event) => updateFieldMapping(index, (current) => ({
@@ -819,6 +841,7 @@ export function TemplateFieldWorkbench() {
                                 <label className="form-label">拼接分隔符</label>
                                 <input
                                   className="clay-input"
+                                  aria-label={`字段映射 ${index + 1} 拼接分隔符`}
                                   placeholder="例如： / "
                                   value={mapping.join_with ?? ""}
                                   onChange={(event) => updateFieldMapping(index, (current) => ({
@@ -833,6 +856,7 @@ export function TemplateFieldWorkbench() {
                               <label className="form-label">来源字段</label>
                               <input
                                 className="clay-input"
+                                aria-label={`字段映射 ${index + 1} 来源字段`}
                                 placeholder="例如：company_name"
                                 value={mapping.source_field ?? ""}
                                 onChange={(event) => updateFieldMapping(index, (current) => ({
@@ -847,6 +871,7 @@ export function TemplateFieldWorkbench() {
                               <label className="form-label">日期格式</label>
                               <input
                                 className="clay-input"
+                                aria-label={`字段映射 ${index + 1} 日期格式`}
                                 placeholder="%Y-%m-%d"
                                 value={mapping.date_format ?? ""}
                                 onChange={(event) => updateFieldMapping(index, (current) => ({
@@ -861,6 +886,7 @@ export function TemplateFieldWorkbench() {
                               <label className="form-label">小数位</label>
                               <input
                                 className="clay-input"
+                                aria-label={`字段映射 ${index + 1} 小数位`}
                                 type="number"
                                 min={0}
                                 value={mapping.decimals ?? 2}
@@ -875,6 +901,7 @@ export function TemplateFieldWorkbench() {
                             <label className="form-label">默认值</label>
                             <input
                               className="clay-input"
+                              aria-label={`字段映射 ${index + 1} 默认值`}
                               placeholder="来源字段为空时使用"
                               value={typeof mapping.default_value === "string" ? mapping.default_value : ""}
                               onChange={(event) => updateFieldMapping(index, (current) => ({
@@ -893,7 +920,7 @@ export function TemplateFieldWorkbench() {
                     </div>
                   )}
                 </div>
-                <div className="template-inline-actions" style={{ marginTop: "var(--space-3)" }}>
+                <div className="template-inline-actions template-inline-actions--offset">
                   <ClayButton
                     variant="outline"
                     size="sm"
@@ -932,7 +959,12 @@ export function TemplateFieldWorkbench() {
                     {packagePreflightQuery.data?.ready ? "可导出" : "待修复"}
                   </Badge>
                 </div>
-                {packagePreflightQuery.isLoading && <div className="spinner" />}
+                {packagePreflightQuery.isLoading && (
+                  <div className="skeleton-stack" aria-label="预检加载中">
+                    <div className="skeleton-card" />
+                    <div className="skeleton-line" />
+                  </div>
+                )}
                 {packagePreflightQuery.isError && (
                   <p className="text-error">{(packagePreflightQuery.error as Error).message}</p>
                 )}
@@ -1013,7 +1045,12 @@ export function TemplateFieldWorkbench() {
                       <p>{summarizeSuggestion(group)}</p>
                     </button>
                   ))}
-                  {suggestionQuery.isLoading && <div className="spinner" />}
+                  {suggestionQuery.isLoading && (
+                    <div className="skeleton-stack" aria-label="映射建议加载中">
+                      <div className="skeleton-card" />
+                      <div className="skeleton-card" />
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -1042,8 +1079,10 @@ export function TemplateFieldWorkbench() {
           </div>
         ) : (
           <section className="template-panel">
-            <div className="empty-state" style={{ padding: "var(--space-12)" }}>
-              <p>请选择模板项开始配置字段映射。</p>
+            <div className="empty-state empty-state--spacious">
+              <span className="empty-state__icon">映</span>
+              <p className="empty-state__title">选择模板项</p>
+              <p className="empty-state__description">选择左侧模板项后，可配置字段映射、预检问题和推荐字段。</p>
             </div>
           </section>
         )}

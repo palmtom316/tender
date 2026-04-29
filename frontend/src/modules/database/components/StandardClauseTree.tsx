@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 
 import { Badge } from "../../../components/ui/Badge";
 import { Icon } from "../../../components/ui/Icon";
@@ -19,6 +20,10 @@ function containsNode(nodes: StandardClauseNode[], targetId: string | null): boo
   }
   return false;
 }
+
+type ClauseRowStyle = CSSProperties & {
+  "--clause-depth-indent": string;
+};
 
 function findNode(nodes: StandardClauseNode[], targetId: string | null): StandardClauseNode | null {
   if (!targetId) return null;
@@ -58,7 +63,7 @@ function ClauseTreeItem({
       <button
         type="button"
         className={`standard-clause-tree__row ${selectedClauseId === node.id ? "is-selected" : ""}`}
-        style={{ paddingLeft: `${12 + depth * 18}px` }}
+        style={{ "--clause-depth-indent": `${12 + depth * 18}px` } as ClauseRowStyle}
         onClick={() => onSelectClause(node)}
       >
         <span

@@ -38,7 +38,13 @@ export function RequirementsContent() {
   });
 
   if (!projectId) {
-    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+    return (
+      <div className="empty-state">
+        <span className="empty-state__icon">项</span>
+        <p className="empty-state__title">先选择投标项目</p>
+        <p className="empty-state__description">选择项目后，可确认否决项、资质要求和评分规则。</p>
+      </div>
+    );
   }
 
   const vetoUnconfirmed = requirements.filter(
@@ -73,7 +79,13 @@ export function RequirementsContent() {
         ))}
       </div>
 
-      {isLoading && <div className="spinner" />}
+      {isLoading && (
+        <div className="skeleton-stack" aria-label="要求列表加载中">
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
+        </div>
+      )}
 
       <div className="requirement-list">
         {requirements.map((r) => (
@@ -95,12 +107,16 @@ export function RequirementsContent() {
                 </ClayButton>
               )}
             </div>
-            <h3 style={{ margin: "var(--space-2) 0 var(--space-1)" }}>{r.title}</h3>
+            <h3 className="requirement-title">{r.title}</h3>
             {r.source_text && <p className="source-text">{r.source_text}</p>}
           </Card>
         ))}
         {!isLoading && requirements.length === 0 && (
-          <p className="empty-state">暂无要求记录</p>
+          <div className="empty-state">
+            <span className="empty-state__icon">要</span>
+            <p className="empty-state__title">暂无要求记录</p>
+            <p className="empty-state__description">解析招标文件后，关键要求会按类别汇总到这里供人工确认。</p>
+          </div>
         )}
       </div>
     </div>

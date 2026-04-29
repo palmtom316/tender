@@ -63,6 +63,7 @@ export function ProjectsModule() {
               placeholder="项目名称"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              aria-label="项目名称"
               autoFocus
             />
             <ClayButton type="submit" disabled={mutation.isPending}>

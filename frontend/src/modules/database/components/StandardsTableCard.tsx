@@ -39,11 +39,12 @@ export function StandardsTableCard({
         </div>
         {isDevMode && (
           <label className="standards-table-card__toggle">
-            <input
-              type="checkbox"
-              checked={showDevArtifacts}
-              onChange={(event) => onToggleShowDevArtifacts(event.target.checked)}
-            />
+              <input
+                type="checkbox"
+                checked={showDevArtifacts}
+                onChange={(event) => onToggleShowDevArtifacts(event.target.checked)}
+                aria-label="显示测试残留"
+              />
             <span>
               显示测试残留
               {hiddenDevArtifactCount > 0 ? `（已隐藏 ${hiddenDevArtifactCount} 条）` : ""}
@@ -55,14 +56,22 @@ export function StandardsTableCard({
       {error && <div className="warning-banner">{error}</div>}
 
       {loading ? (
-        <div className="empty-state">
-          <div className="spinner" />
+        <div className="skeleton-stack" aria-label="规范列表加载中">
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
         </div>
       ) : standards.length === 0 ? (
         <div className="empty-state">
-          {isDevMode && hiddenDevArtifactCount > 0
-            ? `当前仅剩 ${hiddenDevArtifactCount} 条测试残留，打开上方开关可查看。`
-            : "暂无规范，请先批量上传规范 PDF 文件。"}
+          <span className="empty-state__icon">规</span>
+          <p className="empty-state__title">
+            {isDevMode && hiddenDevArtifactCount > 0 ? "测试残留已隐藏" : "还没有规范文件"}
+          </p>
+          <p className="empty-state__description">
+            {isDevMode && hiddenDevArtifactCount > 0
+              ? `当前仅剩 ${hiddenDevArtifactCount} 条测试残留，打开上方开关可查看。`
+              : "先在上方批量上传 PDF，系统会自动进入 OCR 和 AI 解析流水线。"}
+          </p>
         </div>
       ) : (
         <div className="standards-table-card__table-wrap">

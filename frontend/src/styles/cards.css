@@ -23,22 +23,3 @@
 .clay-card--flat:hover {
   box-shadow: none;
 }
-
-/* Stat card inside clay-card */
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: var(--space-5) var(--space-8);
-}
-
-.stat-value {
-  font-size: 36px;
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
-.stat-label {
-  font-size: var(--text-base);
-  color: var(--color-text-secondary);
-}

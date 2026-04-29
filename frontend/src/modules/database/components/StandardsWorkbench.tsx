@@ -42,17 +42,32 @@ export function StandardsWorkbench() {
   const [initialClauseId, setInitialClauseId] = useState<string | null>(null);
   const [pendingDeleteStandardId, setPendingDeleteStandardId] = useState<string | null>(null);
   const pollingRef = useRef<number | null>(null);
+  const standardsAbortRef = useRef<AbortController | null>(null);
   const viewerRequestRef = useRef(0);
   const viewerAbortRef = useRef<AbortController | null>(null);
 
   const loadStandards = useCallback(() => {
-    listStandards()
+    standardsAbortRef.current?.abort();
+    const controller = new AbortController();
+    standardsAbortRef.current = controller;
+
+    listStandards({ signal: controller.signal })
       .then((data) => {
+        if (controller.signal.aborted) return;
         setStandards(data);
         setActionError("");
       })
-      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : "加载规范失败"))
-      .finally(() => setLoading(false));
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setActionError(err instanceof Error ? err.message : "加载规范失败");
+      })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        if (standardsAbortRef.current === controller) {
+          standardsAbortRef.current = null;
+        }
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -77,6 +92,7 @@ export function StandardsWorkbench() {
   }, [hasActiveStandards, loadStandards]);
 
   useEffect(() => () => {
+    standardsAbortRef.current?.abort();
     viewerAbortRef.current?.abort();
   }, []);
 

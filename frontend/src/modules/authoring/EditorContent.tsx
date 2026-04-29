@@ -28,7 +28,13 @@ export function EditorContent() {
   });
 
   if (!projectId) {
-    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+    return (
+      <div className="empty-state">
+        <span className="empty-state__icon">项</span>
+        <p className="empty-state__title">先选择投标项目</p>
+        <p className="empty-state__description">选择项目后，可编辑生成的章节草稿。</p>
+      </div>
+    );
   }
 
   const selected = drafts.find((d) => d.id === selectedId);
@@ -45,7 +51,13 @@ export function EditorContent() {
       <div className="editor-layout">
         <aside className="outline-panel">
           <h2>提纲</h2>
-          {isLoading && <div className="spinner" />}
+          {isLoading && (
+            <div className="skeleton-stack" aria-label="章节草稿加载中">
+              <div className="skeleton-line" />
+              <div className="skeleton-line" />
+              <div className="skeleton-line" />
+            </div>
+          )}
           {drafts.map((d) => (
             <div
               key={d.id}
@@ -59,7 +71,11 @@ export function EditorContent() {
             </div>
           ))}
           {!isLoading && drafts.length === 0 && (
-            <p className="empty-state">暂无章节草稿</p>
+            <div className="empty-state">
+              <span className="empty-state__icon">章</span>
+              <p className="empty-state__title">暂无章节草稿</p>
+              <p className="empty-state__description">完成解析和要求确认后，生成的章节草稿会出现在这里。</p>
+            </div>
           )}
         </aside>
 
@@ -76,14 +92,18 @@ export function EditorContent() {
                 </ClayButton>
               </div>
               <textarea
-                className="clay-textarea"
-                style={{ flex: 1, minHeight: 400 }}
+                className="clay-textarea draft-editor"
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
+                aria-label={`${selected.chapter_code} 章节正文`}
               />
             </>
           ) : (
-            <p className="empty-state">请从左侧选择章节</p>
+            <div className="empty-state">
+              <span className="empty-state__icon">编</span>
+              <p className="empty-state__title">选择章节开始编辑</p>
+              <p className="empty-state__description">左侧选择章节后，可在这里调整正文并保存。</p>
+            </div>
           )}
         </main>
       </div>

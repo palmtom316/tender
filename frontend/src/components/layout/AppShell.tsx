@@ -10,13 +10,14 @@ export function AppShell() {
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
       <Sidebar />
       <div className="workspace">
         <NotificationMarquee />
         <WorkspaceTabs />
-        <div className="workspace-content">
+        <main id="main-content" className="workspace-content" tabIndex={-1}>
           <ModuleRouter />
-        </div>
+        </main>
       </div>
       <CopilotPanel />
     </div>

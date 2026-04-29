@@ -19,8 +19,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   margin: 0 var(--space-3) var(--space-3);
   border: none;
   border-radius: var(--radius-sm);
@@ -120,8 +120,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  width: 100%;
   padding: var(--space-2) var(--space-3);
+  border: none;
   border-radius: var(--radius-sm);
+  background: transparent;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -159,7 +162,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-clay-raised);
   padding: var(--space-2);
   z-index: 100;
 }

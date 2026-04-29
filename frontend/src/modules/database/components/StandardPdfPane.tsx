@@ -132,9 +132,10 @@ export function StandardPdfPane({ pdfUrl, targetPage }: StandardPdfPaneProps) {
 
       <div className="standard-pdf-pane__viewport">
         {loading ? (
-          <div className="empty-state">
-            <div className="spinner" />
-            <p>PDF 加载中...</p>
+          <div className="skeleton-stack" aria-label="PDF 加载中">
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
           </div>
         ) : error ? (
           <div className="empty-state text-error">{error}</div>

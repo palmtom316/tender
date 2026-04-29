@@ -23,20 +23,14 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: 40, textAlign: "center" }}>
-          <h1 style={{ marginBottom: 8 }}>出错了</h1>
-          <p style={{ color: "#666", marginBottom: 16 }}>
+        <div className="error-boundary">
+          <h1>出错了</h1>
+          <p>
             {this.state.error?.message ?? "应用发生未知错误"}
           </p>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
-            style={{
-              padding: "8px 24px",
-              cursor: "pointer",
-              borderRadius: 6,
-              border: "1px solid #ccc",
-              background: "#f5f5f5",
-            }}
+            className="clay-btn clay-btn--outline"
           >
             重试
           </button>

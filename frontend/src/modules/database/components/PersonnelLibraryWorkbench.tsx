@@ -82,14 +82,14 @@ export function PersonnelLibraryWorkbench() {
   }));
 
   return (
-    <div style={{ display: "grid", gap: "var(--space-5)" }}>
+    <div className="stack">
       <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-4)", flexWrap: "wrap", marginBottom: "var(--space-4)" }}>
+        <div className="panel-header-split panel-header-split--center">
           <div>
-            <h3 style={{ marginBottom: "var(--space-1)" }}>人员资料库</h3>
-            <p style={{ color: "var(--color-text-muted)" }}>按公司维度管理人员档案，并把身份证、资格证、社保、劳动合同等文件直接归到个人名下。</p>
+            <h3 className="panel-title-tight">人员资料库</h3>
+            <p className="subtle-copy">按公司维度管理人员档案，并把身份证、资格证、社保、劳动合同等文件直接归到个人名下。</p>
           </div>
-          <select className="clay-input" value={selectedLibraryId} onChange={(event) => setSelectedLibraryId(event.target.value)} style={{ minWidth: 240 }}>
+          <select className="clay-input min-w-company-select" aria-label="选择公司库" value={selectedLibraryId} onChange={(event) => setSelectedLibraryId(event.target.value)}>
             <option value="">选择公司库</option>
             {libraries.map((row) => (
               <option key={row.id} value={row.id}>{row.company_name}</option>
@@ -97,11 +97,16 @@ export function PersonnelLibraryWorkbench() {
           </select>
         </div>
 
-        {loading ? <div className="spinner" /> : (
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 360px) minmax(0, 1fr)", gap: "var(--space-5)" }}>
+        {loading ? (
+          <div className="skeleton-stack" aria-label="人员资料库加载中">
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+          </div>
+        ) : (
+          <div className="split-panel-grid split-panel-grid--wide-rail">
             <div>
-              <h4 style={{ marginBottom: "var(--space-2)" }}>人员清单</h4>
-              <div style={{ display: "grid", gap: "var(--space-2)" }}>
+              <h4 className="panel-title-tight">人员清单</h4>
+              <div className="stack-sm">
                 {personAssetCount.map((row) => (
                   <button
                     key={row.id}
@@ -118,15 +123,15 @@ export function PersonnelLibraryWorkbench() {
             </div>
 
             <div>
-              <form onSubmit={handleUpload} style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--space-3)", marginBottom: "var(--space-4)" }}>
-                <input className="clay-input" placeholder="资料名称" value={uploadName} onChange={(event) => setUploadName(event.target.value)} />
-                <select className="clay-input" value={selectedPersonId} onChange={(event) => setSelectedPersonId(event.target.value)}>
+              <form onSubmit={handleUpload} className="form-grid-two">
+                <input className="clay-input" aria-label="人员资料名称" placeholder="资料名称" value={uploadName} onChange={(event) => setUploadName(event.target.value)} />
+                <select className="clay-input" aria-label="选择人员" value={selectedPersonId} onChange={(event) => setSelectedPersonId(event.target.value)}>
                   <option value="">选择人员</option>
                   {people.map((row) => (
                     <option key={row.id} value={row.id}>{row.full_name}</option>
                   ))}
                 </select>
-                <select className="clay-input" value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value)}>
+                <select className="clay-input" aria-label="人员资料分类" value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value)}>
                   <option value="performance_table">业绩表</option>
                   <option value="id_card">身份证</option>
                   <option value="graduation_certificate">毕业证</option>
@@ -137,8 +142,8 @@ export function PersonnelLibraryWorkbench() {
                   <option value="social_security_proof">社保参保证明</option>
                   <option value="labor_contract">劳动合同书</option>
                 </select>
-                <input type="file" accept=".pdf,image/*" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
-                <div style={{ gridColumn: "1 / -1" }}>
+                <input type="file" accept=".pdf,image/*" aria-label="选择人员资料文件" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
+                <div className="form-grid-full">
                   <ClayButton type="submit" disabled={!selectedPersonId || !uploadFile || !uploadName.trim()}>
                     上传人员资料
                   </ClayButton>
@@ -147,7 +152,7 @@ export function PersonnelLibraryWorkbench() {
 
               {error && <p className="text-error">{error}</p>}
 
-              <div style={{ display: "grid", gap: "var(--space-2)" }}>
+              <div className="stack-sm">
                 {assets
                   .filter((row) => !selectedPersonId || row.owner_id === selectedPersonId)
                   .slice(0, 12)

@@ -45,18 +45,36 @@ export function StandardSearchCard({ onOpenHit }: StandardSearchCardProps) {
           <p>按关键词检索 AI 解析条款，并从命中位置直接进入 PDF 对照查阅。</p>
         </div>
         <div className="standard-search-card__controls">
-          <input
-            className="clay-input"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="输入关键词，如 混凝土、抗震、强度等级"
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void handleSearch();
-              }
-            }}
-          />
+          <div className="standard-search-card__input-wrap">
+            <input
+              className="clay-input"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="输入关键词，如 混凝土、抗震、强度等级"
+              aria-label="规范条款检索关键词"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleSearch();
+                }
+              }}
+            />
+            {query && (
+              <button
+                type="button"
+                className="standard-search-card__clear"
+                onClick={() => {
+                  setQuery("");
+                  setResults([]);
+                  setError("");
+                  setHasSearched(false);
+                }}
+                aria-label="清除检索关键词"
+              >
+                ×
+              </button>
+            )}
+          </div>
           <ClayButton type="button" onClick={() => void handleSearch()} disabled={loading}>
             {loading ? "查询中..." : "查询"}
           </ClayButton>
@@ -67,7 +85,11 @@ export function StandardSearchCard({ onOpenHit }: StandardSearchCardProps) {
 
       {results.length === 0 ? (
         <div className="empty-state">
-          {hasSearched ? "未找到匹配的规范条款，请尝试更换关键词。" : "输入关键词后，可在这里查看命中的规范条款。"}
+          <span className="empty-state__icon">查</span>
+          <p className="empty-state__title">{hasSearched ? "没有匹配条款" : "检索规范条款"}</p>
+          <p className="empty-state__description">
+            {hasSearched ? "尝试更换关键词，或确认规范已完成 AI 解析。" : "输入关键词后，可从命中位置直接进入 PDF 对照查阅。"}
+          </p>
         </div>
       ) : (
         <div className="standard-search-card__results">

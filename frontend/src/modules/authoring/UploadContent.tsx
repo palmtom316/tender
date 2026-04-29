@@ -51,7 +51,13 @@ export function UploadContent() {
   );
 
   if (!projectId) {
-    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+    return (
+      <div className="empty-state">
+        <span className="empty-state__icon">项</span>
+        <p className="empty-state__title">先选择投标项目</p>
+        <p className="empty-state__description">选择项目后，可上传招标文件并启动解析流程。</p>
+      </div>
+    );
   }
 
   return (
@@ -82,11 +88,18 @@ export function UploadContent() {
         <p className="text-error">上传失败: {(upload.error as Error).message}</p>
       )}
 
-      <h2 className="section-heading" style={{ fontSize: "var(--text-lg)" }}>已上传文件</h2>
+      <h2 className="section-heading section-heading--sm">已上传文件</h2>
       {isLoading ? (
-        <div className="spinner" />
+        <div className="skeleton-stack" aria-label="文件列表加载中">
+          <div className="skeleton-card" />
+          <div className="skeleton-card" />
+        </div>
       ) : files.length === 0 ? (
-        <p className="empty-state">暂无文件</p>
+        <div className="empty-state">
+          <span className="empty-state__icon">文</span>
+          <p className="empty-state__title">还没有上传文件</p>
+          <p className="empty-state__description">拖拽 PDF、DOC 或 DOCX 到上方区域，上传后会出现在这里。</p>
+        </div>
       ) : (
         <table className="data-table">
           <thead>

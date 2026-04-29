@@ -54,24 +54,25 @@ export function CopilotPanel() {
           className="copilot-trigger"
           onClick={() => setOpen(true)}
           title="打开 AI 助手 (Ctrl+/)"
+          aria-label="打开 AI 助手"
         >
           AI
         </button>
       )}
 
       {open && (
-        <div className="copilot-backdrop visible" onClick={() => setOpen(false)} />
+        <div className="copilot-backdrop visible" onClick={() => setOpen(false)} aria-hidden="true" />
       )}
 
-      <div className={`copilot-panel ${open ? "open" : ""}`}>
+      <div className={`copilot-panel ${open ? "open" : ""}`} role="complementary" aria-label="AI 助手" hidden={!open}>
         <div className="copilot-header">
           <h3>AI 助手</h3>
-          <button className="copilot-close" onClick={() => setOpen(false)}>
+          <button className="copilot-close" onClick={() => setOpen(false)} aria-label="关闭 AI 助手">
             <Icon name="x" size={16} />
           </button>
         </div>
 
-        <div className="copilot-messages">
+        <div className="copilot-messages" role="log" aria-live="polite" aria-relevant="additions text">
           {messages.map((msg, i) => (
             <div key={i} className={`copilot-bubble ${msg.role}`}>
               {msg.content}
@@ -86,8 +87,9 @@ export function CopilotPanel() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             placeholder="输入问题..."
+            aria-label="输入问题"
           />
-          <button className="copilot-send" onClick={handleSend}>
+          <button className="copilot-send" onClick={handleSend} aria-label="发送问题">
             <Icon name="send" size={14} />
           </button>
         </div>

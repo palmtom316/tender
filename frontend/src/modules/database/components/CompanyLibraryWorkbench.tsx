@@ -144,17 +144,22 @@ export function CompanyLibraryWorkbench() {
   };
 
   return (
-    <div style={{ display: "grid", gap: "var(--space-5)" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 340px) minmax(0, 1fr)", gap: "var(--space-5)" }}>
+    <div className="stack">
+      <div className="split-panel-grid">
         <Card>
-          <h3 style={{ marginBottom: "var(--space-3)" }}>公司库</h3>
-          <form onSubmit={handleCreateLibrary} style={{ display: "grid", gap: "var(--space-2)", marginBottom: "var(--space-4)" }}>
-            <input className="clay-input" placeholder="公司名称" value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} />
-            <input className="clay-input" placeholder="公司类型" value={newCompanyType} onChange={(event) => setNewCompanyType(event.target.value)} />
+          <h3 className="section-heading section-heading--sm">公司库</h3>
+          <form onSubmit={handleCreateLibrary} className="form-grid-compact">
+            <input className="clay-input" aria-label="公司名称" placeholder="公司名称" value={newCompanyName} onChange={(event) => setNewCompanyName(event.target.value)} />
+            <input className="clay-input" aria-label="公司类型" placeholder="公司类型" value={newCompanyType} onChange={(event) => setNewCompanyType(event.target.value)} />
             <ClayButton type="submit" disabled={creating}>{creating ? "创建中..." : "新建公司库"}</ClayButton>
           </form>
-          {loading ? <div className="spinner" /> : (
-            <div style={{ display: "grid", gap: "var(--space-2)" }}>
+          {loading ? (
+            <div className="skeleton-stack" aria-label="公司库加载中">
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+            </div>
+          ) : (
+            <div className="stack-sm">
               {libraries.map((row) => (
                 <button
                   key={row.id}
@@ -171,31 +176,31 @@ export function CompanyLibraryWorkbench() {
         </Card>
 
         <Card>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-4)", marginBottom: "var(--space-4)", flexWrap: "wrap" }}>
+          <div className="panel-header-split">
             <div>
-              <h3 style={{ marginBottom: "var(--space-1)" }}>{selectedLibrary?.company_name || "未选择公司库"}</h3>
-              <p style={{ color: "var(--color-text-muted)" }}>公司资料、业绩、资质、履约评价统一归档到本地复用库。</p>
+              <h3 className="panel-title-tight">{selectedLibrary?.company_name || "未选择公司库"}</h3>
+              <p className="subtle-copy">公司资料、业绩、资质、履约评价统一归档到本地复用库。</p>
             </div>
-            <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
+            <div className="summary-pill-row">
               <div className="template-summary__pill"><span>公司档案</span><strong>{profiles.length}</strong></div>
               <div className="template-summary__pill"><span>已上传资料</span><strong>{assets.length}</strong></div>
             </div>
           </div>
 
-          <form onSubmit={handleUpload} style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--space-3)", marginBottom: "var(--space-4)" }}>
-            <input className="clay-input" placeholder="资料名称" value={uploadName} onChange={(event) => setUploadName(event.target.value)} />
-            <select className="clay-input" value={uploadDomain} onChange={(event) => setUploadDomain(event.target.value)}>
+          <form onSubmit={handleUpload} className="form-grid-two">
+            <input className="clay-input" aria-label="公司资料名称" placeholder="资料名称" value={uploadName} onChange={(event) => setUploadName(event.target.value)} />
+            <select className="clay-input" aria-label="公司资料领域" value={uploadDomain} onChange={(event) => setUploadDomain(event.target.value)}>
               {taxonomy.filter((row) => row.domain !== "personnel").map((row) => (
                 <option key={row.domain} value={row.domain}>{row.label}</option>
               ))}
             </select>
-            <select className="clay-input" value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value)}>
+            <select className="clay-input" aria-label="公司资料分类" value={uploadCategory} onChange={(event) => setUploadCategory(event.target.value)}>
               {categoriesForDomain.map(([code, label]) => (
                 <option key={code} value={code}>{label}</option>
               ))}
             </select>
-            <input type="file" accept=".pdf,image/*" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
-            <div style={{ gridColumn: "1 / -1" }}>
+            <input type="file" accept=".pdf,image/*" aria-label="选择公司资料文件" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} />
+            <div className="form-grid-full">
               <ClayButton type="submit" disabled={!selectedLibraryId || !uploadFile || !uploadName.trim() || uploading}>
                 {uploading ? "上传中..." : "上传公司资料"}
               </ClayButton>
@@ -204,10 +209,10 @@ export function CompanyLibraryWorkbench() {
 
           {error && <p className="text-error">{error}</p>}
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--space-4)" }}>
+          <div className="form-grid-two">
             <div>
-              <h4 style={{ marginBottom: "var(--space-2)" }}>资料分类</h4>
-              <div style={{ display: "grid", gap: "var(--space-2)" }}>
+              <h4 className="panel-title-tight">资料分类</h4>
+              <div className="stack-sm">
                 {groupedAssets.map((row) => (
                   <div key={row.domain} className="template-list__item">
                     <span className="template-list__title">{row.label}</span>
@@ -217,8 +222,8 @@ export function CompanyLibraryWorkbench() {
               </div>
             </div>
             <div>
-              <h4 style={{ marginBottom: "var(--space-2)" }}>最近上传</h4>
-              <div style={{ display: "grid", gap: "var(--space-2)" }}>
+              <h4 className="panel-title-tight">最近上传</h4>
+              <div className="stack-sm">
                 {assets.slice(0, 8).map((row) => (
                   <div key={row.id} className="template-list__item">
                     <span className="template-list__title">{row.asset_name}</span>

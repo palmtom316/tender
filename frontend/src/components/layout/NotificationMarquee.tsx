@@ -7,6 +7,7 @@ interface NotificationItem {
 
 export function NotificationMarquee() {
   const [items, setItems] = useState<NotificationItem[]>([]);
+  const [paused, setPaused] = useState(false);
 
   // Placeholder: in a real app, fetch notifications from API or WebSocket
   useEffect(() => {
@@ -23,7 +24,15 @@ export function NotificationMarquee() {
 
   return (
     <div className="marquee-bar">
-      <div className="marquee-track">
+      <button
+        type="button"
+        className="marquee-pause"
+        onClick={() => setPaused((value) => !value)}
+        aria-pressed={paused}
+      >
+        {paused ? "继续通知" : "暂停通知"}
+      </button>
+      <div className={`marquee-track ${paused ? "is-paused" : ""}`} aria-live="polite">
         {doubled.map((item, i) => (
           <span key={`${item.id}-${i}`} className="marquee-item">
             <span className="marquee-dot" />
