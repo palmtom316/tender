@@ -138,6 +138,23 @@ def _apply_schema(conn: psycopg.Connection) -> None:
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (fiscal_year, statement_type)
     );
+    CREATE TABLE IF NOT EXISTS evidence_asset (
+      id UUID PRIMARY KEY,
+      owner_type TEXT NOT NULL,
+      owner_id UUID,
+      asset_name TEXT NOT NULL,
+      asset_type TEXT NOT NULL DEFAULT 'supporting_document',
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      media_type TEXT,
+      issuer_name TEXT,
+      issued_on DATE,
+      expires_on DATE,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     """)
     conn.commit()
 
@@ -146,6 +163,7 @@ def _reset_schema(conn: psycopg.Connection) -> None:
     conn.execute("DELETE FROM bid_template_binding_rule;")
     conn.execute("DELETE FROM bid_template_item;")
     conn.execute("DELETE FROM bid_template_package;")
+    conn.execute("DELETE FROM evidence_asset;")
     conn.execute("DELETE FROM financial_statement;")
     conn.execute("DELETE FROM qualification_certificate;")
     conn.execute("DELETE FROM project_performance;")
@@ -168,6 +186,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
     source_dir.mkdir()
     (source_dir / "5.1.基本情况表.docx").write_bytes(b"docx")
     (source_dir / "6.1.人员汇总表及人员简历表.docx").write_bytes(b"docx")
+    (source_dir / "7.1.资质证书证明材料.docx").write_bytes(b"docx")
 
     with psycopg.connect(db_url) as conn:
         _apply_schema(conn)
@@ -181,6 +200,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         package_id = UUID(package["id"])
         basic_item_id = UUID(package["items"][0]["id"])
         people_item_id = UUID(package["items"][1]["id"])
+        evidence_item_id = UUID(package["items"][2]["id"])
 
         company = client.post(
             "/api/master-data/company-profiles",
@@ -192,6 +212,30 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
             json={"full_name": "唐玮", "role_name": "项目总经理"},
         )
         assert person.status_code == 201
+        certificate = client.post(
+            "/api/master-data/certificates",
+            json={
+                "certificate_name": "质量管理体系认证证书",
+                "holder_name": "REDACTED",
+                "certificate_no": "ISO-001",
+            },
+        )
+        assert certificate.status_code == 201
+        certificate_id = UUID(certificate.json()["id"])
+        attachment_file = tmp_path / "quality-cert.pdf"
+        attachment_file.write_bytes(b"pdf")
+        evidence_asset = client.post(
+            "/api/master-data/evidence-assets",
+            json={
+                "owner_type": "qualification_certificate",
+                "owner_id": str(certificate_id),
+                "asset_name": "质量认证证书扫描件",
+                "asset_type": "certificate_scan",
+                "file_name": "quality-cert.pdf",
+                "file_path": str(attachment_file),
+            },
+        )
+        assert evidence_asset.status_code == 201
 
         binding1 = client.post(
             f"/api/template-items/{basic_item_id}/bindings",
@@ -216,12 +260,27 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         )
         assert binding2.status_code == 201
         binding2_id = UUID(binding2.json()["id"])
+        binding3 = client.post(
+            f"/api/template-items/{evidence_item_id}/bindings",
+            json={
+                "binding_name": "certificate_assets",
+                "source_type": "evidence_asset",
+                "selection_mode": "all",
+                "output_key": "assets",
+                "source_filters": {
+                    "equals": {"owner_type": "qualification_certificate"},
+                    "record_ids": [evidence_asset.json()["id"]],
+                },
+            },
+        )
+        assert binding3.status_code == 201
 
         preview = client.get(f"/api/template-packages/{package_id}/context-preview")
         assert preview.status_code == 200
         body = preview.json()
         assert body["items"][0]["bindings"][0]["data"]["company_name"] == "REDACTED"
         assert body["items"][1]["bindings"][0]["matched_count"] == 1
+        assert body["items"][2]["bindings"][0]["matched_count"] == 1
 
         item_render = client.get(f"/api/template-items/{basic_item_id}/render-context")
         assert item_render.status_code == 200
@@ -230,8 +289,8 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
 
         package_render = client.get(f"/api/template-packages/{package_id}/render-context")
         assert package_render.status_code == 200
-        assert package_render.json()["ready_item_count"] == 2
-        assert package_render.json()["total_item_count"] == 2
+        assert package_render.json()["ready_item_count"] == 3
+        assert package_render.json()["total_item_count"] == 3
 
         rendered = client.post(f"/api/template-items/{basic_item_id}/render-docx")
         assert rendered.status_code == 200
@@ -244,12 +303,18 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         )
         assert bundle.status_code == 200
         bundle_body = bundle.json()
-        assert bundle_body["rendered_count"] == 2
+        assert bundle_body["rendered_count"] == 3
         assert bundle_body["failed_count"] == 0
         assert Path(bundle_body["output_dir"]).exists()
         assert bundle_body["items"][0]["output_path"].endswith(".docx")
         assert Path(bundle_body["items"][0]["output_path"]).exists()
         assert bundle_body["zip_path"] is None
+        evidence_outputs = [item for item in bundle_body["items"] if item["item_id"] == str(evidence_item_id)]
+        assert len(evidence_outputs) == 1
+        assert evidence_outputs[0]["copied_asset_count"] == 1
+        evidence_manifest = Path(evidence_outputs[0]["output_path"])
+        assert evidence_manifest.exists()
+        assert (evidence_manifest.parent / f"{evidence_manifest.stem}_attachments" / "quality-cert.pdf").exists()
 
         zipped_bundle = client.post(
             f"/api/template-packages/{package_id}/render-bundle",

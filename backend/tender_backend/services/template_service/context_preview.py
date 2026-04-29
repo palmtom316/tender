@@ -19,6 +19,7 @@ _VALID_SOURCE_TYPES = {
     "project_performance",
     "qualification_certificate",
     "financial_statement",
+    "evidence_asset",
 }
 _VALID_SELECTION_MODES = {"all", "latest", "first", "by_id"}
 
@@ -99,6 +100,8 @@ def _load_source_rows(conn: Connection, *, source_type: str) -> list[dict[str, A
         rows = repo.list_certificates(conn)
     elif source_type == "financial_statement":
         rows = repo.list_financial_statements(conn)
+    elif source_type == "evidence_asset":
+        rows = repo.list_evidence_assets(conn)
     else:
         raise ValueError(f"Unsupported source_type: {source_type}")
     return [_normalize_value(row) for row in rows]

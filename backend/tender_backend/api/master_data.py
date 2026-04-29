@@ -204,6 +204,46 @@ class FinancialStatementOut(FinancialStatementBase):
     updated_at: str
 
 
+class EvidenceAssetBase(BaseModel):
+    owner_type: str = Field(min_length=1)
+    owner_id: UUID | None = None
+    asset_name: str = Field(min_length=1)
+    asset_type: str = "supporting_document"
+    file_name: str = Field(min_length=1)
+    file_path: str = Field(min_length=1)
+    media_type: str | None = None
+    issuer_name: str | None = None
+    issued_on: date | None = None
+    expires_on: date | None = None
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+    sort_order: int = 0
+
+
+class EvidenceAssetCreate(EvidenceAssetBase):
+    pass
+
+
+class EvidenceAssetUpdate(BaseModel):
+    owner_type: str | None = None
+    owner_id: UUID | None = None
+    asset_name: str | None = None
+    asset_type: str | None = None
+    file_name: str | None = None
+    file_path: str | None = None
+    media_type: str | None = None
+    issuer_name: str | None = None
+    issued_on: date | None = None
+    expires_on: date | None = None
+    metadata_json: dict[str, Any] | None = None
+    sort_order: int | None = None
+
+
+class EvidenceAssetOut(EvidenceAssetBase):
+    id: UUID
+    created_at: str
+    updated_at: str
+
+
 def _company_out(row) -> CompanyProfileOut:
     return CompanyProfileOut(
         id=row.id,
@@ -297,8 +337,41 @@ def _financial_out(row) -> FinancialStatementOut:
     )
 
 
+def _evidence_asset_out(row) -> EvidenceAssetOut:
+    return EvidenceAssetOut(
+        id=row.id,
+        owner_type=row.owner_type,
+        owner_id=row.owner_id,
+        asset_name=row.asset_name,
+        asset_type=row.asset_type,
+        file_name=row.file_name,
+        file_path=row.file_path,
+        media_type=row.media_type,
+        issuer_name=row.issuer_name,
+        issued_on=row.issued_on,
+        expires_on=row.expires_on,
+        metadata_json=row.metadata_json,
+        sort_order=row.sort_order,
+        created_at=row.created_at.isoformat(),
+        updated_at=row.updated_at.isoformat(),
+    )
+
+
 def _not_found(detail: str):
     raise HTTPException(status_code=404, detail=detail)
+
+
+def _validate_evidence_owner_type(value: str) -> str:
+    allowed = {
+        "company_profile",
+        "person_profile",
+        "project_performance",
+        "qualification_certificate",
+        "financial_statement",
+    }
+    if value not in allowed:
+        raise HTTPException(status_code=400, detail=f"unsupported evidence owner_type: {value}")
+    return value
 
 
 @router.get("/master-data/company-profiles", response_model=list[CompanyProfileOut])
@@ -434,4 +507,33 @@ async def update_financial_statement(record_id: UUID, payload: FinancialStatemen
 async def delete_financial_statement(record_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, bool]:
     if not _repo.delete_financial_statement(conn, record_id):
         _not_found("financial statement not found")
+    return {"deleted": True}
+
+
+@router.get("/master-data/evidence-assets", response_model=list[EvidenceAssetOut])
+async def list_evidence_assets(conn: Connection = Depends(get_db_conn)) -> list[EvidenceAssetOut]:
+    return [_evidence_asset_out(row) for row in _repo.list_evidence_assets(conn)]
+
+
+@router.post("/master-data/evidence-assets", response_model=EvidenceAssetOut, status_code=201)
+async def create_evidence_asset(payload: EvidenceAssetCreate, conn: Connection = Depends(get_db_conn)) -> EvidenceAssetOut:
+    _validate_evidence_owner_type(payload.owner_type)
+    return _evidence_asset_out(_repo.create_evidence_asset(conn, **payload.model_dump()))
+
+
+@router.put("/master-data/evidence-assets/{record_id}", response_model=EvidenceAssetOut)
+async def update_evidence_asset(record_id: UUID, payload: EvidenceAssetUpdate, conn: Connection = Depends(get_db_conn)) -> EvidenceAssetOut:
+    fields = payload.model_dump(exclude_unset=True)
+    if "owner_type" in fields and fields["owner_type"] is not None:
+        _validate_evidence_owner_type(fields["owner_type"])
+    row = _repo.update_evidence_asset(conn, record_id, **fields)
+    if row is None:
+        _not_found("evidence asset not found")
+    return _evidence_asset_out(row)
+
+
+@router.delete("/master-data/evidence-assets/{record_id}")
+async def delete_evidence_asset(record_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, bool]:
+    if not _repo.delete_evidence_asset(conn, record_id):
+        _not_found("evidence asset not found")
     return {"deleted": True}

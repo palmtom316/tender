@@ -99,6 +99,25 @@ class FinancialStatementRow:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class EvidenceAssetRow:
+    id: UUID
+    owner_type: str
+    owner_id: UUID | None
+    asset_name: str
+    asset_type: str
+    file_name: str
+    file_path: str
+    media_type: str | None
+    issuer_name: str | None
+    issued_on: date | None
+    expires_on: date | None
+    metadata_json: dict[str, Any]
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
 _COMPANY_COLUMNS = (
     "id, company_name, company_code, unified_social_credit_code, registered_address, "
     "contact_name, contact_phone, contact_email, website, registered_capital, "
@@ -119,6 +138,10 @@ _CERTIFICATE_COLUMNS = (
 )
 _FINANCIAL_COLUMNS = (
     "id, fiscal_year, statement_type, statement_data, source_note, created_at, updated_at"
+)
+_EVIDENCE_COLUMNS = (
+    "id, owner_type, owner_id, asset_name, asset_type, file_name, file_path, media_type, "
+    "issuer_name, issued_on, expires_on, metadata_json, sort_order, created_at, updated_at"
 )
 
 
@@ -210,6 +233,26 @@ def _to_financial(row: dict[str, Any]) -> FinancialStatementRow:
         statement_type=row["statement_type"],
         statement_data=dict(row["statement_data"] or {}),
         source_note=row["source_note"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _to_evidence_asset(row: dict[str, Any]) -> EvidenceAssetRow:
+    return EvidenceAssetRow(
+        id=row["id"],
+        owner_type=row["owner_type"],
+        owner_id=row["owner_id"],
+        asset_name=row["asset_name"],
+        asset_type=row["asset_type"],
+        file_name=row["file_name"],
+        file_path=row["file_path"],
+        media_type=row["media_type"],
+        issuer_name=row["issuer_name"],
+        issued_on=row["issued_on"],
+        expires_on=row["expires_on"],
+        metadata_json=dict(row["metadata_json"] or {}),
+        sort_order=row["sort_order"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -529,6 +572,71 @@ class MasterDataRepository:
 
     def delete_financial_statement(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="financial_statement", record_id=record_id)
+
+    def list_evidence_assets(self, conn: Connection) -> list[EvidenceAssetRow]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                f"SELECT {_EVIDENCE_COLUMNS} FROM evidence_asset ORDER BY owner_type, sort_order, created_at DESC"
+            ).fetchall()
+        return [_to_evidence_asset(row) for row in rows]
+
+    def get_evidence_asset(self, conn: Connection, record_id: UUID) -> EvidenceAssetRow | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"SELECT {_EVIDENCE_COLUMNS} FROM evidence_asset WHERE id = %s",
+                (record_id,),
+            ).fetchone()
+        return _to_evidence_asset(row) if row else None
+
+    def create_evidence_asset(self, conn: Connection, **fields: Any) -> EvidenceAssetRow:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"""
+                INSERT INTO evidence_asset (
+                  id, owner_type, owner_id, asset_name, asset_type, file_name, file_path,
+                  media_type, issuer_name, issued_on, expires_on, metadata_json, sort_order
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                RETURNING {_EVIDENCE_COLUMNS}
+                """,
+                (
+                    uuid4(),
+                    fields["owner_type"],
+                    fields.get("owner_id"),
+                    fields["asset_name"],
+                    fields.get("asset_type") or "supporting_document",
+                    fields["file_name"],
+                    fields["file_path"],
+                    fields.get("media_type"),
+                    fields.get("issuer_name"),
+                    fields.get("issued_on"),
+                    fields.get("expires_on"),
+                    json.dumps(fields.get("metadata_json") or {}, ensure_ascii=False),
+                    fields.get("sort_order") or 0,
+                ),
+            ).fetchone()
+        conn.commit()
+        assert row is not None
+        return _to_evidence_asset(row)
+
+    def update_evidence_asset(self, conn: Connection, record_id: UUID, **fields: Any) -> EvidenceAssetRow | None:
+        return self._update_json_record(
+            conn,
+            table="evidence_asset",
+            record_id=record_id,
+            fields=fields,
+            allowed_fields={
+                "owner_type", "owner_id", "asset_name", "asset_type", "file_name", "file_path",
+                "media_type", "issuer_name", "issued_on", "expires_on", "metadata_json",
+                "sort_order",
+            },
+            json_fields={"metadata_json"},
+            returning=_EVIDENCE_COLUMNS,
+            mapper=_to_evidence_asset,
+        )
+
+    def delete_evidence_asset(self, conn: Connection, record_id: UUID) -> bool:
+        return self._delete(conn, table="evidence_asset", record_id=record_id)
 
     def _update_json_record(
         self,

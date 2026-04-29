@@ -102,11 +102,30 @@ def _apply_master_data_schema(conn: psycopg.Connection) -> None:
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (fiscal_year, statement_type)
     );
+
+    CREATE TABLE IF NOT EXISTS evidence_asset (
+      id UUID PRIMARY KEY,
+      owner_type TEXT NOT NULL,
+      owner_id UUID,
+      asset_name TEXT NOT NULL,
+      asset_type TEXT NOT NULL DEFAULT 'supporting_document',
+      file_name TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      media_type TEXT,
+      issuer_name TEXT,
+      issued_on DATE,
+      expires_on DATE,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     """)
     conn.commit()
 
 
 def _reset_master_data_tables(conn: psycopg.Connection) -> None:
+    conn.execute("DELETE FROM evidence_asset;")
     conn.execute("DELETE FROM financial_statement;")
     conn.execute("DELETE FROM qualification_certificate;")
     conn.execute("DELETE FROM project_performance;")
@@ -196,6 +215,21 @@ def test_master_data_crud_flow() -> None:
         assert certificate.status_code == 201
         certificate_id = UUID(certificate.json()["id"])
 
+        evidence = client.post(
+            "/api/master-data/evidence-assets",
+            json={
+                "owner_type": "qualification_certificate",
+                "owner_id": str(certificate_id),
+                "asset_name": "质量认证扫描件",
+                "file_name": "iso-001.pdf",
+                "file_path": "/tmp/iso-001.pdf",
+                "asset_type": "certificate_scan",
+                "sort_order": 1,
+            },
+        )
+        assert evidence.status_code == 201
+        evidence_id = UUID(evidence.json()["id"])
+
         statement = client.post(
             "/api/master-data/financial-statements",
             json={
@@ -218,12 +252,26 @@ def test_master_data_crud_flow() -> None:
         )
         assert duplicate_statement.status_code == 409
 
+        evidence_list = client.get("/api/master-data/evidence-assets")
+        assert evidence_list.status_code == 200
+        assert any(UUID(row["id"]) == evidence_id for row in evidence_list.json())
+
+        updated_evidence = client.put(
+            f"/api/master-data/evidence-assets/{evidence_id}",
+            json={"issuer_name": "中国质量认证中心"},
+        )
+        assert updated_evidence.status_code == 200
+        assert updated_evidence.json()["issuer_name"] == "中国质量认证中心"
+
         updated_person = client.put(
             f"/api/master-data/people/{person_id}",
             json={"title": "工程师"},
         )
         assert updated_person.status_code == 200
         assert updated_person.json()["title"] == "工程师"
+
+        deleted_evidence = client.delete(f"/api/master-data/evidence-assets/{evidence_id}")
+        assert deleted_evidence.status_code == 200
 
         deleted_certificate = client.delete(f"/api/master-data/certificates/{certificate_id}")
         assert deleted_certificate.status_code == 200

@@ -7,6 +7,7 @@ from uuid import uuid4
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemRow, BidTemplatePackageRow
 from tender_backend.services.template_service.package_renderer import (
     _bundle_dir_name,
+    _collect_evidence_assets,
     render_template_package_bundle,
 )
 
@@ -78,3 +79,24 @@ def test_render_template_package_bundle_writes_relative_files_and_zip(
     assert (bundle_dir / "sections" / "5.1.基本情况表.docx").exists()
     assert result["zip_path"] is not None
     assert Path(result["zip_path"]).exists()
+
+
+def test_collect_evidence_assets_finds_nested_asset_rows() -> None:
+    assets = _collect_evidence_assets(
+        {
+            "certificate": {
+                "certificate_name": "质量管理体系认证证书",
+                "attachments": [
+                    {
+                        "id": "asset-1",
+                        "asset_name": "认证证书扫描件",
+                        "file_name": "iso.pdf",
+                        "file_path": "/tmp/iso.pdf",
+                    }
+                ],
+            }
+        }
+    )
+
+    assert len(assets) == 1
+    assert assets[0]["asset_name"] == "认证证书扫描件"

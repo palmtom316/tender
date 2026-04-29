@@ -37,6 +37,8 @@ def test_selection_and_source_validation_reject_unknown_values() -> None:
     else:
         raise AssertionError("expected ValueError")
 
+    assert validate_source_type("evidence_asset") == "evidence_asset"
+
 
 def test_build_render_context_marks_missing_required_bindings() -> None:
     context, missing = _build_render_context_from_bindings([
