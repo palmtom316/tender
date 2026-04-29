@@ -128,6 +128,14 @@ class BidTemplatePackageRepository:
             ).fetchall()
         return [_to_item(row) for row in rows]
 
+    def get_item_by_id(self, conn: Connection, *, item_id: UUID) -> BidTemplateItemRow | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"SELECT {_ITEM_COLUMNS} FROM bid_template_item WHERE id = %s",
+                (item_id,),
+            ).fetchone()
+        return _to_item(row) if row else None
+
     def upsert_package(
         self,
         conn: Connection,
