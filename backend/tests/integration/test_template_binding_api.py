@@ -4,8 +4,10 @@ import os
 from pathlib import Path
 from uuid import UUID
 
+import fitz  # PyMuPDF
 import psycopg
 import pytest
+from docx import Document
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.migrations import load_initial_schema_sql
@@ -223,7 +225,11 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert certificate.status_code == 201
         certificate_id = UUID(certificate.json()["id"])
         attachment_file = tmp_path / "quality-cert.pdf"
-        attachment_file.write_bytes(b"pdf")
+        pdf = fitz.open()
+        page = pdf.new_page(width=595, height=842)
+        page.insert_text((72, 72), "Quality Certificate", fontsize=24)
+        pdf.save(attachment_file)
+        pdf.close()
         evidence_asset = client.post(
             "/api/master-data/evidence-assets",
             json={
@@ -312,9 +318,12 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         evidence_outputs = [item for item in bundle_body["items"] if item["item_id"] == str(evidence_item_id)]
         assert len(evidence_outputs) == 1
         assert evidence_outputs[0]["copied_asset_count"] == 1
+        assert evidence_outputs[0]["embedded_preview_count"] == 1
         evidence_manifest = Path(evidence_outputs[0]["output_path"])
         assert evidence_manifest.exists()
         assert (evidence_manifest.parent / f"{evidence_manifest.stem}_attachments" / "quality-cert.pdf").exists()
+        embedded_doc = Document(str(evidence_manifest))
+        assert len(embedded_doc.inline_shapes) >= 1
 
         zipped_bundle = client.post(
             f"/api/template-packages/{package_id}/render-bundle",

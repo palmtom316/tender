@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import re
 import shutil
 from datetime import datetime
@@ -8,14 +9,18 @@ from uuid import UUID
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from docx import Document
+from docx.shared import Inches
 from psycopg import Connection
 
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import build_item_render_context
 from tender_backend.services.template_service.docx_renderer import render_template_item_docx
+from tender_backend.services.vision_service.pdf_renderer import render_pdf_to_pages
 
 
 _RENDER_BUNDLE_ROOT = Path("/tmp/tender_template_bundles")
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
+_PDF_SUFFIXES = {".pdf"}
 
 
 def _sanitize_path_segment(value: str) -> str:
@@ -83,6 +88,38 @@ def _copy_attachment_file(asset: dict[str, object], attachment_dir: Path) -> tup
     return destination, source_path.name
 
 
+def _is_image_asset(source_path: Path, asset: dict[str, object]) -> bool:
+    media_type = str(asset.get("media_type") or "").lower()
+    return source_path.suffix.lower() in _IMAGE_SUFFIXES or media_type.startswith("image/")
+
+
+def _is_pdf_asset(source_path: Path, asset: dict[str, object]) -> bool:
+    media_type = str(asset.get("media_type") or "").lower()
+    return source_path.suffix.lower() in _PDF_SUFFIXES or media_type == "application/pdf"
+
+
+def _max_inline_width_inches(doc: Document) -> float:
+    section = doc.sections[0]
+    return max(1.0, float(section.page_width - section.left_margin - section.right_margin) / 914400)
+
+
+def _embed_asset_preview(doc: Document, *, source_path: Path, asset: dict[str, object]) -> bool:
+    width_inches = _max_inline_width_inches(doc)
+
+    if _is_image_asset(source_path, asset):
+        doc.add_picture(str(source_path), width=Inches(width_inches))
+        return True
+
+    if _is_pdf_asset(source_path, asset):
+        pages = render_pdf_to_pages(str(source_path), dpi=150)
+        for page in pages:
+            doc.add_paragraph(f"第 {page.page_number} 页")
+            doc.add_picture(io.BytesIO(page.png_bytes), width=Inches(width_inches))
+        return True
+
+    return False
+
+
 def _render_attachment_manifest(
     *,
     item_name: str,
@@ -107,8 +144,10 @@ def _render_attachment_manifest(
     header[5].text = "导出位置"
 
     for asset in assets:
+        source_path = Path(str(asset["file_path"])).expanduser()
         copied_path, original_name = _copy_attachment_file(asset, attachment_dir)
         relative_export = copied_path.relative_to(output_docx_path.parent)
+        preview_embedded = False
         copied_assets.append(
             {
                 "asset_id": str(asset.get("id") or ""),
@@ -116,6 +155,7 @@ def _render_attachment_manifest(
                 "file_name": original_name,
                 "output_path": str(copied_path),
                 "relative_output_path": str(relative_export),
+                "preview_embedded": preview_embedded,
             }
         )
         row = table.add_row().cells
@@ -125,6 +165,15 @@ def _render_attachment_manifest(
         row[3].text = str(asset.get("owner_id") or "")
         row[4].text = str(asset.get("expires_on") or "")
         row[5].text = str(relative_export)
+
+        doc.add_page_break()
+        doc.add_heading(str(asset.get("asset_name") or original_name), level=2)
+        doc.add_paragraph(f"源文件: {original_name}")
+        doc.add_paragraph(f"导出位置: {relative_export}")
+        preview_embedded = _embed_asset_preview(doc, source_path=source_path, asset=asset)
+        if not preview_embedded:
+            doc.add_paragraph("该文件类型暂不支持直接嵌入预览，请打开同级附件文件。")
+        copied_assets[-1]["preview_embedded"] = preview_embedded
 
     output_docx_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_docx_path))
@@ -159,6 +208,7 @@ def _render_attachment_item(
         "output_path": str(output_docx_path),
         "copied_assets": copied_assets,
         "copied_asset_count": len(copied_assets),
+        "embedded_preview_count": sum(1 for asset in copied_assets if asset.get("preview_embedded")),
         "context_keys": sorted(render_context["context"].keys()),
     }
 
@@ -207,6 +257,7 @@ def render_template_package_bundle(
                     "status": "rendered",
                     "output_path": rendered["output_path"],
                     "copied_asset_count": rendered.get("copied_asset_count", 0),
+                    "embedded_preview_count": rendered.get("embedded_preview_count", 0),
                 }
             )
             rendered_count += 1

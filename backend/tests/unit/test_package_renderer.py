@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
+
+import fitz  # PyMuPDF
+from docx import Document
 
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemRow, BidTemplatePackageRow
 from tender_backend.services.template_service.package_renderer import (
     _bundle_dir_name,
     _collect_evidence_assets,
+    _render_attachment_manifest,
     render_template_package_bundle,
+)
+
+
+_PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9p2unMcAAAAASUVORK5CYII="
 )
 
 
@@ -100,3 +110,49 @@ def test_collect_evidence_assets_finds_nested_asset_rows() -> None:
 
     assert len(assets) == 1
     assert assets[0]["asset_name"] == "认证证书扫描件"
+
+
+def test_render_attachment_manifest_embeds_image_and_pdf_previews(tmp_path: Path) -> None:
+    image_path = tmp_path / "license.png"
+    image_path.write_bytes(_PNG_1X1)
+
+    pdf_path = tmp_path / "certificate.pdf"
+    pdf = fitz.open()
+    for page_no in range(2):
+        page = pdf.new_page(width=595, height=842)
+        page.insert_text((72, 72), f"Page {page_no + 1}", fontsize=24)
+    pdf.save(pdf_path)
+    pdf.close()
+
+    output_docx_path = tmp_path / "7.1.资质证书证明材料.docx"
+    attachment_dir = tmp_path / "7.1.资质证书证明材料_attachments"
+    copied_assets = _render_attachment_manifest(
+        item_name="资质证书证明材料",
+        output_docx_path=output_docx_path,
+        attachment_dir=attachment_dir,
+        assets=[
+            {
+                "id": "img-1",
+                "asset_name": "营业执照",
+                "file_name": image_path.name,
+                "file_path": str(image_path),
+                "media_type": "image/png",
+                "owner_type": "company_profile",
+            },
+            {
+                "id": "pdf-1",
+                "asset_name": "质量认证证书",
+                "file_name": pdf_path.name,
+                "file_path": str(pdf_path),
+                "media_type": "application/pdf",
+                "owner_type": "qualification_certificate",
+            },
+        ],
+    )
+
+    saved = Document(str(output_docx_path))
+    assert len(saved.inline_shapes) == 3
+    assert copied_assets[0]["preview_embedded"] is True
+    assert copied_assets[1]["preview_embedded"] is True
+    assert (attachment_dir / image_path.name).exists()
+    assert (attachment_dir / pdf_path.name).exists()
