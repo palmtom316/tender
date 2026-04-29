@@ -41,6 +41,7 @@ export const MODULE_CONFIG: ModuleConfig[] = [
       { id: "history", label: "历史投标文件" },
       { id: "excellent", label: "优秀投标文件" },
       { id: "standards", label: "规范规程" },
+      { id: "templates", label: "模板包" },
       { id: "company", label: "公司资料" },
       { id: "personnel", label: "人员资料" },
     ],

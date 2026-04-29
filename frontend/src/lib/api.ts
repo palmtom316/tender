@@ -308,6 +308,219 @@ export function fetchExports(
   });
 }
 
+// ── Template Packages ──
+
+export type TemplateSourceType =
+  | "company_profile"
+  | "person_profile"
+  | "project_performance"
+  | "qualification_certificate"
+  | "financial_statement"
+  | "evidence_asset";
+
+export type TemplateSelectionMode = "all" | "latest" | "first" | "by_id";
+export type TemplateFieldMappingMode = "augment" | "replace";
+
+export interface TemplateFieldMapping {
+  target_field: string;
+  source_field?: string;
+  source_fields?: string[];
+  transform?: "copy" | "join" | "date" | "number";
+  join_with?: string;
+  date_format?: string;
+  decimals?: number;
+  default_value?: unknown;
+}
+
+export interface TemplateItem {
+  id: string;
+  item_code: string | null;
+  item_name: string;
+  filename: string;
+  relative_path: string;
+  source_kind: string;
+  item_type: string;
+  render_mode: string;
+  is_required: boolean;
+  sort_order: number;
+}
+
+export interface TemplatePackageSummary {
+  id: string;
+  package_key: string;
+  display_name: string;
+  package_type: string;
+  source_root: string;
+  item_count: number;
+}
+
+export interface TemplatePackageDetail extends TemplatePackageSummary {
+  items: TemplateItem[];
+}
+
+export interface TemplateBindingRule {
+  id: string;
+  template_item_id: string;
+  binding_name: string;
+  source_type: TemplateSourceType;
+  selection_mode: TemplateSelectionMode;
+  source_filters: Record<string, unknown>;
+  field_mappings: TemplateFieldMapping[];
+  field_mapping_mode: TemplateFieldMappingMode;
+  output_key: string;
+  required: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateBindingPayload {
+  binding_name: string;
+  source_type: TemplateSourceType;
+  selection_mode: TemplateSelectionMode;
+  source_filters: Record<string, unknown>;
+  field_mappings: TemplateFieldMapping[];
+  field_mapping_mode: TemplateFieldMappingMode;
+  output_key: string;
+  required: boolean;
+  sort_order: number;
+}
+
+export interface TemplateResolvedBinding {
+  binding_id: string;
+  binding_name: string;
+  source_type: TemplateSourceType;
+  selection_mode: TemplateSelectionMode;
+  field_mappings: TemplateFieldMapping[];
+  field_mapping_mode: TemplateFieldMappingMode;
+  output_key: string;
+  required: boolean;
+  filters: Record<string, unknown>;
+  matched_count: number;
+  data: unknown;
+}
+
+export interface TemplateItemRenderContext {
+  item_id: string;
+  item_code: string | null;
+  item_name: string;
+  filename: string;
+  render_mode: string;
+  binding_count: number;
+  ready: boolean;
+  missing_required_bindings: string[];
+  context: Record<string, unknown>;
+  bindings: TemplateResolvedBinding[];
+}
+
+export interface TemplatePackageRenderContextItem extends TemplateItemRenderContext {}
+
+export interface TemplatePackageRenderContext {
+  package_id: string;
+  package_key: string;
+  display_name: string;
+  package_type: string;
+  ready_item_count: number;
+  total_item_count: number;
+  items: TemplatePackageRenderContextItem[];
+}
+
+export interface TemplateFieldMappingSuggestionGroup {
+  source_type: TemplateSourceType;
+  field_mapping_mode: TemplateFieldMappingMode;
+  field_mappings: TemplateFieldMapping[];
+}
+
+export interface TemplateFieldMappingSuggestions {
+  item_id: string;
+  item_code: string | null;
+  item_name: string;
+  suggestions: TemplateFieldMappingSuggestionGroup[];
+}
+
+export function listTemplatePackages(options?: {
+  signal?: AbortSignal;
+}): Promise<TemplatePackageSummary[]> {
+  return request<TemplatePackageSummary[]>("/template-packages", {
+    signal: options?.signal,
+  });
+}
+
+export function fetchTemplatePackageDetail(
+  packageId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TemplatePackageDetail> {
+  return request<TemplatePackageDetail>(`/template-packages/${packageId}`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchTemplatePackageRenderContext(
+  packageId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TemplatePackageRenderContext> {
+  return request<TemplatePackageRenderContext>(`/template-packages/${packageId}/render-context`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchTemplateItemBindings(
+  itemId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TemplateBindingRule[]> {
+  return request<TemplateBindingRule[]>(`/template-items/${itemId}/bindings`, {
+    signal: options?.signal,
+  });
+}
+
+export function createTemplateItemBinding(
+  itemId: string,
+  data: TemplateBindingPayload,
+): Promise<TemplateBindingRule> {
+  return request<TemplateBindingRule>(`/template-items/${itemId}/bindings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateTemplateBindingRule(
+  ruleId: string,
+  data: Partial<TemplateBindingPayload>,
+): Promise<TemplateBindingRule> {
+  return request<TemplateBindingRule>(`/template-bindings/${ruleId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteTemplateBindingRule(
+  ruleId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/template-bindings/${ruleId}`, {
+    method: "DELETE",
+  });
+}
+
+export function fetchTemplateItemRenderContext(
+  itemId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TemplateItemRenderContext> {
+  return request<TemplateItemRenderContext>(`/template-items/${itemId}/render-context`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchTemplateFieldMappingSuggestions(
+  itemId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TemplateFieldMappingSuggestions> {
+  return request<TemplateFieldMappingSuggestions>(`/template-items/${itemId}/field-mapping-suggestions`, {
+    signal: options?.signal,
+  });
+}
+
 // ── Table Override ──
 
 export function submitTableOverride(
