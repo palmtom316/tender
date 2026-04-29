@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from psycopg import Connection
+
+from tender_backend.db.deps import get_db_conn
+from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
+from tender_backend.services.template_service.package_importer import (
+    import_template_package_from_directory,
+)
+
+
+router = APIRouter(tags=["template-packages"])
+
+_repo = BidTemplatePackageRepository()
+
+
+class TemplatePackageImportBody(BaseModel):
+    source_dir: str = Field(min_length=1)
+    package_key: str | None = None
+    display_name: str | None = None
+    package_type: str | None = None
+
+
+class TemplateItemOut(BaseModel):
+    id: UUID
+    item_code: str | None
+    item_name: str
+    filename: str
+    relative_path: str
+    source_kind: str
+    item_type: str
+    render_mode: str
+    is_required: bool
+    sort_order: int
+
+
+class TemplatePackageOut(BaseModel):
+    id: UUID
+    package_key: str
+    display_name: str
+    package_type: str
+    source_root: str
+    item_count: int
+
+
+class TemplatePackageDetailOut(TemplatePackageOut):
+    items: list[TemplateItemOut]
+
+
+def _package_out(conn: Connection, package_id: UUID) -> TemplatePackageDetailOut | None:
+    package = _repo.get_by_id(conn, package_id=package_id)
+    if package is None:
+        return None
+    items = _repo.list_items(conn, package_id=package.id)
+    return TemplatePackageDetailOut(
+        id=package.id,
+        package_key=package.package_key,
+        display_name=package.display_name,
+        package_type=package.package_type,
+        source_root=package.source_root,
+        item_count=len(items),
+        items=[
+            TemplateItemOut(
+                id=item.id,
+                item_code=item.item_code,
+                item_name=item.item_name,
+                filename=item.filename,
+                relative_path=item.relative_path,
+                source_kind=item.source_kind,
+                item_type=item.item_type,
+                render_mode=item.render_mode,
+                is_required=item.is_required,
+                sort_order=item.sort_order,
+            )
+            for item in items
+        ],
+    )
+
+
+@router.get("/template-packages", response_model=list[TemplatePackageOut])
+async def list_template_packages(conn: Connection = Depends(get_db_conn)) -> list[TemplatePackageOut]:
+    packages = _repo.list_all(conn)
+    items_by_package = {
+        package.id: len(_repo.list_items(conn, package_id=package.id))
+        for package in packages
+    }
+    return [
+        TemplatePackageOut(
+            id=package.id,
+            package_key=package.package_key,
+            display_name=package.display_name,
+            package_type=package.package_type,
+            source_root=package.source_root,
+            item_count=items_by_package[package.id],
+        )
+        for package in packages
+    ]
+
+
+@router.get("/template-packages/{package_id}", response_model=TemplatePackageDetailOut)
+async def get_template_package(package_id: UUID, conn: Connection = Depends(get_db_conn)) -> TemplatePackageDetailOut:
+    result = _package_out(conn, package_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="template package not found")
+    return result
+
+
+@router.post("/template-packages/import", response_model=TemplatePackageDetailOut)
+async def import_template_package(
+    payload: TemplatePackageImportBody,
+    conn: Connection = Depends(get_db_conn),
+) -> TemplatePackageDetailOut:
+    try:
+        imported = import_template_package_from_directory(
+            conn,
+            source_dir=payload.source_dir.strip(),
+            package_key=(payload.package_key or "").strip() or None,
+            display_name=(payload.display_name or "").strip() or None,
+            package_type=(payload.package_type or "").strip() or None,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result = _package_out(conn, UUID(imported.package_id))
+    assert result is not None
+    return result

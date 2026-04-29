@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from tender_backend.db.repositories.bid_template_package_repo import (
+    BidTemplateItemCreate,
+    BidTemplatePackageRepository,
+)
+
+
+_CODED_NAME_RE = re.compile(r"^(?P<code>\d+(?:\.\d+)*)\.(?P<title>.+)$")
+_KEY_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_OPTIONAL_MARKERS = ("如有", "若", "适用于", "联合体", "无需递交")
+_EVIDENCE_MARKERS = (
+    "证明材料",
+    "证书",
+    "报告",
+    "执照",
+    "许可证",
+    "截图",
+    "凭证",
+    "合同",
+    "发票",
+    "保函",
+)
+
+
+@dataclass(frozen=True)
+class ImportedTemplatePackage:
+    package_id: str
+    package_key: str
+    display_name: str
+    package_type: str
+    source_root: str
+    item_count: int
+
+
+def infer_package_type(name: str) -> str:
+    if "技术" in name:
+        return "technical"
+    if "商务" in name:
+        return "business"
+    return "unknown"
+
+
+def infer_item_type(item_name: str) -> str:
+    if any(marker in item_name for marker in _EVIDENCE_MARKERS):
+        return "evidence"
+    if "表" in item_name:
+        return "table"
+    return "chapter"
+
+
+def infer_render_mode(item_type: str) -> str:
+    if item_type == "evidence":
+        return "attachment"
+    return "templated"
+
+
+def infer_required(item_name: str) -> bool:
+    return not any(marker in item_name for marker in _OPTIONAL_MARKERS)
+
+
+def _default_package_key(root: Path, package_type: str) -> str:
+    tokens = _KEY_TOKEN_RE.findall(root.name)
+    prefix = "-".join(token.lower() for token in tokens[:3]) or "template-package"
+    return f"{prefix}-{package_type}"
+
+
+def _parse_item_name(stem: str) -> tuple[str | None, str]:
+    match = _CODED_NAME_RE.match(stem)
+    if not match:
+        return None, stem
+    return match.group("code"), match.group("title")
+
+
+def _sort_key(path: Path) -> tuple[tuple[int, ...], str]:
+    code, title = _parse_item_name(path.stem)
+    if code:
+        return tuple(int(part) for part in code.split(".")), title
+    return (10**9,), path.stem
+
+
+def build_template_items_from_directory(source_dir: str | Path) -> list[BidTemplateItemCreate]:
+    root = Path(source_dir).expanduser().resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"Template source directory not found: {root}")
+    if not root.is_dir():
+        raise NotADirectoryError(f"Template source path is not a directory: {root}")
+
+    files = sorted(
+        [
+            path for path in root.rglob("*")
+            if path.is_file() and path.suffix.lower() == ".docx"
+        ],
+        key=_sort_key,
+    )
+    if not files:
+        raise ValueError(f"No DOCX template files found in: {root}")
+
+    items: list[BidTemplateItemCreate] = []
+    for index, path in enumerate(files):
+        item_code, item_name = _parse_item_name(path.stem)
+        item_type = infer_item_type(item_name)
+        items.append(
+            BidTemplateItemCreate(
+                item_code=item_code,
+                item_name=item_name,
+                filename=path.name,
+                relative_path=str(path.relative_to(root)),
+                source_kind="docx",
+                item_type=item_type,
+                render_mode=infer_render_mode(item_type),
+                is_required=infer_required(item_name),
+                sort_order=index,
+            )
+        )
+    return items
+
+
+def import_template_package_from_directory(
+    conn,
+    *,
+    source_dir: str | Path,
+    package_key: str | None = None,
+    display_name: str | None = None,
+    package_type: str | None = None,
+) -> ImportedTemplatePackage:
+    root = Path(source_dir).expanduser().resolve()
+    items = build_template_items_from_directory(root)
+
+    resolved_display_name = (display_name or root.name).strip()
+    resolved_package_type = (package_type or infer_package_type(resolved_display_name)).strip() or "unknown"
+    resolved_package_key = (package_key or _default_package_key(root, resolved_package_type)).strip()
+
+    repo = BidTemplatePackageRepository()
+    package = repo.upsert_package(
+        conn,
+        package_key=resolved_package_key,
+        display_name=resolved_display_name,
+        package_type=resolved_package_type,
+        source_root=str(root),
+        source_manifest={
+            "file_count": len(items),
+            "source_dir_name": root.name,
+            "relative_paths": [item.relative_path for item in items],
+        },
+    )
+    repo.replace_items(conn, package_id=package.id, items=items)
+    return ImportedTemplatePackage(
+        package_id=str(package.id),
+        package_key=package.package_key,
+        display_name=package.display_name,
+        package_type=package.package_type,
+        source_root=package.source_root,
+        item_count=len(items),
+    )
