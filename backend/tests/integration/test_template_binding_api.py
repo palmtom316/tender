@@ -311,6 +311,13 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path) -> None:
         assert item_render.json()["context"]["company"]["company_title"] == "REDACTED"
         assert item_render.json()["bindings"][0]["field_mapping_mode"] == "augment"
 
+        suggestions = client.get(f"/api/template-items/{basic_item_id}/field-mapping-suggestions")
+        assert suggestions.status_code == 200
+        assert any(
+            mapping["target_field"] == "company_title"
+            for mapping in suggestions.json()["suggestions"][0]["field_mappings"]
+        )
+
         package_render = client.get(f"/api/template-packages/{package_id}/render-context")
         assert package_render.status_code == 200
         assert package_render.json()["ready_item_count"] == 3

@@ -12,6 +12,7 @@ from tender_backend.db.repositories.bid_template_binding_repo import BidTemplate
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import (
     build_item_render_context,
+    build_item_field_mapping_suggestions,
     build_package_context_preview,
     build_package_render_context,
     validate_field_mapping_mode,
@@ -165,6 +166,16 @@ async def get_package_context_preview(package_id: UUID, conn: Connection = Depen
 async def get_item_render_context(template_item_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
     try:
         return build_item_render_context(conn, item_id=template_item_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/template-items/{template_item_id}/field-mapping-suggestions")
+async def get_item_field_mapping_suggestions(template_item_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
+    try:
+        return build_item_field_mapping_suggestions(conn, item_id=template_item_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

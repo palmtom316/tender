@@ -64,6 +64,69 @@ def validate_field_mappings(mappings: list[dict[str, Any]]) -> list[dict[str, An
     return mappings
 
 
+def suggest_field_mappings(*, item_name: str, item_code: str | None, source_type: str) -> list[dict[str, Any]]:
+    validate_source_type(source_type)
+    mappings: list[dict[str, Any]] = []
+
+    if source_type == "company_profile" and ("基本情况表" in item_name or (item_code or "").startswith("5")):
+        mappings.extend(
+            [
+                {"target_field": "company_title", "source_field": "company_name"},
+                {"target_field": "credit_code", "source_field": "unified_social_credit_code"},
+                {"target_field": "address_text", "source_field": "registered_address"},
+                {"target_field": "contact_summary", "source_fields": ["contact_name", "contact_phone"], "transform": "join", "join_with": " / "},
+            ]
+        )
+    elif source_type == "person_profile" and ("人员" in item_name or "团队" in item_name or (item_code or "").startswith("6")):
+        mappings.extend(
+            [
+                {"target_field": "person_name", "source_field": "full_name"},
+                {"target_field": "role_label", "source_field": "role_name"},
+                {"target_field": "title_label", "source_field": "title"},
+                {"target_field": "specialty_label", "source_field": "specialty"},
+                {"target_field": "experience_years_text", "source_field": "years_experience", "transform": "number", "decimals": 0},
+                {"target_field": "contact_summary", "source_fields": ["phone", "email"], "transform": "join", "join_with": " / "},
+            ]
+        )
+    elif source_type == "project_performance" and ("业绩" in item_name or (item_code or "").startswith("5")):
+        mappings.extend(
+            [
+                {"target_field": "project_title", "source_field": "project_name"},
+                {"target_field": "client_title", "source_field": "client_name"},
+                {"target_field": "contract_amount_text", "source_field": "contract_amount", "transform": "number", "decimals": 2},
+                {"target_field": "started_on_text", "source_field": "started_on", "transform": "date", "date_format": "%Y-%m-%d"},
+                {"target_field": "ended_on_text", "source_field": "ended_on", "transform": "date", "date_format": "%Y-%m-%d"},
+                {"target_field": "contact_summary", "source_fields": ["contact_name", "contact_phone"], "transform": "join", "join_with": " / "},
+            ]
+        )
+    elif source_type == "qualification_certificate" and ("证书" in item_name or "认证" in item_name):
+        mappings.extend(
+            [
+                {"target_field": "certificate_title", "source_field": "certificate_name"},
+                {"target_field": "certificate_code", "source_field": "certificate_no"},
+                {"target_field": "holder_title", "source_field": "holder_name"},
+                {"target_field": "valid_to_text", "source_field": "valid_to", "transform": "date", "date_format": "%Y-%m-%d"},
+            ]
+        )
+    elif source_type == "financial_statement" and ("财务" in item_name or (item_code or "").startswith("8")):
+        mappings.extend(
+            [
+                {"target_field": "fiscal_year_label", "source_field": "fiscal_year", "transform": "number", "decimals": 0},
+                {"target_field": "statement_title", "source_field": "statement_type"},
+                {"target_field": "source_note_text", "source_field": "source_note"},
+            ]
+        )
+    elif source_type == "evidence_asset":
+        mappings.extend(
+            [
+                {"target_field": "asset_title", "source_field": "asset_name"},
+                {"target_field": "file_title", "source_field": "file_name"},
+            ]
+        )
+
+    return mappings
+
+
 def _normalize_value(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
@@ -390,4 +453,34 @@ def build_package_context_preview(conn: Connection, *, package_id: UUID) -> dict
         "display_name": package.display_name,
         "package_type": package.package_type,
         "items": item_previews,
+    }
+
+
+def build_item_field_mapping_suggestions(conn: Connection, *, item_id: UUID) -> dict[str, Any]:
+    package_repo = BidTemplatePackageRepository()
+    binding_repo = BidTemplateBindingRepository()
+
+    item = package_repo.get_item_by_id(conn, item_id=item_id)
+    if item is None:
+        raise LookupError("template item not found")
+
+    bindings = binding_repo.list_by_item(conn, template_item_id=item.id)
+    source_types = [binding.source_type for binding in bindings] or sorted(_VALID_SOURCE_TYPES)
+    suggestions = [
+        {
+            "source_type": source_type,
+            "field_mapping_mode": "augment",
+            "field_mappings": suggest_field_mappings(
+                item_name=item.item_name,
+                item_code=item.item_code,
+                source_type=source_type,
+            ),
+        }
+        for source_type in source_types
+    ]
+    return {
+        "item_id": str(item.id),
+        "item_code": item.item_code,
+        "item_name": item.item_name,
+        "suggestions": suggestions,
     }

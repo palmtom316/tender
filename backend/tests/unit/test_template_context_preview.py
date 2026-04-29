@@ -5,6 +5,7 @@ from tender_backend.services.template_service.context_preview import (
     _build_render_context_from_bindings,
     _matches_filters,
     _select_records,
+    suggest_field_mappings,
     validate_field_mapping_mode,
     validate_field_mappings,
     validate_selection_mode,
@@ -128,3 +129,14 @@ def test_field_mapping_validation_rejects_unknown_values() -> None:
         assert "source_fields" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_suggest_field_mappings_returns_item_specific_presets() -> None:
+    company = suggest_field_mappings(item_name="基本情况表", item_code="5.1", source_type="company_profile")
+    assert any(mapping["target_field"] == "company_title" for mapping in company)
+
+    people = suggest_field_mappings(item_name="人员汇总表及人员简历表", item_code="6.1", source_type="person_profile")
+    assert any(mapping["target_field"] == "role_label" for mapping in people)
+
+    performances = suggest_field_mappings(item_name="业绩情况", item_code="5", source_type="project_performance")
+    assert any(mapping["target_field"] == "project_title" for mapping in performances)

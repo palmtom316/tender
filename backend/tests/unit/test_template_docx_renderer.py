@@ -5,6 +5,7 @@ from pathlib import Path
 from docx import Document
 
 from tender_backend.services.template_service.docx_renderer import (
+    _render_company_profile,
     _render_financial_statements,
     _render_people,
     _render_performances,
@@ -45,6 +46,52 @@ def test_render_people_adds_summary_and_resume_sections() -> None:
     assert "负责过多个配网服务项目。" in text
 
 
+def test_render_company_profile_accepts_mapped_alias_fields() -> None:
+    doc = Document()
+    _render_company_profile(
+        doc,
+        {
+            "company": {
+                "company_title": "REDACTED",
+                "credit_code": "91500105MA5U123456",
+                "address_text": "重庆市江北区",
+                "contact_summary": "王莉莉 / 13800000000",
+            }
+        },
+    )
+
+    table = doc.tables[0]
+    values = [cell.text for row in table.rows for cell in row.cells]
+    assert "REDACTED" in values
+    assert "91500105MA5U123456" in values
+    assert "重庆市江北区" in values
+    assert "王莉莉 / 13800000000" in values
+
+
+def test_render_people_accepts_mapped_alias_fields() -> None:
+    doc = Document()
+    _render_people(
+        doc,
+        {
+            "people": [
+                {
+                    "person_name": "唐玮",
+                    "role_label": "项目总经理",
+                    "title_label": "工程师",
+                    "specialty_label": "机电工程",
+                    "experience_years_text": "11",
+                    "contact_summary": "13800000000 / tang@example.com",
+                    "resume_summary": "负责过多个配网服务项目。",
+                }
+            ]
+        },
+    )
+
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "主要人员简历表（项目总经理）" in text
+    assert "负责过多个配网服务项目。" in text
+
+
 def test_render_performances_adds_table_and_detail_sections() -> None:
     doc = Document()
     _render_performances(
@@ -69,6 +116,30 @@ def test_render_performances_adds_table_and_detail_sections() -> None:
     assert "近年完成的类似项目情况表" in text
     assert "渝中片区营配低压业务外包服务" in text
     assert "低压运维与抢修" in text
+
+
+def test_render_performances_accepts_mapped_alias_fields() -> None:
+    doc = Document()
+    _render_performances(
+        doc,
+        {
+            "performances": [
+                {
+                    "project_title": "渝中片区营配低压业务外包服务",
+                    "client_title": "REDACTED市区供电分公司",
+                    "contract_amount_text": "944.39",
+                    "service_scope_text": "低压运维与抢修",
+                    "started_on_text": "2024-01-01",
+                    "ended_on_text": "2025-12-31",
+                    "contact_summary": "刘工 / 13900000000",
+                }
+            ]
+        },
+    )
+
+    table = doc.tables[0]
+    assert table.rows[1].cells[0].text == "渝中片区营配低压业务外包服务"
+    assert table.rows[1].cells[2].text == "944.39"
 
 
 def test_render_financial_statements_builds_year_matrix() -> None:

@@ -45,15 +45,23 @@ def _format_period(started: object, ended: object) -> str:
     return start or end
 
 
+def _pick(record: dict, *keys: str) -> object:
+    for key in keys:
+        value = record.get(key)
+        if value not in {None, ""}:
+            return value
+    return None
+
+
 def _render_company_profile(doc: Document, context: dict) -> None:
     company = context.get("company") or {}
     doc.add_paragraph("应答人基本情况表")
     pairs = [
-        ("单位名称", company.get("company_name")),
-        ("统一社会信用代码", company.get("unified_social_credit_code")),
-        ("单位地址", company.get("registered_address")),
-        ("联系人", company.get("contact_name")),
-        ("联系电话", company.get("contact_phone")),
+        ("单位名称", _pick(company, "company_name", "company_title", "unit_name")),
+        ("统一社会信用代码", _pick(company, "unified_social_credit_code", "credit_code")),
+        ("单位地址", _pick(company, "registered_address", "address_text")),
+        ("联系人", _pick(company, "contact_name", "contact_person")),
+        ("联系电话", _pick(company, "contact_phone", "phone", "contact_summary")),
         ("联系邮箱", company.get("contact_email")),
         ("网址", company.get("website")),
         ("注册资本", company.get("registered_capital")),
@@ -85,30 +93,34 @@ def _render_people(doc: Document, context: dict) -> None:
 
     for person in people:
         row = table.add_row().cells
-        row[0].text = str(person.get("full_name") or "")
-        row[1].text = str(person.get("role_name") or "")
-        row[2].text = str(person.get("title") or "")
-        row[3].text = str(person.get("specialty") or "")
-        row[4].text = "" if person.get("years_experience") is None else str(person.get("years_experience"))
-        row[5].text = str(person.get("phone") or person.get("email") or "")
+        row[0].text = str(_pick(person, "full_name", "person_name", "name") or "")
+        row[1].text = str(_pick(person, "role_name", "role_label", "position_name") or "")
+        row[2].text = str(_pick(person, "title", "title_label") or "")
+        row[3].text = str(_pick(person, "specialty", "specialty_label", "profession") or "")
+        experience = _pick(person, "years_experience", "experience_years_text", "experience_years")
+        row[4].text = "" if experience is None else str(experience)
+        row[5].text = str(_pick(person, "phone", "email", "contact_summary") or "")
 
     for person in people:
-        doc.add_heading(f"主要人员简历表（{person.get('role_name') or person.get('full_name') or '人员'}）", level=2)
+        doc.add_heading(
+            f"主要人员简历表（{_pick(person, 'role_name', 'role_label', 'full_name', 'person_name') or '人员'}）",
+            level=2,
+        )
         _add_key_value_table(
             doc,
             [
-                ("姓名", person.get("full_name")),
-                ("岗位", person.get("role_name")),
+                ("姓名", _pick(person, "full_name", "person_name", "name")),
+                ("岗位", _pick(person, "role_name", "role_label", "position_name")),
                 ("性别", person.get("gender")),
                 ("年龄", person.get("age")),
                 ("学历", person.get("education")),
-                ("职称", person.get("title")),
-                ("专业", person.get("specialty")),
-                ("从业年限", person.get("years_experience")),
-                ("联系方式", person.get("phone") or person.get("email")),
+                ("职称", _pick(person, "title", "title_label")),
+                ("专业", _pick(person, "specialty", "specialty_label", "profession")),
+                ("从业年限", _pick(person, "years_experience", "experience_years_text", "experience_years")),
+                ("联系方式", _pick(person, "phone", "email", "contact_summary")),
             ],
         )
-        resume_text = str(person.get("resume_text") or "").strip()
+        resume_text = str(_pick(person, "resume_text", "resume_summary") or "").strip()
         if resume_text:
             doc.add_paragraph(resume_text)
 
@@ -132,13 +144,24 @@ def _render_performances(doc: Document, context: dict) -> None:
 
     for performance in performances:
         row = table.add_row().cells
-        row[0].text = str(performance.get("project_name") or "")
-        row[1].text = str(performance.get("client_name") or "")
+        row[0].text = str(_pick(performance, "project_name", "project_title") or "")
+        row[1].text = str(_pick(performance, "client_name", "client_title") or "")
+        amount_text = _pick(performance, "contract_amount_text")
         amount = performance.get("contract_amount")
         currency = performance.get("currency") or "CNY"
-        row[2].text = "" if amount is None else f"{amount} {currency}"
-        row[3].text = str(performance.get("service_scope") or "")
-        row[4].text = _format_period(performance.get("started_on"), performance.get("ended_on"))
+        row[2].text = str(amount_text) if amount_text not in {None, ""} else ("" if amount is None else f"{amount} {currency}")
+        row[3].text = str(_pick(performance, "service_scope", "service_scope_text") or "")
+        row[4].text = str(
+            _pick(
+                performance,
+                "service_period_text",
+                "period_text",
+            )
+            or _format_period(
+                _pick(performance, "started_on_text", "started_on"),
+                _pick(performance, "ended_on_text", "ended_on"),
+            )
+        )
         peak = performance.get("peak_staffing")
         avg = performance.get("average_staffing")
         staffing = []
@@ -146,17 +169,24 @@ def _render_performances(doc: Document, context: dict) -> None:
             staffing.append(f"高峰 {peak}")
         if avg is not None:
             staffing.append(f"平均 {avg}")
-        row[5].text = " / ".join(staffing)
-        row[6].text = str(performance.get("contact_name") or performance.get("contact_phone") or "")
+        row[5].text = str(_pick(performance, "staffing_summary") or " / ".join(staffing))
+        row[6].text = str(_pick(performance, "contact_name", "contact_phone", "contact_summary") or "")
 
     for performance in performances:
-        doc.add_heading(str(performance.get("project_name") or "项目说明"), level=2)
-        doc.add_paragraph(str(performance.get("service_scope") or ""))
+        doc.add_heading(str(_pick(performance, "project_name", "project_title") or "项目说明"), level=2)
+        doc.add_paragraph(str(_pick(performance, "service_scope", "service_scope_text") or ""))
         note_pairs = [
             ("项目状态", performance.get("project_status")),
-            ("服务期间", _format_period(performance.get("started_on"), performance.get("ended_on"))),
-            ("联系人", performance.get("contact_name")),
-            ("联系电话", performance.get("contact_phone")),
+            (
+                "服务期间",
+                _pick(performance, "service_period_text", "period_text")
+                or _format_period(
+                    _pick(performance, "started_on_text", "started_on"),
+                    _pick(performance, "ended_on_text", "ended_on"),
+                ),
+            ),
+            ("联系人", _pick(performance, "contact_name", "contact_summary")),
+            ("联系电话", _pick(performance, "contact_phone", "contact_summary")),
             ("证明摘要", performance.get("evidence_summary")),
         ]
         _add_key_value_table(doc, note_pairs)
@@ -179,12 +209,12 @@ def _render_certificates(doc: Document, context: dict) -> None:
 
     for certificate in certificates:
         row = table.add_row().cells
-        row[0].text = str(certificate.get("certificate_name") or "")
-        row[1].text = str(certificate.get("certificate_no") or "")
-        row[2].text = str(certificate.get("holder_name") or "")
-        row[3].text = str(certificate.get("grade") or "")
-        row[4].text = str(certificate.get("valid_to") or "")
-        row[5].text = str(certificate.get("status") or "")
+        row[0].text = str(_pick(certificate, "certificate_name", "certificate_title") or "")
+        row[1].text = str(_pick(certificate, "certificate_no", "certificate_code") or "")
+        row[2].text = str(_pick(certificate, "holder_name", "holder_title") or "")
+        row[3].text = str(_pick(certificate, "grade", "grade_label") or "")
+        row[4].text = str(_pick(certificate, "valid_to", "valid_to_text") or "")
+        row[5].text = str(_pick(certificate, "status", "status_label") or "")
 
 
 def _render_financial_statements(doc: Document, context: dict) -> None:
@@ -196,7 +226,7 @@ def _render_financial_statements(doc: Document, context: dict) -> None:
     if not statements:
         return
 
-    years = [statement.get("fiscal_year") for statement in statements]
+    years = [_pick(statement, "fiscal_year", "fiscal_year_label") for statement in statements]
     metric_names: list[str] = []
     metric_values_by_statement: list[dict] = []
     for statement in statements:
@@ -220,10 +250,10 @@ def _render_financial_statements(doc: Document, context: dict) -> None:
                 row[idx].text = "" if data.get(metric_name) is None else str(data.get(metric_name))
 
     for statement in statements:
-        year = statement.get("fiscal_year")
-        statement_type = statement.get("statement_type")
+        year = _pick(statement, "fiscal_year", "fiscal_year_label")
+        statement_type = _pick(statement, "statement_type", "statement_title")
         doc.add_heading(f"{year} - {statement_type}", level=2)
-        doc.add_paragraph(str(statement.get("source_note") or ""))
+        doc.add_paragraph(str(_pick(statement, "source_note", "source_note_text") or ""))
 
 
 def _render_generic_context(doc: Document, context: dict) -> None:
