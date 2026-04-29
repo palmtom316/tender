@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
@@ -23,6 +23,16 @@ class TemplatePackageImportBody(BaseModel):
     package_key: str | None = None
     display_name: str | None = None
     package_type: str | None = None
+    category_code: str | None = None
+
+
+class TemplatePackageCategoryOut(BaseModel):
+    code: str
+    display_name: str
+    description: str | None
+    sort_order: int
+    enabled: bool
+    metadata_json: dict
 
 
 class TemplateItemOut(BaseModel):
@@ -43,6 +53,7 @@ class TemplatePackageOut(BaseModel):
     package_key: str
     display_name: str
     package_type: str
+    category_code: str | None
     source_root: str
     item_count: int
 
@@ -61,6 +72,7 @@ def _package_out(conn: Connection, package_id: UUID) -> TemplatePackageDetailOut
         package_key=package.package_key,
         display_name=package.display_name,
         package_type=package.package_type,
+        category_code=package.category_code,
         source_root=package.source_root,
         item_count=len(items),
         items=[
@@ -81,9 +93,29 @@ def _package_out(conn: Connection, package_id: UUID) -> TemplatePackageDetailOut
     )
 
 
+@router.get("/template-package-categories", response_model=list[TemplatePackageCategoryOut])
+async def list_template_package_categories(conn: Connection = Depends(get_db_conn)) -> list[TemplatePackageCategoryOut]:
+    return [
+        TemplatePackageCategoryOut(
+            code=row.code,
+            display_name=row.display_name,
+            description=row.description,
+            sort_order=row.sort_order,
+            enabled=row.enabled,
+            metadata_json=row.metadata_json,
+        )
+        for row in _repo.list_categories(conn)
+    ]
+
+
 @router.get("/template-packages", response_model=list[TemplatePackageOut])
-async def list_template_packages(conn: Connection = Depends(get_db_conn)) -> list[TemplatePackageOut]:
+async def list_template_packages(
+    category_code: str | None = Query(None),
+    conn: Connection = Depends(get_db_conn),
+) -> list[TemplatePackageOut]:
     packages = _repo.list_all(conn)
+    if category_code:
+        packages = [package for package in packages if package.category_code == category_code]
     items_by_package = {
         package.id: len(_repo.list_items(conn, package_id=package.id))
         for package in packages
@@ -94,6 +126,7 @@ async def list_template_packages(conn: Connection = Depends(get_db_conn)) -> lis
             package_key=package.package_key,
             display_name=package.display_name,
             package_type=package.package_type,
+            category_code=package.category_code,
             source_root=package.source_root,
             item_count=items_by_package[package.id],
         )
@@ -121,6 +154,7 @@ async def import_template_package(
             package_key=(payload.package_key or "").strip() or None,
             display_name=(payload.display_name or "").strip() or None,
             package_type=(payload.package_type or "").strip() or None,
+            category_code=(payload.category_code or "").strip() or None,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

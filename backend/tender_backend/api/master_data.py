@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import re
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
@@ -16,9 +19,137 @@ from tender_backend.db.repositories.master_data_repo import MasterDataRepository
 router = APIRouter(tags=["master-data"])
 
 _repo = MasterDataRepository()
+_UPLOAD_DIR = Path(__file__).resolve().parents[2] / "data" / "master_data_assets"
+_EVIDENCE_OWNER_TYPES = {
+    "library_company",
+    "company_profile",
+    "person_profile",
+    "project_performance",
+    "qualification_certificate",
+    "financial_statement",
+}
+_ASSET_TAXONOMY = [
+    {
+        "domain": "company_qualification",
+        "label": "公司资质文件",
+        "categories": [
+            ("business_license", "营业执照"),
+            ("company_credit_document", "公司信用文件"),
+            ("legal_representative_id", "法人身份证"),
+            ("enterprise_qualification", "企业资质证书及证明文件"),
+            ("safety_quality_document", "安全质量证明文件"),
+            ("financial_status_document", "企业财务状况"),
+            ("account_information", "企业账户信息"),
+            ("green_development_document", "企业绿色发展文件"),
+            ("green_management_system", "绿色管理体系文件"),
+            ("esg_document", "ESG文件"),
+            ("green_power_certificate", "绿电绿证文件"),
+            ("scientific_achievement", "科技成果文件"),
+            ("innovation_incentive", "创新激励文件"),
+            ("rd_team_document", "研发团队文件"),
+            ("award_document", "获奖文件"),
+            ("high_tech_enterprise", "高新技术企业文件"),
+            ("company_name_change", "企业名称变更文件"),
+        ],
+    },
+    {
+        "domain": "company_asset",
+        "label": "公司资产文件",
+        "categories": [
+            ("vehicle_certificate", "机动车辆证明文件"),
+            ("tool_certificate", "工器具证明文件"),
+            ("construction_equipment_certificate", "施工设备证明文件"),
+        ],
+    },
+    {
+        "domain": "company_performance",
+        "label": "公司业绩文件",
+        "categories": [
+            ("similar_performance_table", "类似业绩表"),
+            ("contract_document", "合同"),
+            ("invoice_document", "发票"),
+            ("invoice_verification", "发票验证"),
+        ],
+    },
+    {
+        "domain": "company_evaluation",
+        "label": "公司履约评价",
+        "categories": [
+            ("performance_evaluation", "履约评价文件"),
+        ],
+    },
+    {
+        "domain": "personnel",
+        "label": "人员资料",
+        "categories": [
+            ("performance_table", "业绩表"),
+            ("id_card", "身份证"),
+            ("graduation_certificate", "毕业证"),
+            ("title_certificate", "职称证"),
+            ("practice_certificate", "执业资格证"),
+            ("safety_certificate", "安全生产合格证"),
+            ("special_operation_certificate", "特种作业操作证"),
+            ("social_security_proof", "社保参保证明"),
+            ("labor_contract", "劳动合同书"),
+        ],
+    },
+]
+
+
+def _not_found(detail: str):
+    raise HTTPException(status_code=404, detail=detail)
+
+
+def _validate_evidence_owner_type(value: str) -> str:
+    if value not in _EVIDENCE_OWNER_TYPES:
+        raise HTTPException(status_code=400, detail=f"unsupported evidence owner_type: {value}")
+    return value
+
+
+def _default_company_key(company_name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", company_name.casefold()).strip("-")
+    return slug or f"company-{uuid4().hex[:8]}"
+
+
+def _parse_json_text(raw: str, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"{label} must be valid JSON") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail=f"{label} must be a JSON object")
+    return value
+
+
+class LibraryCompanyBase(BaseModel):
+    company_name: str = Field(min_length=1)
+    company_key: str | None = None
+    company_type: str | None = None
+    enabled: bool = True
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class LibraryCompanyCreate(LibraryCompanyBase):
+    pass
+
+
+class LibraryCompanyUpdate(BaseModel):
+    company_name: str | None = None
+    company_key: str | None = None
+    company_type: str | None = None
+    enabled: bool | None = None
+    metadata_json: dict[str, Any] | None = None
+
+
+class LibraryCompanyOut(LibraryCompanyBase):
+    id: UUID
+    company_key: str
+    created_at: str
+    updated_at: str
 
 
 class CompanyProfileBase(BaseModel):
+    library_company_id: UUID | None = None
     company_name: str = Field(min_length=1)
     company_code: str | None = None
     unified_social_credit_code: str | None = None
@@ -38,6 +169,7 @@ class CompanyProfileCreate(CompanyProfileBase):
 
 
 class CompanyProfileUpdate(BaseModel):
+    library_company_id: UUID | None = None
     company_name: str | None = None
     company_code: str | None = None
     unified_social_credit_code: str | None = None
@@ -59,6 +191,7 @@ class CompanyProfileOut(CompanyProfileBase):
 
 
 class PersonProfileBase(BaseModel):
+    library_company_id: UUID | None = None
     full_name: str = Field(min_length=1)
     gender: str | None = None
     age: int | None = None
@@ -78,6 +211,7 @@ class PersonProfileCreate(PersonProfileBase):
 
 
 class PersonProfileUpdate(BaseModel):
+    library_company_id: UUID | None = None
     full_name: str | None = None
     gender: str | None = None
     age: int | None = None
@@ -99,6 +233,7 @@ class PersonProfileOut(PersonProfileBase):
 
 
 class ProjectPerformanceBase(BaseModel):
+    library_company_id: UUID | None = None
     project_name: str = Field(min_length=1)
     client_name: str = Field(min_length=1)
     contract_amount: Decimal | None = None
@@ -120,6 +255,7 @@ class ProjectPerformanceCreate(ProjectPerformanceBase):
 
 
 class ProjectPerformanceUpdate(BaseModel):
+    library_company_id: UUID | None = None
     project_name: str | None = None
     client_name: str | None = None
     contract_amount: Decimal | None = None
@@ -143,6 +279,7 @@ class ProjectPerformanceOut(ProjectPerformanceBase):
 
 
 class QualificationCertificateBase(BaseModel):
+    library_company_id: UUID | None = None
     certificate_name: str = Field(min_length=1)
     certificate_type: str | None = None
     certificate_no: str | None = None
@@ -161,6 +298,7 @@ class QualificationCertificateCreate(QualificationCertificateBase):
 
 
 class QualificationCertificateUpdate(BaseModel):
+    library_company_id: UUID | None = None
     certificate_name: str | None = None
     certificate_type: str | None = None
     certificate_no: str | None = None
@@ -181,6 +319,7 @@ class QualificationCertificateOut(QualificationCertificateBase):
 
 
 class FinancialStatementBase(BaseModel):
+    library_company_id: UUID | None = None
     fiscal_year: int
     statement_type: str = Field(min_length=1)
     statement_data: dict[str, Any] = Field(default_factory=dict)
@@ -192,6 +331,7 @@ class FinancialStatementCreate(FinancialStatementBase):
 
 
 class FinancialStatementUpdate(BaseModel):
+    library_company_id: UUID | None = None
     fiscal_year: int | None = None
     statement_type: str | None = None
     statement_data: dict[str, Any] | None = None
@@ -205,9 +345,12 @@ class FinancialStatementOut(FinancialStatementBase):
 
 
 class EvidenceAssetBase(BaseModel):
+    library_company_id: UUID | None = None
     owner_type: str = Field(min_length=1)
     owner_id: UUID | None = None
     asset_name: str = Field(min_length=1)
+    asset_domain: str = "generic"
+    asset_category: str = "supporting_document"
     asset_type: str = "supporting_document"
     file_name: str = Field(min_length=1)
     file_path: str = Field(min_length=1)
@@ -224,9 +367,12 @@ class EvidenceAssetCreate(EvidenceAssetBase):
 
 
 class EvidenceAssetUpdate(BaseModel):
+    library_company_id: UUID | None = None
     owner_type: str | None = None
     owner_id: UUID | None = None
     asset_name: str | None = None
+    asset_domain: str | None = None
+    asset_category: str | None = None
     asset_type: str | None = None
     file_name: str | None = None
     file_path: str | None = None
@@ -244,9 +390,23 @@ class EvidenceAssetOut(EvidenceAssetBase):
     updated_at: str
 
 
+def _library_company_out(row) -> LibraryCompanyOut:
+    return LibraryCompanyOut(
+        id=row.id,
+        company_key=row.company_key,
+        company_name=row.company_name,
+        company_type=row.company_type,
+        enabled=row.enabled,
+        metadata_json=row.metadata_json,
+        created_at=row.created_at.isoformat(),
+        updated_at=row.updated_at.isoformat(),
+    )
+
+
 def _company_out(row) -> CompanyProfileOut:
     return CompanyProfileOut(
         id=row.id,
+        library_company_id=row.library_company_id,
         company_name=row.company_name,
         company_code=row.company_code,
         unified_social_credit_code=row.unified_social_credit_code,
@@ -267,6 +427,7 @@ def _company_out(row) -> CompanyProfileOut:
 def _person_out(row) -> PersonProfileOut:
     return PersonProfileOut(
         id=row.id,
+        library_company_id=row.library_company_id,
         full_name=row.full_name,
         gender=row.gender,
         age=row.age,
@@ -287,6 +448,7 @@ def _person_out(row) -> PersonProfileOut:
 def _performance_out(row) -> ProjectPerformanceOut:
     return ProjectPerformanceOut(
         id=row.id,
+        library_company_id=row.library_company_id,
         project_name=row.project_name,
         client_name=row.client_name,
         contract_amount=row.contract_amount,
@@ -309,6 +471,7 @@ def _performance_out(row) -> ProjectPerformanceOut:
 def _certificate_out(row) -> QualificationCertificateOut:
     return QualificationCertificateOut(
         id=row.id,
+        library_company_id=row.library_company_id,
         certificate_name=row.certificate_name,
         certificate_type=row.certificate_type,
         certificate_no=row.certificate_no,
@@ -328,6 +491,7 @@ def _certificate_out(row) -> QualificationCertificateOut:
 def _financial_out(row) -> FinancialStatementOut:
     return FinancialStatementOut(
         id=row.id,
+        library_company_id=row.library_company_id,
         fiscal_year=row.fiscal_year,
         statement_type=row.statement_type,
         statement_data=row.statement_data,
@@ -340,9 +504,12 @@ def _financial_out(row) -> FinancialStatementOut:
 def _evidence_asset_out(row) -> EvidenceAssetOut:
     return EvidenceAssetOut(
         id=row.id,
+        library_company_id=row.library_company_id,
         owner_type=row.owner_type,
         owner_id=row.owner_id,
         asset_name=row.asset_name,
+        asset_domain=row.asset_domain,
+        asset_category=row.asset_category,
         asset_type=row.asset_type,
         file_name=row.file_name,
         file_path=row.file_path,
@@ -357,26 +524,45 @@ def _evidence_asset_out(row) -> EvidenceAssetOut:
     )
 
 
-def _not_found(detail: str):
-    raise HTTPException(status_code=404, detail=detail)
+@router.get("/master-data/library-companies", response_model=list[LibraryCompanyOut])
+async def list_library_companies(conn: Connection = Depends(get_db_conn)) -> list[LibraryCompanyOut]:
+    return [_library_company_out(row) for row in _repo.list_library_companies(conn)]
 
 
-def _validate_evidence_owner_type(value: str) -> str:
-    allowed = {
-        "company_profile",
-        "person_profile",
-        "project_performance",
-        "qualification_certificate",
-        "financial_statement",
-    }
-    if value not in allowed:
-        raise HTTPException(status_code=400, detail=f"unsupported evidence owner_type: {value}")
-    return value
+@router.post("/master-data/library-companies", response_model=LibraryCompanyOut, status_code=201)
+async def create_library_company(payload: LibraryCompanyCreate, conn: Connection = Depends(get_db_conn)) -> LibraryCompanyOut:
+    body = payload.model_dump()
+    body["company_key"] = (body.get("company_key") or "").strip() or _default_company_key(body["company_name"])
+    return _library_company_out(_repo.create_library_company(conn, **body))
+
+
+@router.put("/master-data/library-companies/{record_id}", response_model=LibraryCompanyOut)
+async def update_library_company(record_id: UUID, payload: LibraryCompanyUpdate, conn: Connection = Depends(get_db_conn)) -> LibraryCompanyOut:
+    fields = payload.model_dump(exclude_unset=True)
+    row = _repo.update_library_company(conn, record_id, **fields)
+    if row is None:
+        _not_found("library company not found")
+    return _library_company_out(row)
+
+
+@router.delete("/master-data/library-companies/{record_id}")
+async def delete_library_company(record_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, bool]:
+    if not _repo.delete_library_company(conn, record_id):
+        _not_found("library company not found")
+    return {"deleted": True}
+
+
+@router.get("/master-data/asset-taxonomy")
+async def get_asset_taxonomy() -> dict[str, object]:
+    return {"domains": _ASSET_TAXONOMY}
 
 
 @router.get("/master-data/company-profiles", response_model=list[CompanyProfileOut])
-async def list_company_profiles(conn: Connection = Depends(get_db_conn)) -> list[CompanyProfileOut]:
-    return [_company_out(row) for row in _repo.list_company_profiles(conn)]
+async def list_company_profiles(
+    library_company_id: UUID | None = Query(None),
+    conn: Connection = Depends(get_db_conn),
+) -> list[CompanyProfileOut]:
+    return [_company_out(row) for row in _repo.list_company_profiles(conn, library_company_id=library_company_id)]
 
 
 @router.post("/master-data/company-profiles", response_model=CompanyProfileOut, status_code=201)
@@ -400,8 +586,11 @@ async def delete_company_profile(record_id: UUID, conn: Connection = Depends(get
 
 
 @router.get("/master-data/people", response_model=list[PersonProfileOut])
-async def list_people(conn: Connection = Depends(get_db_conn)) -> list[PersonProfileOut]:
-    return [_person_out(row) for row in _repo.list_people(conn)]
+async def list_people(
+    library_company_id: UUID | None = Query(None),
+    conn: Connection = Depends(get_db_conn),
+) -> list[PersonProfileOut]:
+    return [_person_out(row) for row in _repo.list_people(conn, library_company_id=library_company_id)]
 
 
 @router.post("/master-data/people", response_model=PersonProfileOut, status_code=201)
@@ -425,8 +614,11 @@ async def delete_person(record_id: UUID, conn: Connection = Depends(get_db_conn)
 
 
 @router.get("/master-data/performances", response_model=list[ProjectPerformanceOut])
-async def list_performances(conn: Connection = Depends(get_db_conn)) -> list[ProjectPerformanceOut]:
-    return [_performance_out(row) for row in _repo.list_project_performances(conn)]
+async def list_performances(
+    library_company_id: UUID | None = Query(None),
+    conn: Connection = Depends(get_db_conn),
+) -> list[ProjectPerformanceOut]:
+    return [_performance_out(row) for row in _repo.list_project_performances(conn, library_company_id=library_company_id)]
 
 
 @router.post("/master-data/performances", response_model=ProjectPerformanceOut, status_code=201)
@@ -450,8 +642,11 @@ async def delete_performance(record_id: UUID, conn: Connection = Depends(get_db_
 
 
 @router.get("/master-data/certificates", response_model=list[QualificationCertificateOut])
-async def list_certificates(conn: Connection = Depends(get_db_conn)) -> list[QualificationCertificateOut]:
-    return [_certificate_out(row) for row in _repo.list_certificates(conn)]
+async def list_certificates(
+    library_company_id: UUID | None = Query(None),
+    conn: Connection = Depends(get_db_conn),
+) -> list[QualificationCertificateOut]:
+    return [_certificate_out(row) for row in _repo.list_certificates(conn, library_company_id=library_company_id)]
 
 
 @router.post("/master-data/certificates", response_model=QualificationCertificateOut, status_code=201)
@@ -475,8 +670,11 @@ async def delete_certificate(record_id: UUID, conn: Connection = Depends(get_db_
 
 
 @router.get("/master-data/financial-statements", response_model=list[FinancialStatementOut])
-async def list_financial_statements(conn: Connection = Depends(get_db_conn)) -> list[FinancialStatementOut]:
-    return [_financial_out(row) for row in _repo.list_financial_statements(conn)]
+async def list_financial_statements(
+    library_company_id: UUID | None = Query(None),
+    conn: Connection = Depends(get_db_conn),
+) -> list[FinancialStatementOut]:
+    return [_financial_out(row) for row in _repo.list_financial_statements(conn, library_company_id=library_company_id)]
 
 
 @router.post("/master-data/financial-statements", response_model=FinancialStatementOut, status_code=201)
@@ -511,14 +709,71 @@ async def delete_financial_statement(record_id: UUID, conn: Connection = Depends
 
 
 @router.get("/master-data/evidence-assets", response_model=list[EvidenceAssetOut])
-async def list_evidence_assets(conn: Connection = Depends(get_db_conn)) -> list[EvidenceAssetOut]:
-    return [_evidence_asset_out(row) for row in _repo.list_evidence_assets(conn)]
+async def list_evidence_assets(
+    library_company_id: UUID | None = Query(None),
+    asset_domain: str | None = Query(None),
+    conn: Connection = Depends(get_db_conn),
+) -> list[EvidenceAssetOut]:
+    return [
+        _evidence_asset_out(row)
+        for row in _repo.list_evidence_assets(
+            conn,
+            library_company_id=library_company_id,
+            asset_domain=asset_domain,
+        )
+    ]
 
 
 @router.post("/master-data/evidence-assets", response_model=EvidenceAssetOut, status_code=201)
 async def create_evidence_asset(payload: EvidenceAssetCreate, conn: Connection = Depends(get_db_conn)) -> EvidenceAssetOut:
     _validate_evidence_owner_type(payload.owner_type)
     return _evidence_asset_out(_repo.create_evidence_asset(conn, **payload.model_dump()))
+
+
+@router.post("/master-data/evidence-assets/upload", response_model=EvidenceAssetOut, status_code=201)
+async def upload_evidence_asset(
+    library_company_id: UUID | None = Form(None),
+    owner_type: str = Form(...),
+    owner_id: UUID | None = Form(None),
+    asset_name: str = Form(...),
+    asset_domain: str = Form("generic"),
+    asset_category: str = Form("supporting_document"),
+    asset_type: str = Form("supporting_document"),
+    issuer_name: str | None = Form(None),
+    issued_on: date | None = Form(None),
+    expires_on: date | None = Form(None),
+    sort_order: int = Form(0),
+    metadata_json: str = Form("{}"),
+    file: UploadFile = File(...),
+    conn: Connection = Depends(get_db_conn),
+) -> EvidenceAssetOut:
+    _validate_evidence_owner_type(owner_type)
+    payload = _parse_json_text(metadata_json, label="metadata_json")
+    suffix = Path(file.filename or "").suffix
+    local_name = f"{uuid4()}{suffix}"
+    _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    local_path = _UPLOAD_DIR / local_name
+    content = await file.read()
+    local_path.write_bytes(content)
+    row = _repo.create_evidence_asset(
+        conn,
+        library_company_id=library_company_id,
+        owner_type=owner_type,
+        owner_id=owner_id,
+        asset_name=asset_name,
+        asset_domain=asset_domain,
+        asset_category=asset_category,
+        asset_type=asset_type,
+        file_name=file.filename or local_name,
+        file_path=str(local_path),
+        media_type=file.content_type or "application/octet-stream",
+        issuer_name=issuer_name,
+        issued_on=issued_on,
+        expires_on=expires_on,
+        metadata_json=payload,
+        sort_order=sort_order,
+    )
+    return _evidence_asset_out(row)
 
 
 @router.put("/master-data/evidence-assets/{record_id}", response_model=EvidenceAssetOut)

@@ -16,6 +16,7 @@ class BidTemplatePackageRow:
     package_key: str
     display_name: str
     package_type: str
+    category_code: str | None
     source_root: str
     source_manifest: dict[str, Any]
     created_at: datetime
@@ -51,13 +52,28 @@ class BidTemplateItemCreate:
     sort_order: int
 
 
+@dataclass(frozen=True)
+class TemplatePackageCategoryRow:
+    code: str
+    display_name: str
+    description: str | None
+    sort_order: int
+    enabled: bool
+    metadata_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
 _PACKAGE_COLUMNS = (
-    "id, package_key, display_name, package_type, source_root, "
+    "id, package_key, display_name, package_type, category_code, source_root, "
     "source_manifest, created_at, updated_at"
 )
 _ITEM_COLUMNS = (
     "id, package_id, item_code, item_name, filename, relative_path, source_kind, "
     "item_type, render_mode, is_required, sort_order, created_at"
+)
+_CATEGORY_COLUMNS = (
+    "code, display_name, description, sort_order, enabled, metadata_json, created_at, updated_at"
 )
 
 
@@ -67,6 +83,7 @@ def _to_package(row: dict[str, Any]) -> BidTemplatePackageRow:
         package_key=row["package_key"],
         display_name=row["display_name"],
         package_type=row["package_type"],
+        category_code=row.get("category_code"),
         source_root=row["source_root"],
         source_manifest=dict(row["source_manifest"] or {}),
         created_at=row["created_at"],
@@ -91,7 +108,27 @@ def _to_item(row: dict[str, Any]) -> BidTemplateItemRow:
     )
 
 
+def _to_category(row: dict[str, Any]) -> TemplatePackageCategoryRow:
+    return TemplatePackageCategoryRow(
+        code=row["code"],
+        display_name=row["display_name"],
+        description=row["description"],
+        sort_order=row["sort_order"],
+        enabled=row["enabled"],
+        metadata_json=dict(row["metadata_json"] or {}),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 class BidTemplatePackageRepository:
+    def list_categories(self, conn: Connection) -> list[TemplatePackageCategoryRow]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                f"SELECT {_CATEGORY_COLUMNS} FROM template_package_category ORDER BY sort_order, display_name"
+            ).fetchall()
+        return [_to_category(row) for row in rows]
+
     def list_all(self, conn: Connection) -> list[BidTemplatePackageRow]:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(
@@ -143,6 +180,7 @@ class BidTemplatePackageRepository:
         package_key: str,
         display_name: str,
         package_type: str,
+        category_code: str | None,
         source_root: str,
         source_manifest: dict[str, Any],
     ) -> BidTemplatePackageRow:
@@ -150,13 +188,14 @@ class BidTemplatePackageRepository:
             row = cur.execute(
                 f"""
                 INSERT INTO bid_template_package (
-                  id, package_key, display_name, package_type, source_root, source_manifest
+                  id, package_key, display_name, package_type, category_code, source_root, source_manifest
                 )
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
                 ON CONFLICT (package_key)
                 DO UPDATE SET
                   display_name = EXCLUDED.display_name,
                   package_type = EXCLUDED.package_type,
+                  category_code = EXCLUDED.category_code,
                   source_root = EXCLUDED.source_root,
                   source_manifest = EXCLUDED.source_manifest,
                   updated_at = now()
@@ -167,6 +206,7 @@ class BidTemplatePackageRepository:
                     package_key,
                     display_name,
                     package_type,
+                    category_code,
                     source_root,
                     json.dumps(source_manifest, ensure_ascii=False),
                 ),

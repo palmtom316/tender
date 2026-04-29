@@ -12,8 +12,21 @@ from psycopg.rows import dict_row
 
 
 @dataclass(frozen=True)
+class LibraryCompanyRow:
+    id: UUID
+    company_key: str
+    company_name: str
+    company_type: str | None
+    enabled: bool
+    metadata_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class CompanyProfileRow:
     id: UUID
+    library_company_id: UUID | None
     company_name: str
     company_code: str | None
     unified_social_credit_code: str | None
@@ -33,6 +46,7 @@ class CompanyProfileRow:
 @dataclass(frozen=True)
 class PersonProfileRow:
     id: UUID
+    library_company_id: UUID | None
     full_name: str
     gender: str | None
     age: int | None
@@ -52,6 +66,7 @@ class PersonProfileRow:
 @dataclass(frozen=True)
 class ProjectPerformanceRow:
     id: UUID
+    library_company_id: UUID | None
     project_name: str
     client_name: str
     contract_amount: Decimal | None
@@ -73,6 +88,7 @@ class ProjectPerformanceRow:
 @dataclass(frozen=True)
 class QualificationCertificateRow:
     id: UUID
+    library_company_id: UUID | None
     certificate_name: str
     certificate_type: str | None
     certificate_no: str | None
@@ -91,6 +107,7 @@ class QualificationCertificateRow:
 @dataclass(frozen=True)
 class FinancialStatementRow:
     id: UUID
+    library_company_id: UUID | None
     fiscal_year: int
     statement_type: str
     statement_data: dict[str, Any]
@@ -102,9 +119,12 @@ class FinancialStatementRow:
 @dataclass(frozen=True)
 class EvidenceAssetRow:
     id: UUID
+    library_company_id: UUID | None
     owner_type: str
     owner_id: UUID | None
     asset_name: str
+    asset_domain: str
+    asset_category: str
     asset_type: str
     file_name: str
     file_path: str
@@ -118,36 +138,54 @@ class EvidenceAssetRow:
     updated_at: datetime
 
 
+_LIBRARY_COMPANY_COLUMNS = (
+    "id, company_key, company_name, company_type, enabled, metadata_json, created_at, updated_at"
+)
 _COMPANY_COLUMNS = (
-    "id, company_name, company_code, unified_social_credit_code, registered_address, "
+    "id, library_company_id, company_name, company_code, unified_social_credit_code, registered_address, "
     "contact_name, contact_phone, contact_email, website, registered_capital, "
     "company_type, business_scope, profile_json, created_at, updated_at"
 )
 _PERSON_COLUMNS = (
-    "id, full_name, gender, age, education, title, role_name, specialty, "
+    "id, library_company_id, full_name, gender, age, education, title, role_name, specialty, "
     "years_experience, phone, email, resume_text, profile_json, created_at, updated_at"
 )
 _PERFORMANCE_COLUMNS = (
-    "id, project_name, client_name, contract_amount, currency, started_on, ended_on, "
+    "id, library_company_id, project_name, client_name, contract_amount, currency, started_on, ended_on, "
     "project_status, service_scope, peak_staffing, average_staffing, contact_name, "
     "contact_phone, evidence_summary, metadata_json, created_at, updated_at"
 )
 _CERTIFICATE_COLUMNS = (
-    "id, certificate_name, certificate_type, certificate_no, holder_name, grade, "
+    "id, library_company_id, certificate_name, certificate_type, certificate_no, holder_name, grade, "
     "specialty, issued_by, valid_from, valid_to, status, metadata_json, created_at, updated_at"
 )
 _FINANCIAL_COLUMNS = (
-    "id, fiscal_year, statement_type, statement_data, source_note, created_at, updated_at"
+    "id, library_company_id, fiscal_year, statement_type, statement_data, source_note, created_at, updated_at"
 )
 _EVIDENCE_COLUMNS = (
-    "id, owner_type, owner_id, asset_name, asset_type, file_name, file_path, media_type, "
-    "issuer_name, issued_on, expires_on, metadata_json, sort_order, created_at, updated_at"
+    "id, library_company_id, owner_type, owner_id, asset_name, asset_domain, asset_category, "
+    "asset_type, file_name, file_path, media_type, issuer_name, issued_on, expires_on, "
+    "metadata_json, sort_order, created_at, updated_at"
 )
+
+
+def _to_library_company(row: dict[str, Any]) -> LibraryCompanyRow:
+    return LibraryCompanyRow(
+        id=row["id"],
+        company_key=row["company_key"],
+        company_name=row["company_name"],
+        company_type=row["company_type"],
+        enabled=row["enabled"],
+        metadata_json=dict(row["metadata_json"] or {}),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
 
 
 def _to_company(row: dict[str, Any]) -> CompanyProfileRow:
     return CompanyProfileRow(
         id=row["id"],
+        library_company_id=row.get("library_company_id"),
         company_name=row["company_name"],
         company_code=row["company_code"],
         unified_social_credit_code=row["unified_social_credit_code"],
@@ -168,6 +206,7 @@ def _to_company(row: dict[str, Any]) -> CompanyProfileRow:
 def _to_person(row: dict[str, Any]) -> PersonProfileRow:
     return PersonProfileRow(
         id=row["id"],
+        library_company_id=row.get("library_company_id"),
         full_name=row["full_name"],
         gender=row["gender"],
         age=row["age"],
@@ -188,6 +227,7 @@ def _to_person(row: dict[str, Any]) -> PersonProfileRow:
 def _to_performance(row: dict[str, Any]) -> ProjectPerformanceRow:
     return ProjectPerformanceRow(
         id=row["id"],
+        library_company_id=row.get("library_company_id"),
         project_name=row["project_name"],
         client_name=row["client_name"],
         contract_amount=row["contract_amount"],
@@ -210,6 +250,7 @@ def _to_performance(row: dict[str, Any]) -> ProjectPerformanceRow:
 def _to_certificate(row: dict[str, Any]) -> QualificationCertificateRow:
     return QualificationCertificateRow(
         id=row["id"],
+        library_company_id=row.get("library_company_id"),
         certificate_name=row["certificate_name"],
         certificate_type=row["certificate_type"],
         certificate_no=row["certificate_no"],
@@ -229,6 +270,7 @@ def _to_certificate(row: dict[str, Any]) -> QualificationCertificateRow:
 def _to_financial(row: dict[str, Any]) -> FinancialStatementRow:
     return FinancialStatementRow(
         id=row["id"],
+        library_company_id=row.get("library_company_id"),
         fiscal_year=row["fiscal_year"],
         statement_type=row["statement_type"],
         statement_data=dict(row["statement_data"] or {}),
@@ -241,9 +283,12 @@ def _to_financial(row: dict[str, Any]) -> FinancialStatementRow:
 def _to_evidence_asset(row: dict[str, Any]) -> EvidenceAssetRow:
     return EvidenceAssetRow(
         id=row["id"],
+        library_company_id=row.get("library_company_id"),
         owner_type=row["owner_type"],
         owner_id=row["owner_id"],
         asset_name=row["asset_name"],
+        asset_domain=row.get("asset_domain", "generic"),
+        asset_category=row.get("asset_category", row.get("asset_type", "supporting_document")),
         asset_type=row["asset_type"],
         file_name=row["file_name"],
         file_path=row["file_path"],
@@ -259,11 +304,70 @@ def _to_evidence_asset(row: dict[str, Any]) -> EvidenceAssetRow:
 
 
 class MasterDataRepository:
-    def list_company_profiles(self, conn: Connection) -> list[CompanyProfileRow]:
+    def list_library_companies(self, conn: Connection) -> list[LibraryCompanyRow]:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(
-                f"SELECT {_COMPANY_COLUMNS} FROM company_profile ORDER BY created_at DESC"
+                f"SELECT {_LIBRARY_COMPANY_COLUMNS} FROM library_company ORDER BY company_name"
             ).fetchall()
+        return [_to_library_company(row) for row in rows]
+
+    def get_library_company(self, conn: Connection, record_id: UUID) -> LibraryCompanyRow | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"SELECT {_LIBRARY_COMPANY_COLUMNS} FROM library_company WHERE id = %s",
+                (record_id,),
+            ).fetchone()
+        return _to_library_company(row) if row else None
+
+    def create_library_company(self, conn: Connection, **fields: Any) -> LibraryCompanyRow:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"""
+                INSERT INTO library_company (
+                  id, company_key, company_name, company_type, enabled, metadata_json
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                RETURNING {_LIBRARY_COMPANY_COLUMNS}
+                """,
+                (
+                    uuid4(),
+                    fields["company_key"],
+                    fields["company_name"],
+                    fields.get("company_type"),
+                    fields.get("enabled", True),
+                    json.dumps(fields.get("metadata_json") or {}, ensure_ascii=False),
+                ),
+            ).fetchone()
+        conn.commit()
+        assert row is not None
+        return _to_library_company(row)
+
+    def update_library_company(self, conn: Connection, record_id: UUID, **fields: Any) -> LibraryCompanyRow | None:
+        return self._update_json_record(
+            conn,
+            table="library_company",
+            record_id=record_id,
+            fields=fields,
+            allowed_fields={"company_key", "company_name", "company_type", "enabled", "metadata_json"},
+            json_fields={"metadata_json"},
+            returning=_LIBRARY_COMPANY_COLUMNS,
+            mapper=_to_library_company,
+        )
+
+    def delete_library_company(self, conn: Connection, record_id: UUID) -> bool:
+        return self._delete(conn, table="library_company", record_id=record_id)
+
+    def list_company_profiles(self, conn: Connection, *, library_company_id: UUID | None = None) -> list[CompanyProfileRow]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            if library_company_id is None:
+                rows = cur.execute(
+                    f"SELECT {_COMPANY_COLUMNS} FROM company_profile ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    f"SELECT {_COMPANY_COLUMNS} FROM company_profile WHERE library_company_id = %s ORDER BY created_at DESC",
+                    (library_company_id,),
+                ).fetchall()
         return [_to_company(row) for row in rows]
 
     def get_company_profile(self, conn: Connection, record_id: UUID) -> CompanyProfileRow | None:
@@ -279,15 +383,16 @@ class MasterDataRepository:
             row = cur.execute(
                 f"""
                 INSERT INTO company_profile (
-                  id, company_name, company_code, unified_social_credit_code, registered_address,
+                  id, library_company_id, company_name, company_code, unified_social_credit_code, registered_address,
                   contact_name, contact_phone, contact_email, website, registered_capital,
                   company_type, business_scope, profile_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 RETURNING {_COMPANY_COLUMNS}
                 """,
                 (
                     uuid4(),
+                    fields.get("library_company_id"),
                     fields["company_name"],
                     fields.get("company_code"),
                     fields.get("unified_social_credit_code"),
@@ -313,7 +418,7 @@ class MasterDataRepository:
             record_id=record_id,
             fields=fields,
             allowed_fields={
-                "company_name", "company_code", "unified_social_credit_code", "registered_address",
+                "library_company_id", "company_name", "company_code", "unified_social_credit_code", "registered_address",
                 "contact_name", "contact_phone", "contact_email", "website", "registered_capital",
                 "company_type", "business_scope", "profile_json",
             },
@@ -325,11 +430,17 @@ class MasterDataRepository:
     def delete_company_profile(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="company_profile", record_id=record_id)
 
-    def list_people(self, conn: Connection) -> list[PersonProfileRow]:
+    def list_people(self, conn: Connection, *, library_company_id: UUID | None = None) -> list[PersonProfileRow]:
         with conn.cursor(row_factory=dict_row) as cur:
-            rows = cur.execute(
-                f"SELECT {_PERSON_COLUMNS} FROM person_profile ORDER BY created_at DESC"
-            ).fetchall()
+            if library_company_id is None:
+                rows = cur.execute(
+                    f"SELECT {_PERSON_COLUMNS} FROM person_profile ORDER BY created_at DESC"
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    f"SELECT {_PERSON_COLUMNS} FROM person_profile WHERE library_company_id = %s ORDER BY created_at DESC",
+                    (library_company_id,),
+                ).fetchall()
         return [_to_person(row) for row in rows]
 
     def get_person(self, conn: Connection, record_id: UUID) -> PersonProfileRow | None:
@@ -345,14 +456,15 @@ class MasterDataRepository:
             row = cur.execute(
                 f"""
                 INSERT INTO person_profile (
-                  id, full_name, gender, age, education, title, role_name, specialty,
+                  id, library_company_id, full_name, gender, age, education, title, role_name, specialty,
                   years_experience, phone, email, resume_text, profile_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 RETURNING {_PERSON_COLUMNS}
                 """,
                 (
                     uuid4(),
+                    fields.get("library_company_id"),
                     fields["full_name"],
                     fields.get("gender"),
                     fields.get("age"),
@@ -378,7 +490,7 @@ class MasterDataRepository:
             record_id=record_id,
             fields=fields,
             allowed_fields={
-                "full_name", "gender", "age", "education", "title", "role_name", "specialty",
+                "library_company_id", "full_name", "gender", "age", "education", "title", "role_name", "specialty",
                 "years_experience", "phone", "email", "resume_text", "profile_json",
             },
             json_fields={"profile_json"},
@@ -389,11 +501,22 @@ class MasterDataRepository:
     def delete_person(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="person_profile", record_id=record_id)
 
-    def list_project_performances(self, conn: Connection) -> list[ProjectPerformanceRow]:
+    def list_project_performances(self, conn: Connection, *, library_company_id: UUID | None = None) -> list[ProjectPerformanceRow]:
         with conn.cursor(row_factory=dict_row) as cur:
-            rows = cur.execute(
-                f"SELECT {_PERFORMANCE_COLUMNS} FROM project_performance ORDER BY started_on DESC NULLS LAST, created_at DESC"
-            ).fetchall()
+            if library_company_id is None:
+                rows = cur.execute(
+                    f"SELECT {_PERFORMANCE_COLUMNS} FROM project_performance ORDER BY started_on DESC NULLS LAST, created_at DESC"
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    f"""
+                    SELECT {_PERFORMANCE_COLUMNS}
+                    FROM project_performance
+                    WHERE library_company_id = %s
+                    ORDER BY started_on DESC NULLS LAST, created_at DESC
+                    """,
+                    (library_company_id,),
+                ).fetchall()
         return [_to_performance(row) for row in rows]
 
     def get_project_performance(self, conn: Connection, record_id: UUID) -> ProjectPerformanceRow | None:
@@ -409,15 +532,16 @@ class MasterDataRepository:
             row = cur.execute(
                 f"""
                 INSERT INTO project_performance (
-                  id, project_name, client_name, contract_amount, currency, started_on, ended_on,
+                  id, library_company_id, project_name, client_name, contract_amount, currency, started_on, ended_on,
                   project_status, service_scope, peak_staffing, average_staffing, contact_name,
                   contact_phone, evidence_summary, metadata_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 RETURNING {_PERFORMANCE_COLUMNS}
                 """,
                 (
                     uuid4(),
+                    fields.get("library_company_id"),
                     fields["project_name"],
                     fields["client_name"],
                     fields.get("contract_amount"),
@@ -445,7 +569,7 @@ class MasterDataRepository:
             record_id=record_id,
             fields=fields,
             allowed_fields={
-                "project_name", "client_name", "contract_amount", "currency", "started_on",
+                "library_company_id", "project_name", "client_name", "contract_amount", "currency", "started_on",
                 "ended_on", "project_status", "service_scope", "peak_staffing",
                 "average_staffing", "contact_name", "contact_phone", "evidence_summary",
                 "metadata_json",
@@ -458,11 +582,22 @@ class MasterDataRepository:
     def delete_project_performance(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="project_performance", record_id=record_id)
 
-    def list_certificates(self, conn: Connection) -> list[QualificationCertificateRow]:
+    def list_certificates(self, conn: Connection, *, library_company_id: UUID | None = None) -> list[QualificationCertificateRow]:
         with conn.cursor(row_factory=dict_row) as cur:
-            rows = cur.execute(
-                f"SELECT {_CERTIFICATE_COLUMNS} FROM qualification_certificate ORDER BY valid_to DESC NULLS LAST, created_at DESC"
-            ).fetchall()
+            if library_company_id is None:
+                rows = cur.execute(
+                    f"SELECT {_CERTIFICATE_COLUMNS} FROM qualification_certificate ORDER BY valid_to DESC NULLS LAST, created_at DESC"
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    f"""
+                    SELECT {_CERTIFICATE_COLUMNS}
+                    FROM qualification_certificate
+                    WHERE library_company_id = %s
+                    ORDER BY valid_to DESC NULLS LAST, created_at DESC
+                    """,
+                    (library_company_id,),
+                ).fetchall()
         return [_to_certificate(row) for row in rows]
 
     def get_certificate(self, conn: Connection, record_id: UUID) -> QualificationCertificateRow | None:
@@ -478,14 +613,15 @@ class MasterDataRepository:
             row = cur.execute(
                 f"""
                 INSERT INTO qualification_certificate (
-                  id, certificate_name, certificate_type, certificate_no, holder_name, grade,
+                  id, library_company_id, certificate_name, certificate_type, certificate_no, holder_name, grade,
                   specialty, issued_by, valid_from, valid_to, status, metadata_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 RETURNING {_CERTIFICATE_COLUMNS}
                 """,
                 (
                     uuid4(),
+                    fields.get("library_company_id"),
                     fields["certificate_name"],
                     fields.get("certificate_type"),
                     fields.get("certificate_no"),
@@ -510,7 +646,7 @@ class MasterDataRepository:
             record_id=record_id,
             fields=fields,
             allowed_fields={
-                "certificate_name", "certificate_type", "certificate_no", "holder_name", "grade",
+                "library_company_id", "certificate_name", "certificate_type", "certificate_no", "holder_name", "grade",
                 "specialty", "issued_by", "valid_from", "valid_to", "status", "metadata_json",
             },
             json_fields={"metadata_json"},
@@ -521,11 +657,22 @@ class MasterDataRepository:
     def delete_certificate(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="qualification_certificate", record_id=record_id)
 
-    def list_financial_statements(self, conn: Connection) -> list[FinancialStatementRow]:
+    def list_financial_statements(self, conn: Connection, *, library_company_id: UUID | None = None) -> list[FinancialStatementRow]:
         with conn.cursor(row_factory=dict_row) as cur:
-            rows = cur.execute(
-                f"SELECT {_FINANCIAL_COLUMNS} FROM financial_statement ORDER BY fiscal_year DESC, statement_type"
-            ).fetchall()
+            if library_company_id is None:
+                rows = cur.execute(
+                    f"SELECT {_FINANCIAL_COLUMNS} FROM financial_statement ORDER BY fiscal_year DESC, statement_type"
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    f"""
+                    SELECT {_FINANCIAL_COLUMNS}
+                    FROM financial_statement
+                    WHERE library_company_id = %s
+                    ORDER BY fiscal_year DESC, statement_type
+                    """,
+                    (library_company_id,),
+                ).fetchall()
         return [_to_financial(row) for row in rows]
 
     def get_financial_statement(self, conn: Connection, record_id: UUID) -> FinancialStatementRow | None:
@@ -541,13 +688,14 @@ class MasterDataRepository:
             row = cur.execute(
                 f"""
                 INSERT INTO financial_statement (
-                  id, fiscal_year, statement_type, statement_data, source_note
+                  id, library_company_id, fiscal_year, statement_type, statement_data, source_note
                 )
-                VALUES (%s, %s, %s, %s::jsonb, %s)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s)
                 RETURNING {_FINANCIAL_COLUMNS}
                 """,
                 (
                     uuid4(),
+                    fields.get("library_company_id"),
                     fields["fiscal_year"],
                     fields["statement_type"],
                     json.dumps(fields.get("statement_data") or {}, ensure_ascii=False),
@@ -564,7 +712,7 @@ class MasterDataRepository:
             table="financial_statement",
             record_id=record_id,
             fields=fields,
-            allowed_fields={"fiscal_year", "statement_type", "statement_data", "source_note"},
+            allowed_fields={"library_company_id", "fiscal_year", "statement_type", "statement_data", "source_note"},
             json_fields={"statement_data"},
             returning=_FINANCIAL_COLUMNS,
             mapper=_to_financial,
@@ -573,10 +721,26 @@ class MasterDataRepository:
     def delete_financial_statement(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="financial_statement", record_id=record_id)
 
-    def list_evidence_assets(self, conn: Connection) -> list[EvidenceAssetRow]:
+    def list_evidence_assets(
+        self,
+        conn: Connection,
+        *,
+        library_company_id: UUID | None = None,
+        asset_domain: str | None = None,
+    ) -> list[EvidenceAssetRow]:
         with conn.cursor(row_factory=dict_row) as cur:
+            clauses: list[str] = []
+            values: list[Any] = []
+            if library_company_id is not None:
+                clauses.append("library_company_id = %s")
+                values.append(library_company_id)
+            if asset_domain:
+                clauses.append("asset_domain = %s")
+                values.append(asset_domain)
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = cur.execute(
-                f"SELECT {_EVIDENCE_COLUMNS} FROM evidence_asset ORDER BY owner_type, sort_order, created_at DESC"
+                f"SELECT {_EVIDENCE_COLUMNS} FROM evidence_asset {where_sql} ORDER BY owner_type, sort_order, created_at DESC",
+                values,
             ).fetchall()
         return [_to_evidence_asset(row) for row in rows]
 
@@ -593,17 +757,21 @@ class MasterDataRepository:
             row = cur.execute(
                 f"""
                 INSERT INTO evidence_asset (
-                  id, owner_type, owner_id, asset_name, asset_type, file_name, file_path,
-                  media_type, issuer_name, issued_on, expires_on, metadata_json, sort_order
+                  id, library_company_id, owner_type, owner_id, asset_name, asset_domain, asset_category,
+                  asset_type, file_name, file_path, media_type, issuer_name, issued_on, expires_on,
+                  metadata_json, sort_order
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                 RETURNING {_EVIDENCE_COLUMNS}
                 """,
                 (
                     uuid4(),
+                    fields.get("library_company_id"),
                     fields["owner_type"],
                     fields.get("owner_id"),
                     fields["asset_name"],
+                    fields.get("asset_domain") or "generic",
+                    fields.get("asset_category") or "supporting_document",
                     fields.get("asset_type") or "supporting_document",
                     fields["file_name"],
                     fields["file_path"],
@@ -626,9 +794,9 @@ class MasterDataRepository:
             record_id=record_id,
             fields=fields,
             allowed_fields={
-                "owner_type", "owner_id", "asset_name", "asset_type", "file_name", "file_path",
-                "media_type", "issuer_name", "issued_on", "expires_on", "metadata_json",
-                "sort_order",
+                "library_company_id", "owner_type", "owner_id", "asset_name", "asset_domain",
+                "asset_category", "asset_type", "file_name", "file_path", "media_type",
+                "issuer_name", "issued_on", "expires_on", "metadata_json", "sort_order",
             },
             json_fields={"metadata_json"},
             returning=_EVIDENCE_COLUMNS,

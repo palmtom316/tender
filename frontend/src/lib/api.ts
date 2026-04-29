@@ -350,6 +350,7 @@ export interface TemplatePackageSummary {
   package_key: string;
   display_name: string;
   package_type: string;
+  category_code: string | null;
   source_root: string;
   item_count: number;
 }
@@ -438,10 +439,31 @@ export interface TemplateFieldMappingSuggestions {
   suggestions: TemplateFieldMappingSuggestionGroup[];
 }
 
+export interface TemplatePackageCategory {
+  code: string;
+  display_name: string;
+  description: string | null;
+  sort_order: number;
+  enabled: boolean;
+  metadata_json: Record<string, unknown>;
+}
+
 export function listTemplatePackages(options?: {
   signal?: AbortSignal;
+  categoryCode?: string;
 }): Promise<TemplatePackageSummary[]> {
-  return request<TemplatePackageSummary[]>("/template-packages", {
+  const params = new URLSearchParams();
+  if (options?.categoryCode) params.set("category_code", options.categoryCode);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<TemplatePackageSummary[]>(`/template-packages${suffix}`, {
+    signal: options?.signal,
+  });
+}
+
+export function listTemplatePackageCategories(options?: {
+  signal?: AbortSignal;
+}): Promise<TemplatePackageCategory[]> {
+  return request<TemplatePackageCategory[]>("/template-package-categories", {
     signal: options?.signal,
   });
 }
@@ -518,6 +540,200 @@ export function fetchTemplateFieldMappingSuggestions(
 ): Promise<TemplateFieldMappingSuggestions> {
   return request<TemplateFieldMappingSuggestions>(`/template-items/${itemId}/field-mapping-suggestions`, {
     signal: options?.signal,
+  });
+}
+
+// ── Master Data ──
+
+export interface LibraryCompany {
+  id: string;
+  company_key: string;
+  company_name: string;
+  company_type: string | null;
+  enabled: boolean;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyProfile {
+  id: string;
+  library_company_id: string | null;
+  company_name: string;
+  company_code: string | null;
+  unified_social_credit_code: string | null;
+  registered_address: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  website: string | null;
+  registered_capital: string | null;
+  company_type: string | null;
+  business_scope: string | null;
+  profile_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PersonProfile {
+  id: string;
+  library_company_id: string | null;
+  full_name: string;
+  gender: string | null;
+  age: number | null;
+  education: string | null;
+  title: string | null;
+  role_name: string | null;
+  specialty: string | null;
+  years_experience: number | null;
+  phone: string | null;
+  email: string | null;
+  resume_text: string | null;
+  profile_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvidenceAsset {
+  id: string;
+  library_company_id: string | null;
+  owner_type: string;
+  owner_id: string | null;
+  asset_name: string;
+  asset_domain: string;
+  asset_category: string;
+  asset_type: string;
+  file_name: string;
+  file_path: string;
+  media_type: string | null;
+  issuer_name: string | null;
+  issued_on: string | null;
+  expires_on: string | null;
+  metadata_json: Record<string, unknown>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetTaxonomyCategory {
+  code: string;
+  label: string;
+}
+
+export interface AssetTaxonomyDomain {
+  domain: string;
+  label: string;
+  categories: [string, string][];
+}
+
+export interface AssetTaxonomyResponse {
+  domains: AssetTaxonomyDomain[];
+}
+
+export interface LibraryCompanyCreatePayload {
+  company_name: string;
+  company_key?: string;
+  company_type?: string;
+  enabled?: boolean;
+  metadata_json?: Record<string, unknown>;
+}
+
+export interface EvidenceAssetUploadPayload {
+  library_company_id?: string;
+  owner_type: string;
+  owner_id?: string;
+  asset_name: string;
+  asset_domain: string;
+  asset_category: string;
+  asset_type?: string;
+  issuer_name?: string;
+  issued_on?: string;
+  expires_on?: string;
+  sort_order?: number;
+  metadata_json?: Record<string, unknown>;
+  file: File;
+}
+
+export function fetchLibraryCompanies(options?: {
+  signal?: AbortSignal;
+}): Promise<LibraryCompany[]> {
+  return request<LibraryCompany[]>("/master-data/library-companies", {
+    signal: options?.signal,
+  });
+}
+
+export function createLibraryCompany(data: LibraryCompanyCreatePayload): Promise<LibraryCompany> {
+  return request<LibraryCompany>("/master-data/library-companies", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function fetchAssetTaxonomy(options?: {
+  signal?: AbortSignal;
+}): Promise<AssetTaxonomyResponse> {
+  return request<AssetTaxonomyResponse>("/master-data/asset-taxonomy", {
+    signal: options?.signal,
+  });
+}
+
+export function fetchCompanyProfiles(options?: {
+  signal?: AbortSignal;
+  libraryCompanyId?: string;
+}): Promise<CompanyProfile[]> {
+  const params = new URLSearchParams();
+  if (options?.libraryCompanyId) params.set("library_company_id", options.libraryCompanyId);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<CompanyProfile[]>(`/master-data/company-profiles${suffix}`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchPeople(options?: {
+  signal?: AbortSignal;
+  libraryCompanyId?: string;
+}): Promise<PersonProfile[]> {
+  const params = new URLSearchParams();
+  if (options?.libraryCompanyId) params.set("library_company_id", options.libraryCompanyId);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<PersonProfile[]>(`/master-data/people${suffix}`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchEvidenceAssets(options?: {
+  signal?: AbortSignal;
+  libraryCompanyId?: string;
+  assetDomain?: string;
+}): Promise<EvidenceAsset[]> {
+  const params = new URLSearchParams();
+  if (options?.libraryCompanyId) params.set("library_company_id", options.libraryCompanyId);
+  if (options?.assetDomain) params.set("asset_domain", options.assetDomain);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<EvidenceAsset[]>(`/master-data/evidence-assets${suffix}`, {
+    signal: options?.signal,
+  });
+}
+
+export function uploadEvidenceAsset(data: EvidenceAssetUploadPayload): Promise<EvidenceAsset> {
+  const form = new FormData();
+  if (data.library_company_id) form.append("library_company_id", data.library_company_id);
+  form.append("owner_type", data.owner_type);
+  if (data.owner_id) form.append("owner_id", data.owner_id);
+  form.append("asset_name", data.asset_name);
+  form.append("asset_domain", data.asset_domain);
+  form.append("asset_category", data.asset_category);
+  form.append("asset_type", data.asset_type ?? data.asset_category);
+  if (data.issuer_name) form.append("issuer_name", data.issuer_name);
+  if (data.issued_on) form.append("issued_on", data.issued_on);
+  if (data.expires_on) form.append("expires_on", data.expires_on);
+  form.append("sort_order", String(data.sort_order ?? 0));
+  form.append("metadata_json", JSON.stringify(data.metadata_json ?? {}));
+  form.append("file", data.file);
+  return request<EvidenceAsset>("/master-data/evidence-assets/upload", {
+    method: "POST",
+    body: form,
   });
 }
 

@@ -127,6 +127,7 @@ def import_template_package_from_directory(
     package_key: str | None = None,
     display_name: str | None = None,
     package_type: str | None = None,
+    category_code: str | None = None,
 ) -> ImportedTemplatePackage:
     root = Path(source_dir).expanduser().resolve()
     items = build_template_items_from_directory(root)
@@ -141,6 +142,7 @@ def import_template_package_from_directory(
         package_key=resolved_package_key,
         display_name=resolved_display_name,
         package_type=resolved_package_type,
+        category_code=(category_code or "").strip() or None,
         source_root=str(root),
         source_manifest={
             "file_count": len(items),

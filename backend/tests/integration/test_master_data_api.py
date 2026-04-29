@@ -19,8 +19,20 @@ def _db_url() -> str | None:
 def _apply_master_data_schema(conn: psycopg.Connection) -> None:
     conn.execute(load_initial_schema_sql())
     conn.execute("""
+    CREATE TABLE IF NOT EXISTS library_company (
+      id UUID PRIMARY KEY,
+      company_key TEXT NOT NULL UNIQUE,
+      company_name TEXT NOT NULL,
+      company_type TEXT,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS company_profile (
       id UUID PRIMARY KEY,
+      library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE,
       company_name TEXT NOT NULL,
       company_code TEXT,
       unified_social_credit_code TEXT,
@@ -39,6 +51,7 @@ def _apply_master_data_schema(conn: psycopg.Connection) -> None:
 
     CREATE TABLE IF NOT EXISTS person_profile (
       id UUID PRIMARY KEY,
+      library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE,
       full_name TEXT NOT NULL,
       gender TEXT,
       age INT,
@@ -57,6 +70,7 @@ def _apply_master_data_schema(conn: psycopg.Connection) -> None:
 
     CREATE TABLE IF NOT EXISTS project_performance (
       id UUID PRIMARY KEY,
+      library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE,
       project_name TEXT NOT NULL,
       client_name TEXT NOT NULL,
       contract_amount NUMERIC(14,2),
@@ -77,6 +91,7 @@ def _apply_master_data_schema(conn: psycopg.Connection) -> None:
 
     CREATE TABLE IF NOT EXISTS qualification_certificate (
       id UUID PRIMARY KEY,
+      library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE,
       certificate_name TEXT NOT NULL,
       certificate_type TEXT,
       certificate_no TEXT,
@@ -94,6 +109,7 @@ def _apply_master_data_schema(conn: psycopg.Connection) -> None:
 
     CREATE TABLE IF NOT EXISTS financial_statement (
       id UUID PRIMARY KEY,
+      library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE,
       fiscal_year INT NOT NULL,
       statement_type TEXT NOT NULL,
       statement_data JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -105,9 +121,12 @@ def _apply_master_data_schema(conn: psycopg.Connection) -> None:
 
     CREATE TABLE IF NOT EXISTS evidence_asset (
       id UUID PRIMARY KEY,
+      library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE,
       owner_type TEXT NOT NULL,
       owner_id UUID,
       asset_name TEXT NOT NULL,
+      asset_domain VARCHAR(64) NOT NULL DEFAULT 'generic',
+      asset_category VARCHAR(64) NOT NULL DEFAULT 'supporting_document',
       asset_type TEXT NOT NULL DEFAULT 'supporting_document',
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL,
@@ -121,6 +140,24 @@ def _apply_master_data_schema(conn: psycopg.Connection) -> None:
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     """)
+    conn.execute("""
+    ALTER TABLE company_profile
+      ADD COLUMN IF NOT EXISTS library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE;
+    ALTER TABLE person_profile
+      ADD COLUMN IF NOT EXISTS library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE;
+    ALTER TABLE project_performance
+      ADD COLUMN IF NOT EXISTS library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE;
+    ALTER TABLE qualification_certificate
+      ADD COLUMN IF NOT EXISTS library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE;
+    ALTER TABLE financial_statement
+      ADD COLUMN IF NOT EXISTS library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE;
+    ALTER TABLE evidence_asset
+      ADD COLUMN IF NOT EXISTS library_company_id UUID REFERENCES library_company(id) ON DELETE CASCADE;
+    ALTER TABLE evidence_asset
+      ADD COLUMN IF NOT EXISTS asset_domain VARCHAR(64) NOT NULL DEFAULT 'generic';
+    ALTER TABLE evidence_asset
+      ADD COLUMN IF NOT EXISTS asset_category VARCHAR(64) NOT NULL DEFAULT 'supporting_document';
+    """)
     conn.commit()
 
 
@@ -131,6 +168,7 @@ def _reset_master_data_tables(conn: psycopg.Connection) -> None:
     conn.execute("DELETE FROM project_performance;")
     conn.execute("DELETE FROM person_profile;")
     conn.execute("DELETE FROM company_profile;")
+    conn.execute("DELETE FROM library_company;")
     conn.commit()
 
 

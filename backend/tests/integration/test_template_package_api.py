@@ -20,11 +20,23 @@ def _db_url() -> str | None:
 def _apply_template_schema(conn: psycopg.Connection) -> None:
     conn.execute(load_initial_schema_sql())
     conn.execute("""
+    CREATE TABLE IF NOT EXISTS template_package_category (
+      code TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      description TEXT,
+      sort_order INT NOT NULL DEFAULT 0,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS bid_template_package (
       id UUID PRIMARY KEY,
       package_key TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
       package_type VARCHAR(32) NOT NULL,
+      category_code TEXT REFERENCES template_package_category(code),
       source_root TEXT NOT NULL,
       source_manifest JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -47,12 +59,17 @@ def _apply_template_schema(conn: psycopg.Connection) -> None:
       UNIQUE (package_id, relative_path)
     );
     """)
+    conn.execute("""
+    ALTER TABLE bid_template_package
+      ADD COLUMN IF NOT EXISTS category_code TEXT REFERENCES template_package_category(code);
+    """)
     conn.commit()
 
 
 def _reset_template_tables(conn: psycopg.Connection) -> None:
     conn.execute("DELETE FROM bid_template_item;")
     conn.execute("DELETE FROM bid_template_package;")
+    conn.execute("DELETE FROM template_package_category;")
     conn.commit()
 
 
