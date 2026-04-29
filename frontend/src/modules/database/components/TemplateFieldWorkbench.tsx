@@ -32,12 +32,14 @@ type BindingDraft = {
   source_type: TemplateSourceType;
   selection_mode: TemplateSelectionMode;
   source_filters: string;
-  field_mappings: string;
+  field_mappings: TemplateFieldMapping[];
   field_mapping_mode: TemplateFieldMappingMode;
   output_key: string;
   required: boolean;
   sort_order: string;
 };
+
+type TemplateFieldTransform = NonNullable<TemplateFieldMapping["transform"]>;
 
 const SOURCE_TYPE_OPTIONS: Array<{ value: TemplateSourceType; label: string }> = [
   { value: "company_profile", label: "公司资料" },
@@ -58,6 +60,13 @@ const SELECTION_MODE_OPTIONS: Array<{ value: TemplateSelectionMode; label: strin
 const FIELD_MAPPING_MODE_OPTIONS: Array<{ value: TemplateFieldMappingMode; label: string }> = [
   { value: "augment", label: "追加字段" },
   { value: "replace", label: "仅输出映射字段" },
+];
+
+const FIELD_TRANSFORM_OPTIONS: Array<{ value: TemplateFieldTransform; label: string }> = [
+  { value: "copy", label: "直接复制" },
+  { value: "join", label: "多字段拼接" },
+  { value: "date", label: "日期格式化" },
+  { value: "number", label: "数值格式化" },
 ];
 
 function defaultOutputKey(sourceType: TemplateSourceType): string {
@@ -83,13 +92,22 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function createEmptyFieldMapping(): TemplateFieldMapping {
+  return {
+    target_field: "",
+    source_field: "",
+    transform: "copy",
+    default_value: "",
+  };
+}
+
 function createEmptyDraft(item: TemplateItem | null): BindingDraft {
   return {
     binding_name: item ? `${item.item_code ?? "item"}_binding` : "",
     source_type: "company_profile",
     selection_mode: "latest",
     source_filters: "{}",
-    field_mappings: "[]",
+    field_mappings: [],
     field_mapping_mode: "augment",
     output_key: "company",
     required: true,
@@ -103,7 +121,7 @@ function draftFromBinding(rule: TemplateBindingRule): BindingDraft {
     source_type: rule.source_type,
     selection_mode: rule.selection_mode,
     source_filters: prettyJson(rule.source_filters),
-    field_mappings: prettyJson(rule.field_mappings),
+    field_mappings: rule.field_mappings,
     field_mapping_mode: rule.field_mapping_mode,
     output_key: rule.output_key,
     required: rule.required,
@@ -130,16 +148,56 @@ function parseObjectJson(text: string, label: string): Record<string, unknown> {
   }
 }
 
-function parseArrayJson(text: string, label: string): TemplateFieldMapping[] {
-  try {
-    const value = JSON.parse(text || "[]");
-    if (!Array.isArray(value)) {
-      throw new Error(`${label} 必须是 JSON 数组`);
+function normalizeFieldMappings(mappings: TemplateFieldMapping[]): TemplateFieldMapping[] {
+  return mappings.map((mapping, index) => {
+    const targetField = mapping.target_field.trim();
+    if (!targetField) {
+      throw new Error(`字段映射第 ${index + 1} 行缺少目标字段`);
     }
-    return value as TemplateFieldMapping[];
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : `${label} 解析失败`);
-  }
+
+    const transform = mapping.transform ?? "copy";
+    const defaultValue = typeof mapping.default_value === "string"
+      ? mapping.default_value.trim()
+      : mapping.default_value;
+
+    const normalized: TemplateFieldMapping = {
+      target_field: targetField,
+      transform,
+    };
+
+    if (defaultValue !== "" && defaultValue !== undefined) {
+      normalized.default_value = defaultValue;
+    }
+
+    if (transform === "join") {
+      const sourceFields = (mapping.source_fields ?? [])
+        .map((field) => field.trim())
+        .filter(Boolean);
+      if (sourceFields.length === 0) {
+        throw new Error(`字段映射第 ${index + 1} 行缺少来源字段`);
+      }
+      normalized.source_fields = sourceFields;
+      if ((mapping.join_with ?? "").trim()) {
+        normalized.join_with = mapping.join_with?.trim();
+      }
+      return normalized;
+    }
+
+    const sourceField = mapping.source_field?.trim();
+    if (!sourceField && normalized.default_value === undefined) {
+      throw new Error(`字段映射第 ${index + 1} 行缺少来源字段`);
+    }
+    if (sourceField) {
+      normalized.source_field = sourceField;
+    }
+    if (transform === "date" && (mapping.date_format ?? "").trim()) {
+      normalized.date_format = mapping.date_format?.trim();
+    }
+    if (transform === "number" && Number.isFinite(mapping.decimals)) {
+      normalized.decimals = mapping.decimals;
+    }
+    return normalized;
+  });
 }
 
 function summarizeSuggestion(group: TemplateFieldMappingSuggestionGroup): string {
@@ -255,7 +313,7 @@ export function TemplateFieldWorkbench() {
         source_type: draft.source_type,
         selection_mode: draft.selection_mode,
         source_filters: parseObjectJson(draft.source_filters, "来源筛选"),
-        field_mappings: parseArrayJson(draft.field_mappings, "字段映射"),
+        field_mappings: normalizeFieldMappings(draft.field_mappings),
         field_mapping_mode: draft.field_mapping_mode,
         output_key: draft.output_key.trim(),
         required: draft.required,
@@ -300,7 +358,19 @@ export function TemplateFieldWorkbench() {
       source_type: group.source_type,
       output_key: defaultOutputKey(group.source_type),
       field_mapping_mode: group.field_mapping_mode,
-      field_mappings: prettyJson(group.field_mappings),
+      field_mappings: group.field_mappings,
+    }));
+  };
+
+  const updateFieldMapping = (
+    index: number,
+    updater: (mapping: TemplateFieldMapping) => TemplateFieldMapping,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      field_mappings: current.field_mappings.map((mapping, mappingIndex) => (
+        mappingIndex === index ? updater(mapping) : mapping
+      )),
     }));
   };
 
@@ -549,13 +619,174 @@ export function TemplateFieldWorkbench() {
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">字段映射 JSON</label>
-                <textarea
-                  className="clay-textarea template-json"
-                  rows={12}
-                  value={draft.field_mappings}
-                  onChange={(event) => setDraft((current) => ({ ...current, field_mappings: event.target.value }))}
-                />
+                <div className="template-mapping-header">
+                  <label className="form-label" style={{ marginBottom: 0 }}>字段映射</label>
+                  <Badge variant="info">{draft.field_mappings.length}</Badge>
+                </div>
+                <div className="template-mapping-list">
+                  {draft.field_mappings.map((mapping, index) => {
+                    const transform = mapping.transform ?? "copy";
+                    return (
+                      <div key={`${mapping.target_field}-${index}`} className="template-mapping-card">
+                        <div className="template-mapping-card__header">
+                          <strong>映射 {index + 1}</strong>
+                          <button
+                            type="button"
+                            className="template-mapping-card__remove"
+                            onClick={() => {
+                              setDraft((current) => ({
+                                ...current,
+                                field_mappings: current.field_mappings.filter((_, rowIndex) => rowIndex !== index),
+                              }));
+                            }}
+                          >
+                            删除
+                          </button>
+                        </div>
+                        <div className="template-mapping-grid">
+                          <div className="form-group">
+                            <label className="form-label">目标字段</label>
+                            <input
+                              className="clay-input"
+                              value={mapping.target_field}
+                              onChange={(event) => updateFieldMapping(index, (current) => ({
+                                ...current,
+                                target_field: event.target.value,
+                              }))}
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label">转换方式</label>
+                            <select
+                              className="clay-input"
+                              value={transform}
+                              onChange={(event) => {
+                                const nextTransform = event.target.value as TemplateFieldTransform;
+                                updateFieldMapping(index, (current) => ({
+                                  ...current,
+                                  transform: nextTransform,
+                                  source_field: nextTransform === "join" ? undefined : current.source_field,
+                                  source_fields: nextTransform === "join" ? current.source_fields ?? [] : undefined,
+                                  join_with: nextTransform === "join" ? current.join_with ?? "" : undefined,
+                                  date_format: nextTransform === "date" ? current.date_format ?? "YYYY-MM-DD" : undefined,
+                                  decimals: nextTransform === "number" ? current.decimals ?? 2 : undefined,
+                                }));
+                              }}
+                            >
+                              {FIELD_TRANSFORM_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {transform === "join" ? (
+                            <>
+                              <div className="form-group template-mapping-grid__wide">
+                                <label className="form-label">来源字段列表</label>
+                                <input
+                                  className="clay-input"
+                                  placeholder="例如：certificate_name, grade, specialty"
+                                  value={(mapping.source_fields ?? []).join(", ")}
+                                  onChange={(event) => updateFieldMapping(index, (current) => ({
+                                    ...current,
+                                    source_fields: event.target.value
+                                      .split(",")
+                                      .map((field) => field.trim())
+                                      .filter(Boolean),
+                                  }))}
+                                />
+                              </div>
+                              <div className="form-group">
+                                <label className="form-label">拼接分隔符</label>
+                                <input
+                                  className="clay-input"
+                                  placeholder="例如： / "
+                                  value={mapping.join_with ?? ""}
+                                  onChange={(event) => updateFieldMapping(index, (current) => ({
+                                    ...current,
+                                    join_with: event.target.value,
+                                  }))}
+                                />
+                              </div>
+                            </>
+                          ) : (
+                            <div className="form-group template-mapping-grid__wide">
+                              <label className="form-label">来源字段</label>
+                              <input
+                                className="clay-input"
+                                placeholder="例如：company_name"
+                                value={mapping.source_field ?? ""}
+                                onChange={(event) => updateFieldMapping(index, (current) => ({
+                                  ...current,
+                                  source_field: event.target.value,
+                                }))}
+                              />
+                            </div>
+                          )}
+                          {transform === "date" && (
+                            <div className="form-group">
+                              <label className="form-label">日期格式</label>
+                              <input
+                                className="clay-input"
+                                placeholder="YYYY-MM-DD"
+                                value={mapping.date_format ?? ""}
+                                onChange={(event) => updateFieldMapping(index, (current) => ({
+                                  ...current,
+                                  date_format: event.target.value,
+                                }))}
+                              />
+                            </div>
+                          )}
+                          {transform === "number" && (
+                            <div className="form-group">
+                              <label className="form-label">小数位</label>
+                              <input
+                                className="clay-input"
+                                type="number"
+                                min={0}
+                                value={mapping.decimals ?? 2}
+                                onChange={(event) => updateFieldMapping(index, (current) => ({
+                                  ...current,
+                                  decimals: Number(event.target.value || 0),
+                                }))}
+                              />
+                            </div>
+                          )}
+                          <div className="form-group template-mapping-grid__wide">
+                            <label className="form-label">默认值</label>
+                            <input
+                              className="clay-input"
+                              placeholder="来源字段为空时使用"
+                              value={typeof mapping.default_value === "string" ? mapping.default_value : ""}
+                              onChange={(event) => updateFieldMapping(index, (current) => ({
+                                ...current,
+                                default_value: event.target.value,
+                              }))}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {draft.field_mappings.length === 0 && (
+                    <div className="template-mapping-empty">
+                      <p>当前绑定还没有字段映射。可直接新增，或点击右侧“映射建议”自动填充。</p>
+                    </div>
+                  )}
+                </div>
+                <div className="template-inline-actions" style={{ marginTop: "var(--space-3)" }}>
+                  <ClayButton
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setDraft((current) => ({
+                        ...current,
+                        field_mappings: [...current.field_mappings, createEmptyFieldMapping()],
+                      }));
+                    }}
+                  >
+                    <Icon name="plus" size={14} /> 新增映射
+                  </ClayButton>
+                </div>
               </div>
 
               {saveError && <p className="text-error">{saveError}</p>}
