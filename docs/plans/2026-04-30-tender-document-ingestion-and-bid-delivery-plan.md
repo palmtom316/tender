@@ -94,8 +94,8 @@
 - [x] `.wps` 尝试通过 LibreOffice 转 `.docx`。
 - [x] `.wps` 转换失败时标记为人工确认。
 - [x] 文本型 PDF 直接抽取文本。
-- [ ] 扫描型 PDF 走 OCR/MinerU。
-- [ ] PDF 表格抽取并保留页码。
+- [x] 扫描型 PDF 走 OCR/MinerU。
+- [x] PDF 表格抽取并保留页码。
 - [x] ZIP 内 PDF 自动进入 PDF 解析分支。
 - [x] 定义统一解析块模型：
   - [x] `source_file`
