@@ -17,6 +17,7 @@ from tender_backend.api.table_overrides import router as table_overrides_router
 from tender_backend.api.exports import router as exports_router
 from tender_backend.api.settings import router as settings_router
 from tender_backend.api.auth import router as auth_router
+from tender_backend.api.tender_documents import router as tender_documents_router
 from tender_backend.api.standards import router as standards_router
 from tender_backend.api.users import router as users_router
 from tender_backend.api.template_packages import router as template_packages_router
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(exports_router, prefix=settings.api_prefix)
     app.include_router(settings_router, prefix=settings.api_prefix)
     app.include_router(auth_router, prefix=settings.api_prefix)
+    app.include_router(tender_documents_router, prefix=settings.api_prefix)
     app.include_router(users_router, prefix=settings.api_prefix)
     app.include_router(standards_router, prefix=settings.api_prefix)
     app.include_router(template_packages_router, prefix=settings.api_prefix)
