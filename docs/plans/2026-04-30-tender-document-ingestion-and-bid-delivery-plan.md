@@ -16,7 +16,7 @@
 ## Core Principles
 
 - [x] ZIP 和 PDF 是两条输入链路，但必须归一化到同一套解析块模型。
-- [x] Office-first：ZIP 包内 Word/Excel 是主路径，PDF/OCR 是兼容路径。
+- [x] Office-first：ZIP 包内 Word/Excel 是主路径，PDF 统一走 MinerU v4 解析链路。
 - [x] 所有 AI 抽取结果必须保留来源文件、段落、页码、sheet、行列或表格定位。
 - [x] 报价相关内容允许识别和标记，但不进入投标正文生成约束。
 - [x] 业绩要求、项目管理团队要求、特殊要求是一类核心约束。
@@ -28,7 +28,7 @@
 - [x] ZIP/PDF 统一上传入口。
 - [x] ZIP 递归解包与文件分类。
 - [x] Office 文档解析能力。
-- [x] PDF 文本解析与 OCR/MinerU 兼容能力。
+- [x] PDF 统一 MinerU v4 解析能力。
 - [x] 统一 source chunk 数据模型。
 - [x] AI 结构化约束抽取。
 - [x] 约束确认与编辑页面。
@@ -93,9 +93,9 @@
 - [x] `.xls` 通过 LibreOffice headless 转 `.xlsx` 后解析。
 - [x] `.wps` 尝试通过 LibreOffice 转 `.docx`。
 - [x] `.wps` 转换失败时标记为人工确认。
-- [x] 文本型 PDF 直接抽取文本。
-- [x] 扫描型 PDF 走 OCR/MinerU。
-- [x] PDF 表格抽取并保留页码。
+- [x] 文本型 PDF 走 MinerU v4 解析。
+- [x] 扫描型 PDF 走 MinerU v4 解析。
+- [x] PDF 表格通过 MinerU v4 抽取并保留页码。
 - [x] ZIP 内 PDF 自动进入 PDF 解析分支。
 - [x] 定义统一解析块模型：
   - [x] `source_file`

@@ -30,7 +30,7 @@ from tender_backend.services.pdf_document_parser import (
     PDF_PARSER_NAME,
     PDF_PARSER_VERSION,
     PdfParseError,
-    parse_pdf_text,
+    parse_pdf_with_mineru,
 )
 from tender_backend.services.tender_document_ingestion import TenderDocumentIngestionService, UploadPayload
 
@@ -247,7 +247,7 @@ def _parse_status_out(document: dict, files: list[dict], chunk_count: int) -> Te
     )
 
 
-def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
+async def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
     if not file_row["is_parsable"] or file_row["is_archive"]:
         _repo.update_file_parse_status(conn, tender_document_file_id=file_row["id"], parse_status="skipped", error=None)
         return "skipped", 0
@@ -274,7 +274,7 @@ def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
             parser_name = PDF_PARSER_NAME
             parser_version = PDF_PARSER_VERSION
             parser_file_type = "pdf"
-            chunks = parse_pdf_text(path, source_file=file_row["relative_path"])
+            chunks = await parse_pdf_with_mineru(path, source_file=file_row["relative_path"])
         else:
             parser_name = OFFICE_PARSER_NAME
             parser_version = OFFICE_PARSER_VERSION
@@ -411,7 +411,7 @@ async def parse_tender_document(
     chunk_count = 0
     files = _repo.list_files(conn, tender_document_id=tender_document_id)
     for file_row in files:
-        status, count = _parse_file(conn, file_row)
+        status, count = await _parse_file(conn, file_row)
         chunk_count += count
         if status == "parsed":
             parsed += 1
@@ -452,7 +452,7 @@ async def parse_tender_document_file(
     file_row = _repo.get_file(conn, tender_document_file_id=tender_document_file_id)
     if file_row is None:
         raise HTTPException(status_code=404, detail="tender document file not found")
-    status, _ = _parse_file(conn, file_row)
+    status, _ = await _parse_file(conn, file_row)
     updated = _repo.get_file(conn, tender_document_file_id=tender_document_file_id)
     assert updated is not None
     if status == "skipped":
