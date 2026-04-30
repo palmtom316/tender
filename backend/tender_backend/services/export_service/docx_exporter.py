@@ -8,6 +8,10 @@ from uuid import UUID
 
 import structlog
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from psycopg import Connection
 from psycopg.rows import dict_row
 
@@ -16,6 +20,116 @@ from tender_backend.services.tender_requirement_priority import load_tender_requ
 logger = structlog.stdlib.get_logger(__name__)
 
 TEMPLATE_DIR = Path(os.environ.get("TEMPLATE_DIR", "templates"))
+EXPORT_ROOT = Path(os.environ.get("TENDER_EXPORT_ROOT", "/tmp/tender-exports"))
+
+
+def _add_markdown_content(document: Document, content: str) -> None:
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("# "):
+            document.add_heading(line[2:].strip(), level=1)
+        elif line.startswith("## "):
+            document.add_heading(line[3:].strip(), level=2)
+        elif line.startswith("### "):
+            document.add_heading(line[4:].strip(), level=3)
+        elif line.startswith("- "):
+            document.add_paragraph(line[2:].strip(), style="List Bullet")
+        else:
+            document.add_paragraph(line)
+
+
+def _load_project_name(conn: Connection, project_id: UUID) -> str:
+    with conn.cursor() as cur:
+        row = cur.execute("SELECT name FROM project WHERE id = %s", (project_id,)).fetchone()
+    return str(row[0]) if row and row[0] else str(project_id)
+
+
+def _apply_basic_style(document: Document) -> None:
+    style = document.styles["Normal"]
+    style.font.name = "宋体"
+    style.font.size = Pt(10.5)
+    for section in document.sections:
+        section.top_margin = Pt(72)
+        section.bottom_margin = Pt(72)
+        section.left_margin = Pt(72)
+        section.right_margin = Pt(72)
+        section.header.paragraphs[0].text = "投标文件"
+        footer = section.footer.paragraphs[0]
+        footer.text = "第 "
+        run = footer.add_run()
+        fld_char_begin = OxmlElement("w:fldChar")
+        fld_char_begin.set(qn("w:fldCharType"), "begin")
+        instr_text = OxmlElement("w:instrText")
+        instr_text.set(qn("xml:space"), "preserve")
+        instr_text.text = "PAGE"
+        fld_char_end = OxmlElement("w:fldChar")
+        fld_char_end.set(qn("w:fldCharType"), "end")
+        run._r.append(fld_char_begin)
+        run._r.append(instr_text)
+        run._r.append(fld_char_end)
+        footer.add_run(" 页")
+        footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+def _render_plain_docx(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    output_path: Path,
+    volume_type: str | None = None,
+) -> Path:
+    project_name = _load_project_name(conn, project_id)
+    with conn.cursor(row_factory=dict_row) as cur:
+        if volume_type:
+            drafts = cur.execute(
+                """
+                SELECT cd.chapter_code, cd.content_md, bc.chapter_title, bc.volume_type, bc.sort_order
+                FROM chapter_draft cd
+                LEFT JOIN bid_chapter bc ON bc.project_id = cd.project_id AND bc.chapter_code = cd.chapter_code
+                WHERE cd.project_id = %s AND bc.volume_type = %s
+                ORDER BY bc.sort_order NULLS LAST, cd.chapter_code
+                """,
+                (project_id, volume_type),
+            ).fetchall()
+        else:
+            drafts = cur.execute(
+                """
+                SELECT cd.chapter_code, cd.content_md, bc.chapter_title, bc.volume_type, bc.sort_order
+                FROM chapter_draft cd
+                LEFT JOIN bid_chapter bc ON bc.project_id = cd.project_id AND bc.chapter_code = cd.chapter_code
+                WHERE cd.project_id = %s
+                ORDER BY bc.sort_order NULLS LAST, cd.chapter_code
+                """,
+                (project_id,),
+            ).fetchall()
+
+    document = Document()
+    _apply_basic_style(document)
+    title = f"{project_name} 投标文件"
+    if volume_type:
+        title += f"（{volume_type} 分册）"
+    document.add_heading(title, level=0)
+    document.add_paragraph("本文件由系统根据已确认招标约束、企业资料和章节草稿生成。")
+    document.add_page_break()
+    document.add_heading("目录", level=1)
+    for draft in drafts:
+        document.add_paragraph(f"{draft['chapter_code']} {draft.get('chapter_title') or ''}".strip())
+    document.add_heading("附件清单", level=1)
+    document.add_paragraph("资质证书、人员证书、业绩证明等附件按招标文件要求随交付包一并提交。")
+    document.add_heading("签章位置", level=1)
+    document.add_paragraph("投标人盖章：____________")
+    document.add_paragraph("法定代表人或授权代表签字：____________")
+    document.add_page_break()
+    for index, draft in enumerate(drafts):
+        if index:
+            document.add_page_break()
+        _add_markdown_content(document, draft["content_md"])
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    document.save(str(output_path))
+    return output_path
 
 
 def render_docx(
@@ -31,9 +145,13 @@ def render_docx(
     """
     from docxtpl import DocxTemplate
 
+    if output_path is None:
+        EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
+        output_path = EXPORT_ROOT / str(project_id) / f"bid-{project_id}.docx"
+
     template_path = TEMPLATE_DIR / template_name
     if not template_path.exists():
-        raise FileNotFoundError(f"Template not found: {template_path}")
+        return _render_plain_docx(conn, project_id=project_id, output_path=output_path)
 
     doc = DocxTemplate(str(template_path))
 
@@ -63,8 +181,7 @@ def render_docx(
 
     doc.render(context)
 
-    if output_path is None:
-        output_path = Path(f"/tmp/tender_export_{project_id}.docx")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
     overrides = load_tender_requirement_overrides(conn, project_id=project_id)
     if overrides["content_requirements"] or overrides["format_requirements"]:
@@ -84,3 +201,15 @@ def render_docx(
 
     logger.info("docx_rendered", project_id=str(project_id), output=str(output_path))
     return output_path
+
+
+def render_volume_docx(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    volume_type: str,
+    output_path: Path | None = None,
+) -> Path:
+    if output_path is None:
+        output_path = EXPORT_ROOT / str(project_id) / f"bid-{volume_type}-{project_id}.docx"
+    return _render_plain_docx(conn, project_id=project_id, volume_type=volume_type, output_path=output_path)

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchDrafts, updateDraft } from "../../lib/api";
+import { fetchBidOutline, fetchDrafts, generateBidChapter, generateBidOutline, updateDraft } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
 
@@ -19,9 +19,39 @@ export function EditorContent() {
     enabled: !!projectId,
   });
 
+  const { data: outline } = useQuery({
+    queryKey: ["bid-outline", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchBidOutline(projectId, { signal });
+    },
+    enabled: !!projectId,
+    retry: false,
+  });
+
   const save = useMutation({
     mutationFn: ({ id, content }: { id: string; content: string }) =>
       updateDraft(id, content),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
+    },
+  });
+
+  const createOutline = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("No project selected");
+      return generateBidOutline(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bid-outline", projectId] });
+    },
+  });
+
+  const generateChapter = useMutation({
+    mutationFn: (chapterId: string) => {
+      if (!projectId) throw new Error("No project selected");
+      return generateBidChapter(projectId, chapterId);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
     },
@@ -47,10 +77,28 @@ export function EditorContent() {
   return (
     <div>
       <h1 className="section-heading">章节编辑</h1>
+      <div className="toolbar-row">
+        <ClayButton onClick={() => createOutline.mutate()} disabled={createOutline.isPending}>
+          {outline ? "重新规划目录" : "生成投标目录"}
+        </ClayButton>
+      </div>
 
       <div className="editor-layout">
         <aside className="outline-panel">
           <h2>提纲</h2>
+          {outline?.chapters.map((chapter) => (
+            <div key={chapter.id} className="outline-item">
+              <span className="outline-code">{chapter.chapter_code}</span>
+              <span>{chapter.chapter_title}</span>
+              <ClayButton
+                size="sm"
+                onClick={() => generateChapter.mutate(chapter.id)}
+                disabled={generateChapter.isPending}
+              >
+                生成
+              </ClayButton>
+            </div>
+          ))}
           {isLoading && (
             <div className="skeleton-stack" aria-label="章节草稿加载中">
               <div className="skeleton-line" />

@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
+from tender_backend.services.review_service.review_engine import build_project_review, persist_review_issues
 
 router = APIRouter(tags=["review"])
 
@@ -50,3 +51,22 @@ async def resolve_issue(
     if row is None:
         raise HTTPException(status_code=404, detail="issue not found")
     return row
+
+
+@router.post("/projects/{project_id}/bid-review")
+async def run_bid_review(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    _user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    issues = build_project_review(conn, project_id=project_id)
+    persisted_count = persist_review_issues(conn, project_id=project_id, issues=issues)
+    blocking = [issue for issue in issues if issue.severity in {"P0", "P1"}]
+    return {
+        "project_id": str(project_id),
+        "issue_count": len(issues),
+        "persisted_count": persisted_count,
+        "blocking_issue_count": len(blocking),
+        "can_export": len(blocking) == 0,
+        "issues": [issue.__dict__ for issue in issues],
+    }

@@ -224,6 +224,46 @@ export function updateDraft(draftId: string, contentMd: string): Promise<Draft> 
   });
 }
 
+export interface BidChapter {
+  id: string;
+  chapter_code: string;
+  chapter_title: string;
+  volume_type: string;
+  sort_order: number;
+  requirement_ids?: string[];
+}
+
+export interface BidOutline {
+  id: string;
+  project_id: string;
+  outline_name: string;
+  status: string;
+  chapters: BidChapter[];
+}
+
+export function generateBidOutline(projectId: string): Promise<BidOutline> {
+  return request<BidOutline>(`/projects/${projectId}/bid-outline`, {
+    method: "POST",
+  });
+}
+
+export function fetchBidOutline(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<BidOutline> {
+  return request<BidOutline>(`/projects/${projectId}/bid-outline`, {
+    signal: options?.signal,
+  });
+}
+
+export function generateBidChapter(projectId: string, chapterId: string): Promise<Draft> {
+  return request<Draft>(`/projects/${projectId}/bid-chapters/${chapterId}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
 // ── Review Issues ──
 
 export interface ReviewIssue {
@@ -245,6 +285,18 @@ export function fetchReviewIssues(
 
 export function resolveIssue(issueId: string): Promise<ReviewIssue> {
   return request<ReviewIssue>(`/review-issues/${issueId}/resolve`, {
+    method: "POST",
+  });
+}
+
+export interface BidReviewResult {
+  issue_count: number;
+  blocking_issue_count: number;
+  can_export: boolean;
+}
+
+export function runBidReview(projectId: string): Promise<BidReviewResult> {
+  return request<BidReviewResult>(`/projects/${projectId}/bid-review`, {
     method: "POST",
   });
 }
@@ -306,6 +358,41 @@ export function fetchExports(
   return request<ExportRecord[]>(`/projects/${projectId}/exports`, {
     signal: options?.signal,
   });
+}
+
+export function createExport(projectId: string): Promise<ExportRecord> {
+  return request<ExportRecord>(`/projects/${projectId}/exports`, {
+    method: "POST",
+  });
+}
+
+export interface DeliveryPackage {
+  id: string;
+  version_no: number;
+  status: string;
+  package_name: string;
+  created_at: string;
+}
+
+export function createDeliveryPackage(projectId: string): Promise<DeliveryPackage> {
+  return request<DeliveryPackage>(`/projects/${projectId}/delivery-package`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
+export function fetchDeliveryPackages(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<DeliveryPackage[]> {
+  return request<DeliveryPackage[]>(`/projects/${projectId}/delivery-packages`, {
+    signal: options?.signal,
+  });
+}
+
+export function deliveryPackageDownloadUrl(packageId: string): string {
+  return buildApiUrl(`/delivery-packages/${packageId}/download`);
 }
 
 // ── Template Packages ──

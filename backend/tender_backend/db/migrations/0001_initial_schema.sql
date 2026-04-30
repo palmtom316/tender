@@ -167,10 +167,13 @@ CREATE INDEX IF NOT EXISTS idx_bid_chapter_requirement_requirement ON bid_chapte
 CREATE TABLE IF NOT EXISTS review_issue (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  requirement_id UUID NULL REFERENCES project_requirement(id) ON DELETE SET NULL,
+  chapter_code TEXT NULL,
   severity TEXT NOT NULL,
   title TEXT NOT NULL,
   detail TEXT NULL,
   resolved BOOLEAN NOT NULL DEFAULT false,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -182,6 +185,29 @@ CREATE TABLE IF NOT EXISTS export_record (
   export_key TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS bid_delivery_package (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  version_no INT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'created',
+  package_name TEXT NOT NULL,
+  package_path TEXT NOT NULL,
+  docx_path TEXT NULL,
+  doc_path TEXT NULL,
+  review_report_path TEXT NULL,
+  response_matrix_path TEXT NULL,
+  missing_items_path TEXT NULL,
+  traceability_path TEXT NULL,
+  confirmation_record_path TEXT NULL,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, version_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bid_delivery_package_project ON bid_delivery_package (project_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS synonym_dictionary (
   id UUID PRIMARY KEY,

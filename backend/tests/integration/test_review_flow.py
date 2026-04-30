@@ -6,7 +6,7 @@ import pytest
 
 import tender_backend.workflows.review_section  # noqa: F401
 from tender_backend.workflows.registry import get_workflow, list_workflows
-from tender_backend.services.review_service.review_engine import review_draft, ReviewIssue
+from tender_backend.services.review_service.review_engine import build_project_review, review_draft, ReviewIssue
 
 
 def test_review_section_workflow_registered():
@@ -62,3 +62,53 @@ def test_review_detects_fact_inconsistency():
     )
     p2 = [i for i in issues if i.severity == "P2"]
     assert len(p2) >= 1
+
+
+def test_project_review_flags_pricing_content_and_uncovered_hard_requirement() -> None:
+    requirement_id = "11111111-1111-1111-1111-111111111111"
+
+    class _Cursor:
+        def __init__(self):
+            self.result = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "FROM project_requirement" in query:
+                self.result = [
+                    {
+                        "id": requirement_id,
+                        "category": "veto",
+                        "title": "安全生产许可证",
+                        "requirement_text": "必须提供安全生产许可证",
+                        "source_text": "必须提供安全生产许可证",
+                        "is_veto": True,
+                        "is_hard_constraint": True,
+                    }
+                ]
+            elif "FROM chapter_draft" in query:
+                self.result = [{"chapter_code": "3.3", "content_md": "本章包含投标报价说明"}]
+            elif "FROM bid_chapter WHERE" in query:
+                self.result = [{"chapter_code": "3.3", "chapter_title": "硬约束", "volume_type": "technical", "sort_order": 1}]
+            elif "FROM bid_chapter_requirement" in query:
+                self.result = [{"requirement_id": requirement_id, "chapter_code": "3.3"}]
+            elif "FROM requirement_match" in query:
+                self.result = []
+            return self
+
+        def fetchall(self):
+            return self.result
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    issues = build_project_review(_Conn(), project_id=__import__("uuid").UUID("22222222-2222-2222-2222-222222222222"))
+    titles = {issue.title for issue in issues}
+
+    assert any("约束未覆盖" in title for title in titles)
+    assert "正文包含报价相关内容" in titles

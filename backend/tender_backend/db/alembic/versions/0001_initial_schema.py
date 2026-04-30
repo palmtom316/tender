@@ -212,10 +212,13 @@ def upgrade() -> None:
     CREATE TABLE IF NOT EXISTS review_issue (
       id UUID PRIMARY KEY,
       project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+      requirement_id UUID NULL REFERENCES project_requirement(id) ON DELETE SET NULL,
+      chapter_code TEXT NULL,
       severity TEXT NOT NULL,
       title TEXT NOT NULL,
       detail TEXT NULL,
       resolved BOOLEAN NOT NULL DEFAULT false,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     """)
@@ -232,6 +235,29 @@ def upgrade() -> None:
     """)
 
     op.execute("""
+    CREATE TABLE IF NOT EXISTS bid_delivery_package (
+      id UUID PRIMARY KEY,
+      project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+      version_no INT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'created',
+      package_name TEXT NOT NULL,
+      package_path TEXT NOT NULL,
+      docx_path TEXT NULL,
+      doc_path TEXT NULL,
+      review_report_path TEXT NULL,
+      response_matrix_path TEXT NULL,
+      missing_items_path TEXT NULL,
+      traceability_path TEXT NULL,
+      confirmation_record_path TEXT NULL,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_by TEXT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (project_id, version_no)
+    );
+    """)
+
+    op.execute("""
     CREATE TABLE IF NOT EXISTS synonym_dictionary (
       id UUID PRIMARY KEY,
       term TEXT NOT NULL,
@@ -243,6 +269,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS synonym_dictionary;")
+    op.execute("DROP TABLE IF EXISTS bid_delivery_package;")
     op.execute("DROP TABLE IF EXISTS export_record;")
     op.execute("DROP TABLE IF EXISTS review_issue;")
     op.execute("DROP TABLE IF EXISTS chapter_draft;")

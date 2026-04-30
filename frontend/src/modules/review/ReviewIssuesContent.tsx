@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchReviewIssues, resolveIssue } from "../../lib/api";
+import { fetchReviewIssues, resolveIssue, runBidReview } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
@@ -32,6 +32,16 @@ export function ReviewIssuesContent() {
     },
   });
 
+  const review = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("No project selected");
+      return runBidReview(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["review-issues", projectId] });
+    },
+  });
+
   if (!projectId) {
     return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
   }
@@ -43,6 +53,11 @@ export function ReviewIssuesContent() {
   return (
     <div>
       <h1 className="section-heading">审查问题</h1>
+      <div className="toolbar-row">
+        <ClayButton onClick={() => review.mutate()} disabled={review.isPending}>
+          {review.isPending ? "审查中..." : "运行投标审查"}
+        </ClayButton>
+      </div>
 
       {blocking.length > 0 && (
         <div className="warning-banner">

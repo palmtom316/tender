@@ -1,0 +1,189 @@
+"""Build final bid delivery ZIP packages."""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import zipfile
+from pathlib import Path
+from typing import Any
+from uuid import UUID, uuid4
+
+from psycopg import Connection
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
+from tender_backend.services.export_service.docx_exporter import EXPORT_ROOT, render_docx, render_volume_docx
+from tender_backend.services.review_service.compliance_matrix import build_compliance_matrix
+from tender_backend.services.review_service.review_engine import build_project_review
+
+
+def _write_json(path: Path, payload: Any) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+    return path
+
+
+def _next_version(conn: Connection, project_id: UUID) -> int:
+    with conn.cursor() as cur:
+        row = cur.execute(
+            "SELECT COALESCE(MAX(version_no), 0) + 1 FROM bid_delivery_package WHERE project_id = %s",
+            (project_id,),
+        ).fetchone()
+    return int(row[0] if row else 1)
+
+
+def _project_name(conn: Connection, project_id: UUID) -> str:
+    with conn.cursor() as cur:
+        row = cur.execute("SELECT name FROM project WHERE id = %s", (project_id,)).fetchone()
+    return str(row[0]) if row and row[0] else str(project_id)
+
+
+def _load_confirmation_records(conn: Connection, project_id: UUID) -> list[dict]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            """
+            SELECT id, category, title, human_confirmed, confirmed_by, confirmed_at, review_status
+            FROM project_requirement
+            WHERE project_id = %s
+            ORDER BY category, created_at
+            """,
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _load_traceability(conn: Connection, project_id: UUID) -> list[dict]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            """
+            SELECT pr.id, pr.category, pr.title, pr.source_file, pr.source_locator,
+                   bc.chapter_code, bc.chapter_title
+            FROM project_requirement pr
+            LEFT JOIN bid_chapter_requirement bcr ON bcr.requirement_id = pr.id
+            LEFT JOIN bid_chapter bc ON bc.id = bcr.bid_chapter_id
+            WHERE pr.project_id = %s
+            ORDER BY pr.category, pr.created_at
+            """,
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _load_missing_items(conn: Connection, project_id: UUID) -> list[dict]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            """
+            SELECT rm.*, pr.category, pr.title AS requirement_title
+            FROM requirement_match rm
+            JOIN project_requirement pr ON pr.id = rm.requirement_id
+            WHERE pr.project_id = %s
+              AND rm.match_status IN ('missing', 'needs_review')
+            ORDER BY pr.category, pr.created_at
+            """,
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: str | None = None) -> dict[str, Any]:
+    version = _next_version(conn, project_id)
+    project_name = _project_name(conn, project_id)
+    root = EXPORT_ROOT / str(project_id) / f"delivery-v{version}"
+    root.mkdir(parents=True, exist_ok=True)
+
+    docx_path = render_docx(conn, project_id=project_id, output_path=root / "投标文件.docx")
+    doc_path = convert_docx_to_doc(docx_path)
+    volume_paths: list[Path] = []
+    for volume in ("qualification", "business", "technical"):
+        try:
+            volume_paths.append(render_volume_docx(conn, project_id=project_id, volume_type=volume, output_path=root / f"{volume}.docx"))
+        except Exception:
+            continue
+
+    review_issues = build_project_review(conn, project_id=project_id)
+    review_report_path = _write_json(root / "审查报告.json", {"issues": [issue.__dict__ for issue in review_issues]})
+    matrix_entries = build_compliance_matrix(conn, project_id=project_id)
+    response_matrix_path = _write_json(root / "约束响应矩阵.json", {"entries": [entry.__dict__ for entry in matrix_entries]})
+    missing_items_path = _write_json(root / "资料缺失清单.json", {"items": _load_missing_items(conn, project_id)})
+    traceability_path = _write_json(root / "来源追溯清单.json", {"items": _load_traceability(conn, project_id)})
+    confirmation_record_path = _write_json(root / "人工确认记录.json", {"items": _load_confirmation_records(conn, project_id)})
+
+    package_name = f"{project_name}-投标交付包-v{version}.zip"
+    package_path = root.parent / package_name
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in [docx_path, *([doc_path] if doc_path else []), *volume_paths, review_report_path, response_matrix_path, missing_items_path, traceability_path, confirmation_record_path]:
+            archive.write(path, path.name)
+
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            INSERT INTO bid_delivery_package (
+              id, project_id, version_no, status, package_name, package_path,
+              docx_path, doc_path, review_report_path, response_matrix_path, missing_items_path,
+              traceability_path, confirmation_record_path, metadata_json, created_by
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (
+                uuid4(),
+                project_id,
+                version,
+                "created",
+                package_name,
+                str(package_path),
+                str(docx_path),
+                str(doc_path) if doc_path else None,
+                str(review_report_path),
+                str(response_matrix_path),
+                str(missing_items_path),
+                str(traceability_path),
+                str(confirmation_record_path),
+                Jsonb({"volume_paths": [str(path) for path in volume_paths]}),
+                created_by,
+            ),
+        ).fetchone()
+    conn.commit()
+    assert row is not None
+    return dict(row)
+
+
+def get_delivery_package(conn: Connection, *, package_id: UUID) -> dict[str, Any] | None:
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute("SELECT * FROM bid_delivery_package WHERE id = %s", (package_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_delivery_packages(conn: Connection, *, project_id: UUID) -> list[dict[str, Any]]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            "SELECT * FROM bid_delivery_package WHERE project_id = %s ORDER BY created_at DESC",
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def convert_docx_to_doc(docx_path: Path) -> Path | None:
+    binary = shutil.which("libreoffice") or shutil.which("soffice")
+    if binary is None:
+        return None
+    result = subprocess.run(
+        [
+            binary,
+            "--headless",
+            "--convert-to",
+            "doc",
+            "--outdir",
+            str(docx_path.parent),
+            str(docx_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    doc_path = docx_path.with_suffix(".doc")
+    return doc_path if doc_path.is_file() else None

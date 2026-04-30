@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_outline_repo import BidOutlineRepository
+from tender_backend.services.bid_chapter_generation import generate_bid_chapter_draft
 from tender_backend.services.bid_outline_planner import build_bid_outline
 
 router = APIRouter(tags=["bid-outline"])
@@ -30,6 +31,10 @@ class ChapterRequirementMappingBody(BaseModel):
     requirement_ids: list[UUID]
     mapping_reason: str = "人工调整章节约束映射"
     priority_level: str = "normal"
+
+
+class ChapterGenerateBody(BaseModel):
+    rewrite_note: str | None = None
 
 
 @router.post("/projects/{project_id}/bid-outline")
@@ -83,3 +88,22 @@ async def replace_bid_chapter_requirements(
     if row is None:
         raise HTTPException(status_code=404, detail="bid chapter not found")
     return row
+
+
+@router.post("/projects/{project_id}/bid-chapters/{chapter_id}/generate")
+async def generate_bid_chapter(
+    project_id: UUID,
+    chapter_id: UUID,
+    payload: ChapterGenerateBody | None = None,
+    conn: Connection = Depends(get_db_conn),
+    _user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    try:
+        return generate_bid_chapter_draft(
+            conn,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            rewrite_note=payload.rewrite_note if payload else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

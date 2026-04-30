@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { fetchExportGates } from "../../lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createDeliveryPackage, createExport, fetchExportGates } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
@@ -18,6 +18,7 @@ function GateIndicator({ passed, label, detail }: { passed: boolean; label: stri
 
 export function ExportGateContent() {
   const { projectId } = useNavigation();
+  const queryClient = useQueryClient();
 
   const { data: gatesData, isLoading } = useQuery({
     queryKey: ["export-gates", projectId],
@@ -26,6 +27,26 @@ export function ExportGateContent() {
       return fetchExportGates(projectId, { signal });
     },
     enabled: !!projectId,
+  });
+
+  const exportDocx = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("No project selected");
+      return createExport(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["exports", projectId] });
+    },
+  });
+
+  const delivery = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("No project selected");
+      return createDeliveryPackage(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["delivery-packages", projectId] });
+    },
   });
 
   if (!projectId) {
@@ -64,9 +85,15 @@ export function ExportGateContent() {
         <ClayButton
           size="lg"
           disabled={!gatesData.can_export}
+          onClick={() => exportDocx.mutate()}
           style={{ marginBottom: "var(--space-8)" }}
         >
-          {gatesData.can_export ? "开始导出" : "门禁未通过，无法导出"}
+          {gatesData.can_export ? "生成 Word" : "门禁未通过，无法导出"}
+        </ClayButton>
+      )}
+      {gatesData?.can_export && (
+        <ClayButton size="lg" onClick={() => delivery.mutate()} disabled={delivery.isPending}>
+          {delivery.isPending ? "打包中..." : "生成最终交付包"}
         </ClayButton>
       )}
     </div>
