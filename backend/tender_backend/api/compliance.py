@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from psycopg import Connection
 
+from tender_backend.core.project_access import require_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.services.review_service.compliance_matrix import build_compliance_matrix
@@ -18,8 +19,9 @@ router = APIRouter(tags=["compliance"])
 async def get_compliance_matrix(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
     entries = build_compliance_matrix(conn, project_id=project_id)
     return [
         {

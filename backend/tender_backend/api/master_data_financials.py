@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from psycopg import Connection
+from psycopg import Connection, errors
 
 from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
@@ -75,10 +75,8 @@ async def create_financial_statement(
 ) -> FinancialStatementOut:
     try:
         row = _repo.create_financial_statement(conn, **payload.model_dump())
-    except Exception as exc:
-        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="financial statement already exists for year/type") from exc
-        raise
+    except errors.UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="financial statement already exists for year/type") from exc
     return _financial_out(row)
 
 
@@ -90,10 +88,8 @@ async def update_financial_statement(
 ) -> FinancialStatementOut:
     try:
         row = _repo.update_financial_statement(conn, record_id, **payload.model_dump(exclude_unset=True))
-    except Exception as exc:
-        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="financial statement already exists for year/type") from exc
-        raise
+    except errors.UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="financial statement already exists for year/type") from exc
     if row is None:
         _not_found("financial statement not found")
     return _financial_out(row)

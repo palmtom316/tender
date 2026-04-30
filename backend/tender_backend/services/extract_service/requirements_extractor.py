@@ -86,6 +86,7 @@ KEYWORDS_BY_CATEGORY: dict[str, list[str]] = {
 }
 
 PRICING_KEYWORDS = ["报价", "投标报价", "价格", "最高限价", "控制价", "清单计价", "单价", "总价"]
+PRICING_ONLY_CATEGORIES = {"business"}
 HUMAN_CONFIRM_CATEGORIES = {"veto", "qualification", "performance", "project_team", "special"}
 HARD_CONSTRAINT_CATEGORIES = {"veto", "qualification", "performance", "project_team", "format", "special"}
 MAX_REQUIREMENT_TEXT = 1200
@@ -150,7 +151,7 @@ def extract_requirements_from_source_chunks(chunks: list[dict[str, Any]]) -> lis
                 continue
             seen.add(dedupe_key)
 
-            ignored_for_pricing = bool(pricing_hits)
+            ignored_for_pricing = bool(pricing_hits) and category in PRICING_ONLY_CATEGORIES and hits == pricing_hits
             confidence = _confidence(len(hits), pricing_only=ignored_for_pricing and len(matched_categories) == 1)
             is_veto = category == "veto"
             is_hard_constraint = category in HARD_CONSTRAINT_CATEGORIES

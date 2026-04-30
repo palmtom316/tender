@@ -48,8 +48,8 @@ class TenderDocumentRepository:
                     Jsonb(metadata_json or {}),
                 ),
             ).fetchone()
-        conn.commit()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("failed to create tender document")
         return dict(row)
 
     def update_document_status(
@@ -74,7 +74,6 @@ class TenderDocumentRepository:
                 """,
                 (status, error, Jsonb(metadata_json) if metadata_json is not None else None, tender_document_id),
             ).fetchone()
-        conn.commit()
         return dict(row) if row else None
 
     def get_document(self, conn: Connection, *, tender_document_id: UUID) -> dict[str, Any] | None:
@@ -162,8 +161,8 @@ class TenderDocumentRepository:
                     Jsonb(metadata_json or {}),
                 ),
             ).fetchone()
-        conn.commit()
-        assert row is not None
+        if row is None:
+            raise RuntimeError("failed to create tender document file")
         return dict(row)
 
     def list_files(self, conn: Connection, *, tender_document_id: UUID) -> list[dict[str, Any]]:
@@ -206,7 +205,6 @@ class TenderDocumentRepository:
                     tender_document_file_id,
                 ),
             ).fetchone()
-        conn.commit()
         return dict(row) if row else None
 
     def update_file_parse_status(
@@ -236,7 +234,6 @@ class TenderDocumentRepository:
                     tender_document_file_id,
                 ),
             ).fetchone()
-        conn.commit()
         return dict(row) if row else None
 
     def replace_source_chunks(
@@ -286,7 +283,6 @@ class TenderDocumentRepository:
                         Jsonb(chunk.get("metadata_json") or {}),
                     ),
                 )
-        conn.commit()
         return len(chunks)
 
     def list_source_chunks(
@@ -358,5 +354,4 @@ class TenderDocumentRepository:
                 """,
                 values,
             ).fetchone()
-        conn.commit()
         return dict(row) if row else None

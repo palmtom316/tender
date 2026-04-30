@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg import Connection
 from pydantic import BaseModel
 
+from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_outline_repo import BidOutlineRepository
@@ -16,6 +17,7 @@ from tender_backend.services.bid_outline_planner import build_bid_outline
 
 router = APIRouter(tags=["bid-outline"])
 _repo = BidOutlineRepository()
+_CHAPTER_PROJECT_QUERY = "SELECT project_id FROM bid_chapter WHERE id = %s"
 
 
 class ChapterUpdateBody(BaseModel):
@@ -41,8 +43,9 @@ class ChapterGenerateBody(BaseModel):
 async def generate_bid_outline(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
     return build_bid_outline(conn, project_id=project_id)
 
 
@@ -50,8 +53,9 @@ async def generate_bid_outline(
 async def get_latest_bid_outline(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
     row = _repo.get_latest_by_project(conn, project_id=project_id)
     if row is None:
         raise HTTPException(status_code=404, detail="bid outline not found")
@@ -63,8 +67,15 @@ async def update_bid_chapter(
     chapter_id: UUID,
     payload: ChapterUpdateBody,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=chapter_id,
+        query=_CHAPTER_PROJECT_QUERY,
+        not_found_detail="bid chapter not found",
+        user=user,
+    )
     row = _repo.update_chapter(conn, chapter_id=chapter_id, fields=payload.model_dump(exclude_unset=True))
     if row is None:
         raise HTTPException(status_code=404, detail="bid chapter not found")
@@ -76,8 +87,15 @@ async def replace_bid_chapter_requirements(
     chapter_id: UUID,
     payload: ChapterRequirementMappingBody,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=chapter_id,
+        query=_CHAPTER_PROJECT_QUERY,
+        not_found_detail="bid chapter not found",
+        user=user,
+    )
     row = _repo.replace_chapter_requirements(
         conn,
         chapter_id=chapter_id,
@@ -96,8 +114,17 @@ async def generate_bid_chapter(
     chapter_id: UUID,
     payload: ChapterGenerateBody | None = None,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    chapter_project_id = require_resource_project_access(
+        conn,
+        resource_id=chapter_id,
+        query=_CHAPTER_PROJECT_QUERY,
+        not_found_detail="bid chapter not found",
+        user=user,
+    )
+    if chapter_project_id != project_id:
+        raise HTTPException(status_code=404, detail="bid chapter not found")
     try:
         return generate_bid_chapter_draft(
             conn,

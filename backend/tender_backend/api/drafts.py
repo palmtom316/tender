@@ -9,18 +9,21 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from pydantic import BaseModel
 
+from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 
 router = APIRouter(tags=["drafts"])
+_DRAFT_PROJECT_QUERY = "SELECT project_id FROM chapter_draft WHERE id = %s"
 
 
 @router.get("/projects/{project_id}/drafts")
 async def list_drafts(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
             "SELECT * FROM chapter_draft WHERE project_id = %s ORDER BY chapter_code",
@@ -33,8 +36,15 @@ async def list_drafts(
 async def get_draft(
     draft_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=draft_id,
+        query=_DRAFT_PROJECT_QUERY,
+        not_found_detail="draft not found",
+        user=user,
+    )
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             "SELECT * FROM chapter_draft WHERE id = %s",
@@ -56,6 +66,13 @@ async def update_draft(
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=draft_id,
+        query=_DRAFT_PROJECT_QUERY,
+        not_found_detail="draft not found",
+        user=user,
+    )
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """

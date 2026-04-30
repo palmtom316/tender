@@ -45,6 +45,12 @@ type BindingDraft = {
   sort_order: string;
 };
 
+type BindingSaveInput = {
+  draft: BindingDraft;
+  selectedBindingId: string | null;
+  selectedItemId: string | null;
+};
+
 type TemplateFieldTransform = NonNullable<TemplateFieldMapping["transform"]>;
 
 const SOURCE_TYPE_OPTIONS: Array<{ value: TemplateSourceType; label: string }> = [
@@ -74,6 +80,7 @@ const FIELD_TRANSFORM_OPTIONS: Array<{ value: TemplateFieldTransform; label: str
   { value: "date", label: "日期格式化" },
   { value: "number", label: "数值格式化" },
 ];
+const STATIC_QUERY_STALE_TIME_MS = 5 * 60 * 1000;
 
 function defaultOutputKey(sourceType: TemplateSourceType): string {
   switch (sourceType) {
@@ -227,6 +234,23 @@ function normalizeFieldMappings(mappings: TemplateFieldMapping[]): TemplateField
   });
 }
 
+function buildBindingPayload(draft: BindingDraft): TemplateBindingPayload {
+  const payload: TemplateBindingPayload = {
+    binding_name: draft.binding_name.trim(),
+    source_type: draft.source_type,
+    selection_mode: draft.selection_mode,
+    source_filters: parseObjectJson(draft.source_filters, "来源筛选"),
+    field_mappings: normalizeFieldMappings(draft.field_mappings),
+    field_mapping_mode: draft.field_mapping_mode,
+    output_key: draft.output_key.trim(),
+    required: draft.required,
+    sort_order: Number(draft.sort_order) || 0,
+  };
+  if (!payload.binding_name) throw new Error("绑定名称不能为空");
+  if (!payload.output_key) throw new Error("输出键不能为空");
+  return payload;
+}
+
 function summarizeSuggestion(group: TemplateFieldMappingSuggestionGroup): string {
   if (group.field_mappings.length === 0) return "暂无建议字段";
   return group.field_mappings.map((mapping) => mapping.target_field).join(" / ");
@@ -254,6 +278,7 @@ export function TemplateFieldWorkbench() {
   const categoriesQuery = useQuery({
     queryKey: ["template-package-categories"],
     queryFn: () => listTemplatePackageCategories(),
+    staleTime: STATIC_QUERY_STALE_TIME_MS,
   });
 
   const packagesQuery = useQuery({
@@ -388,26 +413,14 @@ export function TemplateFieldWorkbench() {
   };
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedItemId) throw new Error("请先选择模板项");
-      const payload: TemplateBindingPayload = {
-        binding_name: draft.binding_name.trim(),
-        source_type: draft.source_type,
-        selection_mode: draft.selection_mode,
-        source_filters: parseObjectJson(draft.source_filters, "来源筛选"),
-        field_mappings: normalizeFieldMappings(draft.field_mappings),
-        field_mapping_mode: draft.field_mapping_mode,
-        output_key: draft.output_key.trim(),
-        required: draft.required,
-        sort_order: Number(draft.sort_order) || 0,
-      };
-      if (!payload.binding_name) throw new Error("绑定名称不能为空");
-      if (!payload.output_key) throw new Error("输出键不能为空");
+    mutationFn: async (input: BindingSaveInput) => {
+      if (!input.selectedItemId) throw new Error("请先选择模板项");
+      const payload = buildBindingPayload(input.draft);
 
-      if (selectedBindingId) {
-        return updateTemplateBindingRule(selectedBindingId, payload);
+      if (input.selectedBindingId) {
+        return updateTemplateBindingRule(input.selectedBindingId, payload);
       }
-      return createTemplateItemBinding(selectedItemId, payload);
+      return createTemplateItemBinding(input.selectedItemId, payload);
     },
     onSuccess: (rule) => {
       setSelectedBindingId(rule.id);
@@ -1032,7 +1045,10 @@ export function TemplateFieldWorkbench() {
               {saveError && <p className="text-error">{saveError}</p>}
 
               <div className="template-inline-actions">
-                <ClayButton onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                <ClayButton
+                  onClick={() => saveMutation.mutate({ draft, selectedBindingId, selectedItemId })}
+                  disabled={saveMutation.isPending}
+                >
                   {saveMutation.isPending ? "保存中..." : selectedBindingId ? "更新绑定" : "创建绑定"}
                 </ClayButton>
                 <ClayButton variant="outline" onClick={refreshItemQueries}>

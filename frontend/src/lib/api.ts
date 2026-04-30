@@ -4,9 +4,10 @@
  */
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 
-function getToken(): string {
-  return localStorage.getItem("tender_token") ?? "dev-token";
+function getToken(): string | null {
+  return localStorage.getItem("tender_token");
 }
 
 function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
@@ -34,22 +35,34 @@ export function buildApiUrl(path: string): string {
 }
 
 export function getAuthHeaders(headers?: HeadersInit): Record<string, string> {
-  return {
-    ...normalizeHeaders(headers),
-    Authorization: `Bearer ${getToken()}`,
-  };
+  const normalized = normalizeHeaders(headers);
+  const token = getToken();
+  return token ? { ...normalized, Authorization: `Bearer ${token}` } : normalized;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const url = buildApiUrl(path);
   const headers = getAuthHeaders(init?.headers);
+  const controller = init?.signal ? null : new AbortController();
+  const timeout = controller
+    ? window.setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS)
+    : null;
 
-  const res = await fetch(url, { ...init, headers });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? `HTTP ${res.status}`);
+  try {
+    const res = await fetch(url, { ...init, headers, signal: init?.signal ?? controller?.signal });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail ?? `HTTP ${res.status}`);
+    }
+    return res.json();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError" && controller) {
+      throw new Error("请求超时");
+    }
+    throw error;
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
   }
-  return res.json();
 }
 
 // ── Projects ──

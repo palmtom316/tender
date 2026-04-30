@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from uuid import UUID
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -10,6 +10,9 @@ from pydantic import BaseModel
 from psycopg import Connection, errors
 
 from tender_backend.core.config import Settings, get_settings
+from tender_backend.core.path_safety import ensure_path_within_root
+from tender_backend.core.project_access import require_project_access, require_resource_project_access
+from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
@@ -35,11 +38,25 @@ from tender_backend.services.pdf_document_parser import (
 from tender_backend.services.tender_document_ingestion import TenderDocumentIngestionService, UploadPayload
 
 
-router = APIRouter(tags=["tender-documents"])
+router = APIRouter(tags=["tender-documents"], dependencies=[Depends(get_current_user)])
 
 _repo = TenderDocumentRepository()
 _requirement_repo = RequirementRepository()
 _agent_repo = AgentConfigRepository()
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+_DOCUMENT_PROJECT_QUERY = "SELECT project_id FROM tender_document WHERE id = %s"
+_FILE_PROJECT_QUERY = """
+    SELECT td.project_id
+    FROM tender_document_file f
+    JOIN tender_document td ON td.id = f.tender_document_id
+    WHERE f.id = %s
+"""
+_SOURCE_CHUNK_PROJECT_QUERY = """
+    SELECT td.project_id
+    FROM source_chunk sc
+    JOIN tender_document td ON td.id = sc.tender_document_id
+    WHERE sc.id = %s
+"""
 
 
 class TenderDocumentOut(BaseModel):
@@ -247,7 +264,21 @@ def _parse_status_out(document: dict, files: list[dict], chunk_count: int) -> Te
     )
 
 
-async def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
+async def _read_upload_with_limit(file: UploadFile, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail=f"file exceeds {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _parse_file(conn: Connection, file_row: dict, *, settings: Settings) -> tuple[str, int]:
     if not file_row["is_parsable"] or file_row["is_archive"]:
         _repo.update_file_parse_status(conn, tender_document_file_id=file_row["id"], parse_status="skipped", error=None)
         return "skipped", 0
@@ -255,7 +286,20 @@ async def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
         _repo.update_file_parse_status(conn, tender_document_file_id=file_row["id"], parse_status="skipped", error=None)
         return "skipped", 0
 
-    path = Path(file_row["storage_key"])
+    try:
+        path = ensure_path_within_root(
+            file_row["storage_key"],
+            settings.tender_document_storage_root,
+            label="tender document file path",
+        )
+    except ValueError:
+        _repo.update_file_parse_status(
+            conn,
+            tender_document_file_id=file_row["id"],
+            parse_status="failed",
+            error="source file path is outside tender document storage root",
+        )
+        return "failed", 0
     if not path.is_file():
         _repo.update_file_parse_status(
             conn,
@@ -278,7 +322,11 @@ async def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
         else:
             parser_name = OFFICE_PARSER_NAME
             parser_version = OFFICE_PARSER_VERSION
-            parser_file_type, chunks = parse_office_file(path, source_file=file_row["relative_path"])
+            parser_file_type, chunks = await asyncio.to_thread(
+                parse_office_file,
+                path,
+                source_file=file_row["relative_path"],
+            )
     except (OfficeParseError, PdfParseError) as exc:
         _repo.update_file_parse_status(
             conn,
@@ -320,9 +368,11 @@ async def upload_tender_document(
     file: UploadFile = File(...),
     conn: Connection = Depends(get_db_conn),
     settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
 ) -> TenderDocumentDetailOut:
+    require_project_access(conn, project_id=project_id, user=user)
     filename = file.filename or "unnamed"
-    content = await file.read()
+    content = await _read_upload_with_limit(file, max_bytes=settings.tender_document_upload_max_bytes)
     if not content:
         raise HTTPException(status_code=422, detail="file is empty")
 
@@ -346,7 +396,12 @@ async def upload_tender_document(
 
 
 @router.get("/projects/{project_id}/tender-documents", response_model=list[TenderDocumentOut])
-async def list_tender_documents(project_id: UUID, conn: Connection = Depends(get_db_conn)) -> list[TenderDocumentOut]:
+async def list_tender_documents(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> list[TenderDocumentOut]:
+    require_project_access(conn, project_id=project_id, user=user)
     return [_document_out(row) for row in _repo.list_documents(conn, project_id=project_id)]
 
 
@@ -354,7 +409,15 @@ async def list_tender_documents(project_id: UUID, conn: Connection = Depends(get
 async def get_tender_document(
     tender_document_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> TenderDocumentDetailOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
     document = _repo.get_document(conn, tender_document_id=tender_document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="tender document not found")
@@ -366,7 +429,15 @@ async def get_tender_document(
 async def list_tender_document_files(
     tender_document_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[TenderDocumentFileOut]:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
     if _repo.get_document(conn, tender_document_id=tender_document_id) is None:
         raise HTTPException(status_code=404, detail="tender document not found")
     return [_file_out(row) for row in _repo.list_files(conn, tender_document_id=tender_document_id)]
@@ -377,7 +448,15 @@ async def update_tender_document_file_classification(
     tender_document_file_id: UUID,
     payload: TenderDocumentFileClassificationUpdateBody,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> TenderDocumentFileOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_file_id,
+        query=_FILE_PROJECT_QUERY,
+        not_found_detail="tender document file not found",
+        user=user,
+    )
     existing = _repo.get_file(conn, tender_document_file_id=tender_document_file_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="tender document file not found")
@@ -393,7 +472,9 @@ async def update_tender_document_file_classification(
         is_parsable=payload.is_parsable,
         metadata_json=metadata,
     )
-    assert row is not None
+    conn.commit()
+    if row is None:
+        raise HTTPException(status_code=500, detail="failed to update tender document file")
     return _file_out(row)
 
 
@@ -401,7 +482,16 @@ async def update_tender_document_file_classification(
 async def parse_tender_document(
     tender_document_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
 ) -> TenderDocumentParseOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
     if _repo.get_document(conn, tender_document_id=tender_document_id) is None:
         raise HTTPException(status_code=404, detail="tender document not found")
 
@@ -411,7 +501,7 @@ async def parse_tender_document(
     chunk_count = 0
     files = _repo.list_files(conn, tender_document_id=tender_document_id)
     for file_row in files:
-        status, count = await _parse_file(conn, file_row)
+        status, count = await _parse_file(conn, file_row, settings=settings)
         chunk_count += count
         if status == "parsed":
             parsed += 1
@@ -419,6 +509,7 @@ async def parse_tender_document(
             failed += 1
         else:
             skipped += 1
+    conn.commit()
 
     updated_files = _repo.list_files(conn, tender_document_id=tender_document_id)
     return TenderDocumentParseOut(
@@ -435,7 +526,15 @@ async def parse_tender_document(
 async def get_tender_document_parse_status(
     tender_document_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> TenderDocumentParseStatusOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
     document = _repo.get_document(conn, tender_document_id=tender_document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="tender document not found")
@@ -448,11 +547,21 @@ async def get_tender_document_parse_status(
 async def parse_tender_document_file(
     tender_document_file_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
 ) -> TenderDocumentFileOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_file_id,
+        query=_FILE_PROJECT_QUERY,
+        not_found_detail="tender document file not found",
+        user=user,
+    )
     file_row = _repo.get_file(conn, tender_document_file_id=tender_document_file_id)
     if file_row is None:
         raise HTTPException(status_code=404, detail="tender document file not found")
-    status, _ = await _parse_file(conn, file_row)
+    status, _ = await _parse_file(conn, file_row, settings=settings)
+    conn.commit()
     updated = _repo.get_file(conn, tender_document_file_id=tender_document_file_id)
     assert updated is not None
     if status == "skipped":
@@ -465,7 +574,15 @@ async def list_tender_source_chunks(
     tender_document_id: UUID,
     tender_document_file_id: UUID | None = None,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[SourceChunkOut]:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
     if _repo.get_document(conn, tender_document_id=tender_document_id) is None:
         raise HTTPException(status_code=404, detail="tender document not found")
     return [
@@ -483,7 +600,15 @@ async def download_tender_source_chunks(
     tender_document_id: UUID,
     tender_document_file_id: UUID | None = None,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> Response:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
     document = _repo.get_document(conn, tender_document_id=tender_document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="tender document not found")
@@ -511,7 +636,15 @@ async def update_source_chunk(
     source_chunk_id: UUID,
     payload: SourceChunkUpdateBody,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> SourceChunkOut:
+    require_resource_project_access(
+        conn,
+        resource_id=source_chunk_id,
+        query=_SOURCE_CHUNK_PROJECT_QUERY,
+        not_found_detail="source chunk not found",
+        user=user,
+    )
     row = _repo.update_source_chunk(
         conn,
         source_chunk_id=source_chunk_id,
@@ -519,6 +652,7 @@ async def update_source_chunk(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="source chunk not found")
+    conn.commit()
     return _chunk_out(row)
 
 
@@ -533,7 +667,15 @@ async def update_source_chunk(
 async def extract_tender_document_requirements(
     tender_document_id: UUID,
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> TenderDocumentRequirementExtractionOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
     document = _repo.get_document(conn, tender_document_id=tender_document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="tender document not found")

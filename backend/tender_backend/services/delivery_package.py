@@ -95,12 +95,15 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
 
     docx_path = render_docx(conn, project_id=project_id, output_path=root / "投标文件.docx")
     doc_path = convert_docx_to_doc(docx_path)
+    warnings: list[dict[str, str]] = []
+    if doc_path is None:
+        warnings.append({"code": "doc_conversion_unavailable", "message": "DOC conversion did not produce an output file"})
     volume_paths: list[Path] = []
     for volume in ("qualification", "business", "technical"):
         try:
             volume_paths.append(render_volume_docx(conn, project_id=project_id, volume_type=volume, output_path=root / f"{volume}.docx"))
-        except Exception:
-            continue
+        except Exception as exc:
+            warnings.append({"code": "volume_render_failed", "volume": volume, "message": str(exc)})
 
     review_issues = build_project_review(conn, project_id=project_id)
     review_report_path = _write_json(root / "审查报告.json", {"issues": [issue.__dict__ for issue in review_issues]})
@@ -131,7 +134,7 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
                 uuid4(),
                 project_id,
                 version,
-                "created",
+                "degraded" if warnings else "created",
                 package_name,
                 str(package_path),
                 str(docx_path),
@@ -141,12 +144,13 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
                 str(missing_items_path),
                 str(traceability_path),
                 str(confirmation_record_path),
-                Jsonb({"volume_paths": [str(path) for path in volume_paths]}),
+                Jsonb({"volume_paths": [str(path) for path in volume_paths], "warnings": warnings}),
                 created_by,
             ),
         ).fetchone()
     conn.commit()
-    assert row is not None
+    if row is None:
+        raise RuntimeError("failed to create delivery package record")
     return dict(row)
 
 

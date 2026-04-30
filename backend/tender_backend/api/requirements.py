@@ -10,7 +10,8 @@ from fastapi.responses import Response
 from psycopg import Connection
 from pydantic import BaseModel
 
-from tender_backend.core.security import CurrentUser, Role, get_current_user, require_role
+from tender_backend.core.project_access import require_project_access, require_resource_project_access
+from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.db.repositories.requirement_match_repo import RequirementMatchRepository
@@ -19,6 +20,7 @@ from tender_backend.services.requirement_matching import build_requirement_match
 router = APIRouter(tags=["requirements"])
 _repo = RequirementRepository()
 _match_repo = RequirementMatchRepository()
+_REQUIREMENT_PROJECT_QUERY = "SELECT project_id FROM project_requirement WHERE id = %s"
 
 
 class ConfirmBody(BaseModel):
@@ -66,8 +68,9 @@ async def list_requirements(
     is_veto: bool | None = None,
     is_hard_constraint: bool | None = None,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
     return _repo.list_by_project(
         conn,
         project_id=project_id,
@@ -85,8 +88,9 @@ async def download_requirements(
     project_id: UUID,
     category: str | None = None,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> Response:
+    require_project_access(conn, project_id=project_id, user=user)
     rows = _repo.list_by_project(conn, project_id=project_id, category=category)
     payload = {
         "project_id": str(project_id),
@@ -109,8 +113,15 @@ async def update_requirement(
     requirement_id: UUID,
     payload: RequirementUpdateBody,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=requirement_id,
+        query=_REQUIREMENT_PROJECT_QUERY,
+        not_found_detail="requirement not found",
+        user=user,
+    )
     row = _repo.update(conn, requirement_id=requirement_id, fields=payload.model_dump(exclude_unset=True))
     if row is None:
         raise HTTPException(status_code=404, detail="requirement not found")
@@ -121,8 +132,15 @@ async def update_requirement(
 async def mark_hard_constraint(
     requirement_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=requirement_id,
+        query=_REQUIREMENT_PROJECT_QUERY,
+        not_found_detail="requirement not found",
+        user=user,
+    )
     row = _repo.update(
         conn,
         requirement_id=requirement_id,
@@ -137,8 +155,15 @@ async def mark_hard_constraint(
 async def mark_special_requirement(
     requirement_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=requirement_id,
+        query=_REQUIREMENT_PROJECT_QUERY,
+        not_found_detail="requirement not found",
+        user=user,
+    )
     row = _repo.update(
         conn,
         requirement_id=requirement_id,
@@ -154,8 +179,15 @@ async def merge_requirements(
     requirement_id: UUID,
     payload: RequirementMergeBody,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=requirement_id,
+        query=_REQUIREMENT_PROJECT_QUERY,
+        not_found_detail="requirement not found",
+        user=user,
+    )
     row = _repo.merge(
         conn,
         target_requirement_id=requirement_id,
@@ -171,8 +203,15 @@ async def split_requirement(
     requirement_id: UUID,
     payload: RequirementSplitBody,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=requirement_id,
+        query=_REQUIREMENT_PROJECT_QUERY,
+        not_found_detail="requirement not found",
+        user=user,
+    )
     existing = _repo.update(conn, requirement_id=requirement_id, fields={"review_status": "split"})
     if existing is None:
         raise HTTPException(status_code=404, detail="requirement not found")
@@ -203,6 +242,13 @@ async def confirm_requirement(
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=requirement_id,
+        query=_REQUIREMENT_PROJECT_QUERY,
+        not_found_detail="requirement not found",
+        user=user,
+    )
     row = _repo.confirm(conn, requirement_id=requirement_id, confirmed_by=user.display_name)
     if row is None:
         raise HTTPException(status_code=404, detail="requirement not found")
@@ -214,8 +260,15 @@ async def reject_requirement(
     requirement_id: UUID,
     payload: RejectBody,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=requirement_id,
+        query=_REQUIREMENT_PROJECT_QUERY,
+        not_found_detail="requirement not found",
+        user=user,
+    )
     row = _repo.reject(conn, requirement_id=requirement_id, review_note=payload.review_note)
     if row is None:
         raise HTTPException(status_code=404, detail="requirement not found")
@@ -226,9 +279,10 @@ async def reject_requirement(
 async def check_export_readiness(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Check if all veto requirements are confirmed (export gate)."""
+    require_project_access(conn, project_id=project_id, user=user)
     unconfirmed = _repo.unconfirmed_veto_count(conn, project_id=project_id)
     return {
         "project_id": str(project_id),
@@ -241,8 +295,9 @@ async def check_export_readiness(
 async def match_project_requirements(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
     return build_requirement_matches(conn, project_id=project_id)
 
 
@@ -250,6 +305,7 @@ async def match_project_requirements(
 async def list_requirement_matches(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
     return _match_repo.list_by_project(conn, project_id=project_id)

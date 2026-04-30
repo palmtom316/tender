@@ -126,6 +126,7 @@ class TenderDocumentIngestionService:
         upload_type = detect_upload_type(payload.filename, payload.content_type)
         digest = sha256_bytes(payload.content)
         document_root = self.storage_root / str(project_id) / digest[:16]
+        created_document_root = not document_root.exists()
         original_dir = document_root / "original"
         original_dir.mkdir(parents=True, exist_ok=True)
 
@@ -133,62 +134,62 @@ class TenderDocumentIngestionService:
         original_path = original_dir / original_filename
         original_path.write_bytes(payload.content)
 
-        document = self.repository.create_document(
-            conn,
-            project_id=project_id,
-            original_filename=original_filename,
-            upload_type=upload_type,
-            status="extracting" if upload_type == "zip" else "uploaded",
-            content_type=payload.content_type or content_type_for(original_filename),
-            size_bytes=len(payload.content),
-            storage_key=str(original_path),
-            file_sha256=digest,
-            metadata_json={"storage_root": str(document_root)},
-        )
-
-        original_file = self.repository.create_file(
-            conn,
-            tender_document_id=document["id"],
-            parent_file_id=None,
-            filename=original_filename,
-            relative_path=original_filename,
-            storage_key=str(original_path),
-            content_type=payload.content_type or content_type_for(original_filename),
-            size_bytes=len(payload.content),
-            file_type=file_type_for(original_filename),
-            classification="uploaded_package" if upload_type == "zip" else "uploaded_pdf",
-            depth=0,
-            is_archive=upload_type == "zip",
-            is_parsable=upload_type == "pdf",
-            parse_status="pending",
-            metadata_json={"sha256": digest},
-        )
-
-        if upload_type == "zip":
-            try:
-                self._extract_zip(
+        try:
+            with conn.transaction():
+                document = self.repository.create_document(
                     conn,
-                    tender_document_id=document["id"],
-                    archive_path=original_path,
-                    parent_file_id=original_file["id"],
-                    base_relative_path=PurePosixPath(original_filename),
-                    output_root=document_root / "extracted",
-                    depth=1,
+                    project_id=project_id,
+                    original_filename=original_filename,
+                    upload_type=upload_type,
+                    status="extracting" if upload_type == "zip" else "uploaded",
+                    content_type=payload.content_type or content_type_for(original_filename),
+                    size_bytes=len(payload.content),
+                    storage_key=str(original_path),
+                    file_sha256=digest,
+                    metadata_json={"storage_root": str(document_root)},
                 )
-                document = self.repository.update_document_status(
+
+                original_file = self.repository.create_file(
                     conn,
                     tender_document_id=document["id"],
-                    status="completed",
-                    error=None,
-                ) or document
-            except Exception as exc:
-                document = self.repository.update_document_status(
-                    conn,
-                    tender_document_id=document["id"],
-                    status="failed",
-                    error=str(exc),
-                ) or document
-                raise
+                    parent_file_id=None,
+                    filename=original_filename,
+                    relative_path=original_filename,
+                    storage_key=str(original_path),
+                    content_type=payload.content_type or content_type_for(original_filename),
+                    size_bytes=len(payload.content),
+                    file_type=file_type_for(original_filename),
+                    classification="uploaded_package" if upload_type == "zip" else "uploaded_pdf",
+                    depth=0,
+                    is_archive=upload_type == "zip",
+                    is_parsable=upload_type == "pdf",
+                    parse_status="pending",
+                    metadata_json={"sha256": digest},
+                )
+
+                if upload_type == "zip":
+                    self._extract_zip(
+                        conn,
+                        tender_document_id=document["id"],
+                        archive_path=original_path,
+                        parent_file_id=original_file["id"],
+                        base_relative_path=PurePosixPath(original_filename),
+                        output_root=document_root / "extracted",
+                        depth=1,
+                    )
+                    document = self.repository.update_document_status(
+                        conn,
+                        tender_document_id=document["id"],
+                        status="completed",
+                        error=None,
+                    ) or document
+        except Exception:
+            if created_document_root:
+                try:
+                    shutil.rmtree(document_root)
+                except FileNotFoundError:
+                    pass
+            raise
 
         return document
 

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from psycopg import Connection
 
+from tender_backend.core.config import Settings, get_settings
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.user_repository import (
     UserRepository,
@@ -58,7 +59,11 @@ async def login(payload: LoginRequest, conn: Connection = Depends(get_db_conn)) 
 
 
 @router.get("/auth/me", response_model=MeResponse)
-async def auth_me(request: Request, conn: Connection = Depends(get_db_conn)) -> MeResponse:
+async def auth_me(
+    request: Request,
+    conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+) -> MeResponse:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -70,7 +75,7 @@ async def auth_me(request: Request, conn: Connection = Depends(get_db_conn)) -> 
         return MeResponse(username=user.username, display_name=user.display_name, role=user.role)
 
     # Fallback to dev-token
-    if token == "dev-token":
+    if token == "dev-token" and settings.app_env.lower() in {"development", "dev", "test", "testing"}:
         return MeResponse(username="dev", display_name="Developer", role="admin")
 
     raise HTTPException(status_code=401, detail="Invalid or expired session")

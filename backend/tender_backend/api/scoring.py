@@ -7,20 +7,23 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg import Connection
 
+from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.scoring_repo import ScoringRepository
 
 router = APIRouter(tags=["scoring"])
 _repo = ScoringRepository()
+_SCORING_PROJECT_QUERY = "SELECT project_id FROM scoring_criteria WHERE id = %s"
 
 
 @router.get("/projects/{project_id}/scoring-criteria")
 async def list_scoring_criteria(
     project_id: UUID,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
     return _repo.list_by_project(conn, project_id=project_id)
 
 
@@ -30,6 +33,13 @@ async def confirm_scoring_criteria(
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=criteria_id,
+        query=_SCORING_PROJECT_QUERY,
+        not_found_detail="scoring criteria not found",
+        user=user,
+    )
     row = _repo.confirm(conn, criteria_id=criteria_id, confirmed_by=user.display_name)
     if row is None:
         raise HTTPException(status_code=404, detail="scoring criteria not found")

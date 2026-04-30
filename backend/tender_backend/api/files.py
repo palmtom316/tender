@@ -6,6 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from psycopg import Connection, errors
 
+from tender_backend.core.project_access import require_project_access
+from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.document_repository import DocumentRepository
 from tender_backend.db.repositories.file_repository import FileRepository
@@ -23,7 +25,9 @@ async def upload_file(
     file: UploadFile | None = File(None),
     upload: UploadFile | None = File(None),  # backward-compat for early internal clients
     conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
     upload = file or upload
     if upload is None:
         raise HTTPException(status_code=422, detail="file is required")
@@ -62,7 +66,12 @@ async def upload_file(
 
 
 @router.get("/projects/{project_id}/files")
-async def list_files(project_id: UUID, conn: Connection = Depends(get_db_conn)) -> list[dict]:
+async def list_files(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
     rows = _repo.list(conn, project_id=project_id)
     return [
         {

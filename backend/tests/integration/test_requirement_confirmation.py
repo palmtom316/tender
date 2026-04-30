@@ -91,6 +91,27 @@ def test_extract_core_constraints_from_source_chunks():
     assert all(item.source_file and item.source_locator for item in results)
 
 
+def test_pricing_keywords_do_not_hide_qualification_requirements_in_same_chunk():
+    chunks = [
+        {
+            "id": "44444444-4444-4444-4444-444444444444",
+            "chunk_type": "paragraph",
+            "source_file": "招标文件.pdf",
+            "source_locator": "page:6:block:1",
+            "section_title": "资格与报价要求",
+            "text": "投标人须具有建筑工程施工总承包资质，投标报价不得超过最高限价。",
+            "page_start": 6,
+            "page_end": 6,
+        },
+    ]
+
+    results = extract_requirements_from_source_chunks(chunks)
+    qualification = [item for item in results if item.category == "qualification"]
+
+    assert qualification
+    assert all(not item.ignored_for_pricing for item in qualification)
+
+
 def test_extract_scoring_from_table():
     tables = [
         {

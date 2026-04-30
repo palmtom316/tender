@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import ipaddress
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from psycopg import Connection
 from uuid import UUID
 
+from tender_backend.core.security import Role, get_current_user, require_role
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository, AgentConfigRow
 from tender_backend.db.repositories.skill_definition_repo import (
@@ -18,7 +22,7 @@ from tender_backend.services.deepseek_api import (
 )
 from tender_backend.services.skill_catalog import default_skill_specs
 
-router = APIRouter(tags=["settings"])
+router = APIRouter(tags=["settings"], dependencies=[Depends(get_current_user)])
 
 _repo = AgentConfigRepository()
 _skills = SkillDefinitionRepository()
@@ -124,6 +128,32 @@ def _parse_prompt_template_id(raw: str | None) -> UUID | None:
         raise HTTPException(status_code=400, detail="prompt_template_id must be a valid UUID") from exc
 
 
+def _is_safe_test_url(raw_url: str) -> bool:
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host.lower() != "localhost"
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_unspecified
+        or ip.is_reserved
+    )
+
+
+def _validate_test_url(raw_url: str) -> None:
+    if not _is_safe_test_url(raw_url):
+        raise HTTPException(status_code=400, detail="agent base_url is not allowed for connection tests")
+
+
 @router.get("/settings/agents", response_model=list[AgentConfigOut])
 async def list_agent_configs(conn: Connection = Depends(get_db_conn)) -> list[AgentConfigOut]:
     rows = _repo.list_all(conn)
@@ -135,6 +165,7 @@ async def update_agent_config(
     agent_key: str,
     payload: AgentConfigUpdate,
     conn: Connection = Depends(get_db_conn),
+    _admin = Depends(require_role(Role.ADMIN)),
 ) -> AgentConfigOut:
     existing = _repo.get_by_key(conn, agent_key)
     if existing is None:
@@ -148,6 +179,7 @@ async def update_agent_config(
 async def test_agent_connection(
     agent_key: str,
     conn: Connection = Depends(get_db_conn),
+    _admin = Depends(require_role(Role.ADMIN)),
 ) -> dict:
     """Test connectivity to an agent's API endpoint."""
     import httpx
@@ -158,6 +190,7 @@ async def test_agent_connection(
 
     if not config.base_url or not config.api_key:
         return {"success": False, "message": "未配置 Base URL 或 API Key"}
+    _validate_test_url(config.base_url)
 
     if config.agent_type == "ocr":
         # For OCR (MinerU), just check the base domain is reachable
@@ -204,6 +237,7 @@ async def list_skill_definitions(conn: Connection = Depends(get_db_conn)) -> lis
 async def create_skill_definition(
     payload: SkillDefinitionCreate,
     conn: Connection = Depends(get_db_conn),
+    _admin = Depends(require_role(Role.ADMIN)),
 ) -> SkillDefinitionOut:
     skill_name = payload.skill_name.strip()
     existing = _skills.get_by_name(conn, skill_name)
@@ -227,6 +261,7 @@ async def update_skill_definition(
     skill_name: str,
     payload: SkillDefinitionUpdate,
     conn: Connection = Depends(get_db_conn),
+    _admin = Depends(require_role(Role.ADMIN)),
 ) -> SkillDefinitionOut:
     existing = _skills.get_by_name(conn, skill_name)
     if existing is None:
@@ -248,6 +283,7 @@ async def update_skill_definition(
 async def delete_skill_definition(
     skill_name: str,
     conn: Connection = Depends(get_db_conn),
+    _admin = Depends(require_role(Role.ADMIN)),
 ) -> dict[str, object]:
     deleted = _skills.delete(conn, skill_name=skill_name)
     if not deleted:
@@ -256,7 +292,10 @@ async def delete_skill_definition(
 
 
 @router.post("/settings/skills/sync-defaults")
-async def sync_default_skills(conn: Connection = Depends(get_db_conn)) -> dict[str, object]:
+async def sync_default_skills(
+    conn: Connection = Depends(get_db_conn),
+    _admin = Depends(require_role(Role.ADMIN)),
+) -> dict[str, object]:
     inserted = 0
     updated = 0
     names: list[str] = []

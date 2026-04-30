@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from psycopg import Connection
+from psycopg import Connection, errors
 
 from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
@@ -128,10 +128,8 @@ async def create_item_binding(
     _validate_payload(payload)
     try:
         row = _bindings.create(conn, template_item_id=template_item_id, **payload.model_dump())
-    except Exception as exc:
-        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="binding name already exists for template item") from exc
-        raise
+    except errors.UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="binding name already exists for template item") from exc
     return _binding_out(row)
 
 
@@ -144,10 +142,8 @@ async def update_binding_rule(
     _validate_payload(payload)
     try:
         row = _bindings.update(conn, rule_id=rule_id, **payload.model_dump(exclude_unset=True))
-    except Exception as exc:
-        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="binding name already exists for template item") from exc
-        raise
+    except errors.UniqueViolation as exc:
+        raise HTTPException(status_code=409, detail="binding name already exists for template item") from exc
     if row is None:
         raise HTTPException(status_code=404, detail="binding rule not found")
     return _binding_out(row)

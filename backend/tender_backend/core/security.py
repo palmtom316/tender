@@ -15,6 +15,7 @@ from fastapi import Depends, HTTPException, Request
 from psycopg import Connection
 from psycopg.errors import UndefinedTable
 
+from tender_backend.core.config import Settings, get_settings
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.user_repository import SessionRepository
 
@@ -33,15 +34,18 @@ class CurrentUser:
 
 
 # Phase 1: fixed tokens from env. Format: "token:role:name,token:role:name,..."
-def _load_token_map() -> dict[str, CurrentUser]:
+def _load_token_map(settings: Settings | None = None) -> dict[str, CurrentUser]:
     raw = os.environ.get("AUTH_TOKENS", "")
     if not raw:
-        # Development fallback — single admin token
-        return {
-            "dev-token": CurrentUser(
-                token="dev-token", role=Role.ADMIN, display_name="Developer"
-            )
-        }
+        env = (settings or get_settings()).app_env.lower()
+        if env in {"development", "dev", "test", "testing"}:
+            # Development fallback — single admin token.
+            return {
+                "dev-token": CurrentUser(
+                    token="dev-token", role=Role.ADMIN, display_name="Developer"
+                )
+            }
+        return {}
     token_map: dict[str, CurrentUser] = {}
     for entry in raw.split(","):
         parts = entry.strip().split(":")
@@ -59,20 +63,24 @@ _token_map: dict[str, CurrentUser] | None = None
 _sessions = SessionRepository()
 
 
-def _get_token_map() -> dict[str, CurrentUser]:
+def _get_token_map(settings: Settings | None = None) -> dict[str, CurrentUser]:
     global _token_map
     if _token_map is None:
-        _token_map = _load_token_map()
+        _token_map = _load_token_map(settings)
     return _token_map
 
 
-def get_current_user(request: Request, conn: Connection = Depends(get_db_conn)) -> CurrentUser:
+def get_current_user(
+    request: Request,
+    conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+) -> CurrentUser:
     """Extract and validate Bearer token from Authorization header."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
     token = auth[7:]
-    static_user = _get_token_map().get(token)
+    static_user = _get_token_map(settings).get(token)
     if static_user is not None:
         return static_user
 
