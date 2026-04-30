@@ -27,9 +27,9 @@
 
 - [x] ZIP/PDF 统一上传入口。
 - [x] ZIP 递归解包与文件分类。
-- [ ] Office 文档解析能力。
+- [x] Office 文档解析能力。
 - [ ] PDF 文本解析与 OCR/MinerU 兼容能力。
-- [ ] 统一 source chunk 数据模型。
+- [x] 统一 source chunk 数据模型。
 - [ ] AI 结构化约束抽取。
 - [ ] 约束确认与编辑页面。
 - [ ] 企业库、业绩库、人员库匹配。
@@ -80,16 +80,17 @@
 
 **目标：** 将 ZIP/PDF 中的内容统一解析为结构化文本块和表格块。
 
-- [ ] `.docx` 段落抽取。
-- [ ] `.docx` 标题层级识别。
-- [ ] `.docx` 表格抽取。
+- [x] `.docx` 段落抽取。
+- [x] `.docx` 标题层级识别。
+- [x] `.docx` 表格抽取。
 - [ ] `.docx` 页眉页脚和封面关键文本抽取。
-- [ ] `.xlsx` sheet 抽取。
+- [x] `.xlsx` sheet 抽取。
 - [ ] `.xlsx` 表头识别。
-- [ ] `.xlsx` 合并单元格还原。
-- [ ] `.xlsx` 行列定位保留。
+- [x] `.xlsx` 合并单元格还原。
+- [x] `.xlsx` 行列定位保留。
 - [ ] `.xlsx` 多 sheet 类型识别。
-- [ ] `.doc` 通过 LibreOffice headless 转 `.docx` 后解析。
+- [x] `.doc` 通过 LibreOffice headless 转 `.docx` 后解析。
+- [x] `.xls` 通过 LibreOffice headless 转 `.xlsx` 后解析。
 - [ ] `.wps` 尝试通过 LibreOffice 转 `.docx`。
 - [ ] `.wps` 转换失败时标记为人工确认。
 - [ ] 文本型 PDF 直接抽取文本。
@@ -114,10 +115,10 @@
 **验收标准：**
 
 - [ ] ZIP 和 PDF 都能产出统一解析块。
-- [ ] Excel 表格不丢 sheet、行列定位。
-- [ ] Word 表格可被后续 AI 抽取使用。
-- [ ] `.doc/.wps` 转换失败不会阻断整个任务。
-- [ ] 解析结果可按来源文件查看。
+- [x] Excel 表格不丢 sheet、行列定位。
+- [x] Word 表格可被后续 AI 抽取使用。
+- [x] `.doc/.wps` 转换失败不会阻断整个任务。
+- [x] 解析结果可按来源文件查看。
 
 ## Phase 3: 核心约束抽取
 
@@ -424,7 +425,7 @@
 
 - [ ] 新增 `tender_document` 表。
 - [ ] 新增 `tender_document_file` 表。
-- [ ] 新增 `source_chunk` 表。
+- [x] 新增 `source_chunk` 表。
 - [ ] 新增或扩展 `project_requirement` 约束字段。
 - [ ] 新增 `requirement_match` 表。
 - [ ] 新增 `bid_outline` 表。
@@ -440,9 +441,9 @@
 - [ ] `GET /api/projects/{project_id}/tender-documents`
 - [ ] `GET /api/tender-documents/{id}`
 - [ ] `GET /api/tender-documents/{id}/files`
-- [ ] `POST /api/tender-documents/{id}/parse`
+- [x] `POST /api/tender-documents/{id}/parse`
 - [ ] `GET /api/tender-documents/{id}/parse-status`
-- [ ] `GET /api/tender-documents/{id}/source-chunks`
+- [x] `GET /api/tender-documents/{id}/source-chunks`
 - [ ] `POST /api/tender-documents/{id}/extract-constraints`
 - [ ] `GET /api/projects/{project_id}/requirements`
 - [ ] `PATCH /api/requirements/{id}`
@@ -480,9 +481,9 @@
 - [ ] ZIP 解包测试。
 - [ ] GBK 文件名测试。
 - [ ] 内层 ZIP 递归测试。
-- [ ] `.docx` 解析测试。
-- [ ] `.xlsx` 解析测试。
-- [ ] `.doc` 转换测试。
+- [x] `.docx` 解析测试。
+- [x] `.xlsx` 解析测试。
+- [x] `.doc` 转换测试。
 - [ ] `.wps` 转换失败降级测试。
 - [ ] PDF 文本解析测试。
 - [ ] 扫描型 PDF OCR 测试。

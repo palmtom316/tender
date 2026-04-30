@@ -56,11 +56,32 @@ def _apply_tender_document_schema(conn: psycopg.Connection) -> None:
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS source_chunk (
+      id UUID PRIMARY KEY,
+      tender_document_id UUID NOT NULL REFERENCES tender_document(id) ON DELETE CASCADE,
+      tender_document_file_id UUID NOT NULL REFERENCES tender_document_file(id) ON DELETE CASCADE,
+      chunk_type VARCHAR(32) NOT NULL,
+      source_file TEXT NOT NULL,
+      source_locator TEXT NOT NULL,
+      title TEXT,
+      text TEXT,
+      table_json JSONB,
+      sheet_name TEXT,
+      row_start INT,
+      row_end INT,
+      paragraph_index INT,
+      sort_order INT NOT NULL DEFAULT 0,
+      confidence DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+      metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     """)
     conn.commit()
 
 
 def _reset_tables(conn: psycopg.Connection) -> None:
+    conn.execute("DELETE FROM source_chunk;")
     conn.execute("DELETE FROM tender_document_file;")
     conn.execute("DELETE FROM tender_document;")
     conn.execute("DELETE FROM project_file;")
@@ -159,6 +180,53 @@ def test_upload_pdf_tender_document(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         assert len(body["files"]) == 1
         assert body["files"][0]["classification"] == "uploaded_pdf"
         assert body["files"][0]["is_parsable"] is True
+    finally:
+        client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_tables(conn)
+
+
+def test_parse_uploaded_zip_office_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = _db_url()
+    if not db_url:
+        pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    sample = Path(__file__).resolve().parents[3] / "docs" / "国网招标文件" / "包1_完整招标文件_REDACTED.zip"
+    if not sample.is_file():
+        pytest.skip("real SGCC tender ZIP sample is not available")
+
+    monkeypatch.setenv("TENDER_DOCUMENT_STORAGE_ROOT", str(tmp_path / "tender-documents"))
+    get_settings.cache_clear()
+
+    with psycopg.connect(db_url) as conn:
+        _apply_tender_document_schema(conn)
+        _reset_tables(conn)
+
+    client = SyncASGIClient(app)
+    try:
+        project_res = client.post("/api/projects", json={"name": "Office 解析"})
+        assert project_res.status_code == 200
+        project_id = UUID(project_res.json()["id"])
+
+        upload = client.post(
+            f"/api/projects/{project_id}/tender-documents",
+            files={"file": (sample.name, sample.read_bytes(), "application/zip")},
+        )
+        assert upload.status_code == 200
+        tender_document_id = UUID(upload.json()["id"])
+
+        parsed = client.post(f"/api/tender-documents/{tender_document_id}/parse")
+        assert parsed.status_code == 200
+        body = parsed.json()
+        assert body["parsed_file_count"] > 0
+        assert body["chunk_count"] > 0
+        assert any(row["filename"].endswith(".docx") and row["parse_status"] == "completed" for row in body["files"])
+
+        chunks = client.get(f"/api/tender-documents/{tender_document_id}/source-chunks")
+        assert chunks.status_code == 200
+        rows = chunks.json()
+        assert any(row["chunk_type"] == "paragraph" for row in rows)
+        assert any(row["chunk_type"] == "table" for row in rows)
     finally:
         client.close()
         with psycopg.connect(db_url) as conn:

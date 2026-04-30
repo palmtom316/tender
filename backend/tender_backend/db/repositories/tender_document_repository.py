@@ -85,6 +85,14 @@ class TenderDocumentRepository:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_file(self, conn: Connection, *, tender_document_file_id: UUID) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                "SELECT * FROM tender_document_file WHERE id = %s",
+                (tender_document_file_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def list_documents(self, conn: Connection, *, project_id: UUID) -> list[dict[str, Any]]:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(
@@ -169,4 +177,100 @@ class TenderDocumentRepository:
                 """,
                 (tender_document_id,),
             ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_file_parse_status(
+        self,
+        conn: Connection,
+        *,
+        tender_document_file_id: UUID,
+        parse_status: str,
+        error: str | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                UPDATE tender_document_file
+                SET parse_status = %s,
+                    error = %s,
+                    metadata_json = COALESCE(%s, metadata_json),
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    parse_status,
+                    error,
+                    Jsonb(metadata_json) if metadata_json is not None else None,
+                    tender_document_file_id,
+                ),
+            ).fetchone()
+        conn.commit()
+        return dict(row) if row else None
+
+    def replace_source_chunks(
+        self,
+        conn: Connection,
+        *,
+        tender_document_id: UUID,
+        tender_document_file_id: UUID,
+        chunks: list[dict[str, Any]],
+    ) -> int:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM source_chunk WHERE tender_document_file_id = %s",
+                (tender_document_file_id,),
+            )
+            for index, chunk in enumerate(chunks):
+                cur.execute(
+                    """
+                    INSERT INTO source_chunk (
+                      id, tender_document_id, tender_document_file_id, chunk_type,
+                      source_file, source_locator, title, text, table_json, sheet_name,
+                      row_start, row_end, paragraph_index, sort_order, confidence, metadata_json
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        uuid4(),
+                        tender_document_id,
+                        tender_document_file_id,
+                        chunk["chunk_type"],
+                        chunk["source_file"],
+                        chunk["source_locator"],
+                        chunk.get("title"),
+                        chunk.get("text"),
+                        Jsonb(chunk.get("table_json")) if chunk.get("table_json") is not None else None,
+                        chunk.get("sheet_name"),
+                        chunk.get("row_start"),
+                        chunk.get("row_end"),
+                        chunk.get("paragraph_index"),
+                        chunk.get("sort_order", index),
+                        chunk.get("confidence", 1.0),
+                        Jsonb(chunk.get("metadata_json") or {}),
+                    ),
+                )
+        conn.commit()
+        return len(chunks)
+
+    def list_source_chunks(
+        self,
+        conn: Connection,
+        *,
+        tender_document_id: UUID,
+        tender_document_file_id: UUID | None = None,
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT *
+            FROM source_chunk
+            WHERE tender_document_id = %s
+        """
+        params: list[Any] = [tender_document_id]
+        if tender_document_file_id is not None:
+            query += " AND tender_document_file_id = %s"
+            params.append(tender_document_file_id)
+        query += " ORDER BY source_file, sort_order, created_at"
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(query, params).fetchall()
         return [dict(row) for row in rows]
