@@ -488,6 +488,14 @@ export interface TemplatePackageCategory {
   metadata_json: Record<string, unknown>;
 }
 
+export interface TemplatePackageUploadPayload {
+  project_type: string;
+  template_kind: "business" | "technical";
+  display_name?: string;
+  category_code?: string;
+  file: File;
+}
+
 export function listTemplatePackages(options?: {
   signal?: AbortSignal;
   categoryCode?: string;
@@ -589,6 +597,19 @@ export function fetchTemplateFieldMappingSuggestions(
 ): Promise<TemplateFieldMappingSuggestions> {
   return request<TemplateFieldMappingSuggestions>(`/template-items/${itemId}/field-mapping-suggestions`, {
     signal: options?.signal,
+  });
+}
+
+export function uploadTemplatePackage(data: TemplatePackageUploadPayload): Promise<TemplatePackageDetail> {
+  const form = new FormData();
+  form.append("project_type", data.project_type);
+  form.append("template_kind", data.template_kind);
+  if (data.display_name) form.append("display_name", data.display_name);
+  if (data.category_code) form.append("category_code", data.category_code);
+  form.append("file", data.file);
+  return request<TemplatePackageDetail>("/template-packages/upload", {
+    method: "POST",
+    body: form,
   });
 }
 

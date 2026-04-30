@@ -13,6 +13,7 @@ The following variables are especially important for the template-package and ma
 - `TEMPLATE_IMPORT_ROOTS`
   - Required for `POST /api/template-packages/import`.
   - Use a path-separated allowlist of directories the server may read template packages from.
+  - Template packages are single-DOCX documents. Import may point to a `.docx` file or a directory containing exactly one `.docx` file.
   - On macOS/Linux use `:` as the separator.
   - Example: `/workspace/data/template_imports:/workspace/shared/template_packages`
 - `EVIDENCE_UPLOAD_DIR`

@@ -10,7 +10,9 @@ import pytest
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemCreate
 from tender_backend.services.template_service.package_importer import (
+    SingleDocxTemplateSource,
     build_template_items_from_directory,
+    _default_package_key,
     infer_package_type,
     import_template_package_from_directory,
 )
@@ -22,27 +24,67 @@ def test_infer_package_type_from_chinese_folder_name() -> None:
     assert infer_package_type("其他资料") == "unknown"
 
 
+def test_default_package_key_for_chinese_docx_uses_stable_hash() -> None:
+    key = _default_package_key(Path("商务标完整模板.docx"), "business")
+
+    assert key.startswith("template-package-")
+    assert key.endswith("-business")
+    assert key == _default_package_key(Path("商务标完整模板.docx"), "business")
+
+
 def test_build_template_items_from_directory_infers_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
     import_root = tmp_path / "imports"
     import_root.mkdir()
     nested = import_root / "20258B商务文件"
     nested.mkdir()
-    (nested / "1.商务偏差表.docx").write_bytes(b"docx")
-    (nested / "5.1.基本情况表.docx").write_bytes(b"docx")
-    (nested / "23.2.投标保证金缴纳证明材料（汇款底单或保单或保函的彩色扫描件）.docx").write_bytes(b"docx")
-    (nested / "24.认为需要加以说明的其它商务内容（如有）.docx").write_bytes(b"docx")
+    template_path = nested / "20258B商务文件.docx"
+    template_path.write_bytes(b"docx")
 
     monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
     get_settings.cache_clear()
     items = build_template_items_from_directory(nested)
 
-    assert [item.item_code for item in items] == ["1", "5.1", "23.2", "24"]
-    assert items[0].item_name == "商务偏差表"
-    assert items[1].item_type == "table"
-    assert items[2].item_type == "evidence"
-    assert items[2].render_mode == "attachment"
-    assert items[3].is_required is False
+    assert len(items) == 1
+    assert items[0].item_code is None
+    assert items[0].item_name == "20258B商务文件"
+    assert items[0].filename == "20258B商务文件.docx"
+    assert items[0].relative_path == "20258B商务文件.docx"
+    assert items[0].item_type == "document"
+    assert items[0].render_mode == "single_docx"
+
+
+def test_build_template_items_from_directory_rejects_multiple_docx_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    import_root = tmp_path / "imports"
+    source_dir = import_root / "20258B商务文件"
+    source_dir.mkdir(parents=True)
+    (source_dir / "商务标完整模板.docx").write_bytes(b"docx")
+    (source_dir / "资格审查完整模板.docx").write_bytes(b"docx")
+
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    get_settings.cache_clear()
+
+    with pytest.raises(ValueError, match="Single-DOCX template packages are required"):
+        build_template_items_from_directory(source_dir)
+
+
+def test_build_template_items_from_docx_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    import_root = tmp_path / "imports"
+    import_root.mkdir()
+    template_path = import_root / "商务标完整模板.docx"
+    template_path.write_bytes(b"docx")
+
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    get_settings.cache_clear()
+
+    items = build_template_items_from_directory(template_path)
+
+    assert len(items) == 1
+    assert items[0].filename == "商务标完整模板.docx"
+    assert items[0].relative_path == "商务标完整模板.docx"
+    assert items[0].render_mode == "single_docx"
 
 
 def test_build_template_items_from_directory_rejects_empty_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,6 +163,10 @@ def test_import_template_package_from_directory_uses_single_transaction(monkeypa
     monkeypatch.setattr(
         "tender_backend.services.template_service.package_importer.get_settings",
         lambda: SimpleNamespace(template_import_roots=str(tmp_path / "imports")),
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.package_importer._resolve_single_docx_template_source",
+        lambda source_dir: SingleDocxTemplateSource(root_dir=root_dir, docx_path=root_dir / "20258B商务文件.docx"),
     )
     monkeypatch.setattr(
         "tender_backend.services.template_service.package_importer.BidTemplatePackageRepository",

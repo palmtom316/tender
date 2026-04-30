@@ -30,6 +30,7 @@ import {
   listTemplatePackageCategories,
   listTemplatePackages,
   updateTemplateBindingRule,
+  uploadTemplatePackage,
 } from "../../../lib/api";
 
 type BindingDraft = {
@@ -245,6 +246,10 @@ export function TemplateFieldWorkbench() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [draft, setDraft] = useState<BindingDraft>(createEmptyDraft(null));
   const [saveError, setSaveError] = useState("");
+  const [uploadProjectType, setUploadProjectType] = useState("");
+  const [uploadTemplateKind, setUploadTemplateKind] = useState<"business" | "technical">("business");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState("");
 
   const categoriesQuery = useQuery({
     queryKey: ["template-package-categories"],
@@ -429,6 +434,34 @@ export function TemplateFieldWorkbench() {
     },
   });
 
+  const uploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!uploadProjectType.trim()) throw new Error("请填写项目类型");
+      if (!uploadFile) throw new Error("请选择一个 DOCX 模板");
+      if (!uploadFile.name.toLowerCase().endsWith(".docx")) throw new Error("模板文件必须是 DOCX");
+      return uploadTemplatePackage({
+        project_type: uploadProjectType.trim(),
+        template_kind: uploadTemplateKind,
+        display_name: `${uploadProjectType.trim()}${uploadTemplateKind === "business" ? "商务标模板" : "技术标模板"}`,
+        category_code: selectedCategoryCode || undefined,
+        file: uploadFile,
+      });
+    },
+    onSuccess: (pkg) => {
+      setSelectedPackageId(pkg.id);
+      setSelectedItemId(pkg.items[0]?.id ?? null);
+      setSelectedBindingId(null);
+      setUploadFile(null);
+      setUploadError("");
+      void queryClient.invalidateQueries({ queryKey: ["template-packages"] });
+      void queryClient.invalidateQueries({ queryKey: ["template-packages", selectedCategoryCode] });
+      void queryClient.invalidateQueries({ queryKey: ["template-package-detail", pkg.id] });
+    },
+    onError: (error) => {
+      setUploadError(error instanceof Error ? error.message : "上传模板失败");
+    },
+  });
+
   const applySuggestion = (group: TemplateFieldMappingSuggestionGroup) => {
     setDraft((current) => ({
       ...current,
@@ -458,6 +491,66 @@ export function TemplateFieldWorkbench() {
   return (
     <div className="template-field-shell">
       <aside className="template-field-rail">
+        <section className="template-panel template-panel--rail">
+          <div className="template-panel__header">
+            <div>
+              <p className="template-panel__eyebrow">模板上传</p>
+              <h2>单 DOCX</h2>
+            </div>
+            <Badge variant="info">{uploadTemplateKind === "business" ? "商务" : "技术"}</Badge>
+          </div>
+          <form
+            className="template-upload-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              uploadMutation.mutate();
+            }}
+          >
+            <div className="form-group form-group--tight">
+              <label className="form-label">项目类型</label>
+              <input
+                className="clay-input"
+                value={uploadProjectType}
+                onChange={(event) => setUploadProjectType(event.target.value)}
+                placeholder="如：配网施工类"
+              />
+            </div>
+            <div className="template-kind-toggle" role="radiogroup" aria-label="模板类型">
+              <button
+                type="button"
+                className={uploadTemplateKind === "business" ? "is-active" : ""}
+                onClick={() => setUploadTemplateKind("business")}
+              >
+                商务标
+              </button>
+              <button
+                type="button"
+                className={uploadTemplateKind === "technical" ? "is-active" : ""}
+                onClick={() => setUploadTemplateKind("technical")}
+              >
+                技术标
+              </button>
+            </div>
+            <label className="template-docx-picker">
+              <Icon name="upload-cloud" size={18} />
+              <span>{uploadFile ? uploadFile.name : "选择一个 DOCX 模板"}</span>
+              <input
+                type="file"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <ClayButton
+              type="submit"
+              size="sm"
+              disabled={!uploadProjectType.trim() || !uploadFile || uploadMutation.isPending}
+            >
+              {uploadMutation.isPending ? "上传中..." : "上传模板"}
+            </ClayButton>
+            {uploadError && <p className="text-error">{uploadError}</p>}
+          </form>
+        </section>
+
         <section className="template-panel template-panel--rail">
           <div className="template-panel__header">
             <div>
@@ -506,7 +599,7 @@ export function TemplateFieldWorkbench() {
               >
                 <span className="template-list__title">{pkg.display_name}</span>
                 <span className="template-list__meta">
-                  {(categoriesQuery.data ?? []).find((category) => category.code === pkg.category_code)?.display_name ?? "未分类"} / {pkg.item_count} 个模板项
+                  {(categoriesQuery.data ?? []).find((category) => category.code === pkg.category_code)?.display_name ?? "未分类"} / 单 DOCX 模板
                 </span>
               </button>
             ))}
@@ -584,7 +677,7 @@ export function TemplateFieldWorkbench() {
               <p className="template-panel__eyebrow">模板项字段面板</p>
               <h2>{selectedItem ? `${selectedItem.item_code ?? ""} ${selectedItem.item_name}`.trim() : "请选择模板项"}</h2>
               <p className="template-panel__description">
-                {selectedItem ? selectedItem.relative_path : "从左侧选择模板包和模板项后，配置数据绑定、字段映射和输出键。"}
+                {selectedItem ? selectedItem.relative_path : "选择单 DOCX 模板后，配置整本文档的数据绑定、字段映射和输出键。"}
               </p>
             </div>
             {selectedItem && (

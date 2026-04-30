@@ -6,6 +6,7 @@ from uuid import UUID
 
 import psycopg
 import pytest
+from docx import Document
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.migrations import load_initial_schema_sql
@@ -90,9 +91,9 @@ def test_import_and_list_template_packages(tmp_path: Path, monkeypatch: pytest.M
     import_root.mkdir()
     source_dir = import_root / "20258B商务文件"
     source_dir.mkdir()
-    (source_dir / "1.商务偏差表.docx").write_bytes(b"docx")
-    (source_dir / "5.1.基本情况表.docx").write_bytes(b"docx")
-    (source_dir / "23.1.保证金明细表.docx").write_bytes(b"docx")
+    template = Document()
+    template.add_paragraph("投标人：{{ company.company_name }}")
+    template.save(source_dir / "20258B商务文件.docx")
     monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
     get_settings.cache_clear()
 
@@ -111,9 +112,10 @@ def test_import_and_list_template_packages(tmp_path: Path, monkeypatch: pytest.M
         body = response.json()
         package_id = UUID(body["id"])
         assert body["package_type"] == "business"
-        assert body["item_count"] == 3
-        assert body["items"][0]["item_code"] == "1"
-        assert body["items"][1]["item_code"] == "5.1"
+        assert body["item_count"] == 1
+        assert body["items"][0]["item_code"] is None
+        assert body["items"][0]["item_type"] == "document"
+        assert body["items"][0]["render_mode"] == "single_docx"
 
         listed = client.get("/api/template-packages")
         assert listed.status_code == 200
@@ -121,7 +123,7 @@ def test_import_and_list_template_packages(tmp_path: Path, monkeypatch: pytest.M
 
         detail = client.get(f"/api/template-packages/{package_id}")
         assert detail.status_code == 200
-        assert detail.json()["items"][2]["item_name"] == "保证金明细表"
+        assert detail.json()["items"][0]["item_name"] == "20258B商务文件"
 
         anon_client = SyncASGIClient(app)
         anon_response = anon_client.get("/api/template-packages")

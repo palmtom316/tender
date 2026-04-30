@@ -1402,6 +1402,61 @@
   top: var(--space-4);
 }
 
+.template-upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.template-kind-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-translucent);
+  padding: 3px;
+}
+
+.template-kind-toggle button {
+  min-height: 34px;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.template-kind-toggle button.is-active {
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  box-shadow: var(--shadow-soft);
+}
+
+.template-docx-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 42px;
+  padding: 0 var(--space-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-subtle-translucent);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.template-docx-picker:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text);
+}
+
+.template-docx-picker input {
+  display: none;
+}
+
 .template-panel__header,
 .template-panel__header--hero {
   display: flex;

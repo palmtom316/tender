@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 from docx import Document
 
@@ -10,6 +12,7 @@ from tender_backend.services.template_service.docx_renderer import (
     _render_people,
     _render_performances,
     _sanitize_filename,
+    render_template_item_docx,
 )
 
 
@@ -166,3 +169,48 @@ def test_render_financial_statements_builds_year_matrix() -> None:
     assert doc.tables[0].rows[0].cells[2].text == "2024"
     body_text = "\n".join(p.text for p in doc.paragraphs)
     assert "近年财务状况表" in body_text
+
+
+def test_render_template_item_docx_renders_single_docx_template(tmp_path: Path, monkeypatch) -> None:
+    package_id = uuid4()
+    item_id = uuid4()
+    template_path = tmp_path / "商务标完整模板.docx"
+    template = Document()
+    template.add_paragraph("投标人：{{ company.company_name }}")
+    template.save(template_path)
+
+    item = SimpleNamespace(
+        id=item_id,
+        package_id=package_id,
+        item_name="商务标完整模板",
+        filename=template_path.name,
+        relative_path=template_path.name,
+        render_mode="single_docx",
+        item_type="document",
+    )
+    package = SimpleNamespace(id=package_id, source_root=str(tmp_path))
+
+    class _Repo:
+        def get_item_by_id(self, conn, *, item_id):
+            return item
+
+        def get_by_id(self, conn, *, package_id):
+            return package
+
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.BidTemplatePackageRepository",
+        lambda: _Repo(),
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.build_item_render_context",
+        lambda conn, *, item_id: {
+            "ready": True,
+            "missing_required_bindings": [],
+            "context": {"company": {"company_name": "REDACTED"}},
+        },
+    )
+
+    result = render_template_item_docx(None, item_id=item_id, output_dir=tmp_path / "out")
+
+    rendered = Document(result["output_path"])
+    assert "投标人：REDACTED" in "\n".join(p.text for p in rendered.paragraphs)

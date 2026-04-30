@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import re
 from uuid import UUID
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
+from tender_backend.core.config import Settings, get_settings
+from tender_backend.core.path_safety import parse_root_list
 from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
@@ -17,6 +21,8 @@ from tender_backend.services.template_service.package_importer import (
 router = APIRouter(tags=["template-packages"], dependencies=[Depends(get_current_user)])
 
 _repo = BidTemplatePackageRepository()
+_DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PACKAGE_KEY_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class TemplatePackageImportBody(BaseModel):
@@ -61,6 +67,33 @@ class TemplatePackageOut(BaseModel):
 
 class TemplatePackageDetailOut(TemplatePackageOut):
     items: list[TemplateItemOut]
+
+
+def _sanitize_package_key_part(value: str) -> str:
+    cleaned = _PACKAGE_KEY_SAFE_RE.sub("-", value).strip("-._").lower()
+    return cleaned or "template"
+
+
+async def _save_uploaded_template_docx(file: UploadFile, settings: Settings) -> str:
+    roots = parse_root_list(settings.template_import_roots)
+    if not roots:
+        raise HTTPException(status_code=400, detail="template import roots are not configured")
+    if not (file.filename or "").lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="template file must be a DOCX file")
+    if file.content_type and file.content_type not in {_DOCX_CONTENT_TYPE, "application/octet-stream"}:
+        raise HTTPException(status_code=400, detail="template file content type is not allowed")
+
+    content = await file.read()
+    if not content.startswith(b"PK\x03\x04"):
+        raise HTTPException(status_code=400, detail="template file is not a valid DOCX archive")
+
+    upload_dir = roots[0] / "uploaded_template_packages"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    suffix_dir = upload_dir / str(uuid4())
+    suffix_dir.mkdir()
+    template_path = suffix_dir / "template.docx"
+    template_path.write_bytes(content)
+    return str(template_path)
 
 
 def _package_out(conn: Connection, package_id: UUID) -> TemplatePackageDetailOut | None:
@@ -153,6 +186,51 @@ async def import_template_package(
             display_name=(payload.display_name or "").strip() or None,
             package_type=(payload.package_type or "").strip() or None,
             category_code=(payload.category_code or "").strip() or None,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result = _package_out(conn, UUID(imported.package_id))
+    assert result is not None
+    return result
+
+
+@router.post("/template-packages/upload", response_model=TemplatePackageDetailOut, status_code=201)
+async def upload_template_package(
+    project_type: str = Form(...),
+    template_kind: str = Form(...),
+    display_name: str | None = Form(None),
+    category_code: str | None = Form(None),
+    file: UploadFile = File(...),
+    conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+) -> TemplatePackageDetailOut:
+    normalized_project_type = project_type.strip()
+    normalized_kind = template_kind.strip()
+    if not normalized_project_type:
+        raise HTTPException(status_code=400, detail="project_type is required")
+    if normalized_kind not in {"business", "technical"}:
+        raise HTTPException(status_code=400, detail="template_kind must be business or technical")
+
+    source_path = await _save_uploaded_template_docx(file, settings)
+    resolved_display_name = (display_name or "").strip() or (
+        f"{normalized_project_type}{'商务标模板' if normalized_kind == 'business' else '技术标模板'}"
+    )
+    package_key = "-".join(
+        [
+            _sanitize_package_key_part(normalized_project_type),
+            normalized_kind,
+            "single-docx",
+        ]
+    )
+    try:
+        imported = import_template_package_from_directory(
+            conn,
+            source_dir=source_path,
+            package_key=package_key,
+            display_name=resolved_display_name,
+            package_type=normalized_kind,
+            category_code=(category_code or "").strip() or None,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

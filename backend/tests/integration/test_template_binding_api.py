@@ -252,9 +252,11 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
     import_root.mkdir()
     source_dir = import_root / "20258B商务文件"
     source_dir.mkdir()
-    (source_dir / "5.1.基本情况表.docx").write_bytes(b"docx")
-    (source_dir / "6.1.人员汇总表及人员简历表.docx").write_bytes(b"docx")
-    (source_dir / "7.1.资质证书证明材料.docx").write_bytes(b"docx")
+    template = Document()
+    template.add_paragraph("投标人：{{ company.company_name }}")
+    template.add_paragraph("项目人员数：{{ people|length }}")
+    template.add_paragraph("附件数：{{ assets|length }}")
+    template.save(source_dir / "20258B商务文件.docx")
     upload_root = tmp_path / "uploads"
     upload_root.mkdir()
     monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
@@ -272,9 +274,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         assert imported.status_code == 200
         package = imported.json()
         package_id = UUID(package["id"])
-        basic_item_id = UUID(package["items"][0]["id"])
-        people_item_id = UUID(package["items"][1]["id"])
-        evidence_item_id = UUID(package["items"][2]["id"])
+        document_item_id = UUID(package["items"][0]["id"])
 
         company = client.post(
             "/api/master-data/company-profiles",
@@ -316,7 +316,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         assert evidence_asset.status_code == 201
 
         binding1 = client.post(
-            f"/api/template-items/{basic_item_id}/bindings",
+            f"/api/template-items/{document_item_id}/bindings",
             json={
                 "binding_name": "company_basic",
                 "source_type": "company_profile",
@@ -334,14 +334,14 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         assert reimported.status_code == 200
         reimported_body = reimported.json()
         assert UUID(reimported_body["id"]) == package_id
-        assert UUID(reimported_body["items"][0]["id"]) == basic_item_id
+        assert UUID(reimported_body["items"][0]["id"]) == document_item_id
 
-        preserved_bindings = client.get(f"/api/template-items/{basic_item_id}/bindings")
+        preserved_bindings = client.get(f"/api/template-items/{document_item_id}/bindings")
         assert preserved_bindings.status_code == 200
         assert [row["binding_name"] for row in preserved_bindings.json()] == ["company_basic"]
 
         binding2 = client.post(
-            f"/api/template-items/{people_item_id}/bindings",
+            f"/api/template-items/{document_item_id}/bindings",
             json={
                 "binding_name": "team_people",
                 "source_type": "person_profile",
@@ -353,7 +353,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         assert binding2.status_code == 201
         binding2_id = UUID(binding2.json()["id"])
         binding3 = client.post(
-            f"/api/template-items/{evidence_item_id}/bindings",
+            f"/api/template-items/{document_item_id}/bindings",
             json={
                 "binding_name": "certificate_assets",
                 "source_type": "evidence_asset",
@@ -370,20 +370,21 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         preview = client.get(f"/api/template-packages/{package_id}/context-preview")
         assert preview.status_code == 200
         body = preview.json()
-        assert body["items"][0]["bindings"][0]["data"]["company_name"] == "REDACTED"
-        assert body["items"][0]["bindings"][0]["data"]["company_title"] == "REDACTED"
-        assert body["items"][0]["bindings"][0]["data"]["contact_summary"] == "王莉莉"
-        assert body["items"][1]["bindings"][0]["matched_count"] == 1
-        assert body["items"][2]["bindings"][0]["matched_count"] == 1
+        preview_bindings = {row["binding_name"]: row for row in body["items"][0]["bindings"]}
+        assert preview_bindings["company_basic"]["data"]["company_name"] == "REDACTED"
+        assert preview_bindings["company_basic"]["data"]["company_title"] == "REDACTED"
+        assert preview_bindings["company_basic"]["data"]["contact_summary"] == "王莉莉"
+        assert preview_bindings["team_people"]["matched_count"] == 1
+        assert preview_bindings["certificate_assets"]["matched_count"] == 1
 
-        item_render = client.get(f"/api/template-items/{basic_item_id}/render-context")
+        item_render = client.get(f"/api/template-items/{document_item_id}/render-context")
         assert item_render.status_code == 200
         assert item_render.json()["ready"] is True
         assert item_render.json()["context"]["company"]["company_name"] == "REDACTED"
         assert item_render.json()["context"]["company"]["company_title"] == "REDACTED"
         assert item_render.json()["bindings"][0]["field_mapping_mode"] == "augment"
 
-        suggestions = client.get(f"/api/template-items/{basic_item_id}/field-mapping-suggestions")
+        suggestions = client.get(f"/api/template-items/{document_item_id}/field-mapping-suggestions")
         assert suggestions.status_code == 200
         assert any(
             mapping["target_field"] == "company_title"
@@ -392,24 +393,26 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
 
         package_render = client.get(f"/api/template-packages/{package_id}/render-context")
         assert package_render.status_code == 200
-        assert package_render.json()["ready_item_count"] == 3
-        assert package_render.json()["total_item_count"] == 3
+        assert package_render.json()["ready_item_count"] == 1
+        assert package_render.json()["total_item_count"] == 1
 
         preflight = client.get(f"/api/template-packages/{package_id}/render-preflight")
         assert preflight.status_code == 200
         preflight_body = preflight.json()
         assert preflight_body["ready"] is True
-        assert preflight_body["ready_item_count"] == 3
+        assert preflight_body["ready_item_count"] == 1
         assert preflight_body["blocked_item_count"] == 0
-        evidence_preflight = [item for item in preflight_body["items"] if item["item_id"] == str(evidence_item_id)]
-        assert len(evidence_preflight) == 1
-        assert evidence_preflight[0]["asset_count"] == 1
-        assert evidence_preflight[0]["invalid_asset_count"] == 0
+        assert set(preflight_body["items"][0]["context_keys"]) == {"assets", "company", "people"}
 
-        rendered = client.post(f"/api/template-items/{basic_item_id}/render-docx")
+        rendered = client.post(f"/api/template-items/{document_item_id}/render-docx")
         assert rendered.status_code == 200
         assert rendered.json()["ready"] is True
         assert rendered.json()["output_path"].endswith(".docx")
+        rendered_doc = Document(rendered.json()["output_path"])
+        rendered_text = "\n".join(paragraph.text for paragraph in rendered_doc.paragraphs)
+        assert "投标人：REDACTED" in rendered_text
+        assert "项目人员数：1" in rendered_text
+        assert "附件数：1" in rendered_text
 
         bundle = client.post(
             f"/api/template-packages/{package_id}/render-bundle",
@@ -417,22 +420,12 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         )
         assert bundle.status_code == 200
         bundle_body = bundle.json()
-        assert bundle_body["rendered_count"] == 3
+        assert bundle_body["rendered_count"] == 1
         assert bundle_body["failed_count"] == 0
         assert Path(bundle_body["output_dir"]).exists()
         assert bundle_body["items"][0]["output_path"].endswith(".docx")
         assert Path(bundle_body["items"][0]["output_path"]).exists()
         assert bundle_body["zip_path"] is None
-        evidence_outputs = [item for item in bundle_body["items"] if item["item_id"] == str(evidence_item_id)]
-        assert len(evidence_outputs) == 1
-        assert evidence_outputs[0]["copied_asset_count"] == 1
-        assert evidence_outputs[0]["embedded_preview_count"] == 1
-        evidence_manifest = Path(evidence_outputs[0]["output_path"])
-        assert evidence_manifest.exists()
-        assert (evidence_manifest.parent / f"{evidence_manifest.stem}_attachments" / "quality-cert.pdf").exists()
-        embedded_doc = Document(str(evidence_manifest))
-        assert embedded_doc.paragraphs[0].text == "（一）资质证书证明材料"
-        assert len(embedded_doc.inline_shapes) >= 1
 
         zipped_bundle = client.post(
             f"/api/template-packages/{package_id}/render-bundle",
@@ -451,16 +444,16 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         assert updated.status_code == 200
         assert updated.json()["selection_mode"] == "first"
 
-        listed = client.get(f"/api/template-items/{people_item_id}/bindings")
+        listed = client.get(f"/api/template-items/{document_item_id}/bindings")
         assert listed.status_code == 200
-        assert len(listed.json()) == 1
+        assert len(listed.json()) == 2
 
         deleted = client.delete(f"/api/template-bindings/{binding2_id}")
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
 
         anon_client = SyncASGIClient(app)
-        unauthorized = anon_client.get(f"/api/template-items/{people_item_id}/bindings")
+        unauthorized = anon_client.get(f"/api/template-items/{document_item_id}/bindings")
         assert unauthorized.status_code == 401
     finally:
         client.close()

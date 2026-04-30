@@ -5,9 +5,11 @@ from pathlib import Path
 from uuid import UUID
 
 from docx import Document
+from docxtpl import DocxTemplate
 from psycopg import Connection
 
 from tender_backend.core.config import get_settings
+from tender_backend.core.path_safety import ensure_path_within_root
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import build_item_render_context
 
@@ -264,6 +266,42 @@ def _render_generic_context(doc: Document, context: dict) -> None:
             doc.add_paragraph("" if value is None else str(value))
 
 
+def _resolve_item_template_path(conn: Connection, item) -> Path:
+    repo = BidTemplatePackageRepository()
+    package = repo.get_by_id(conn, package_id=item.package_id)
+    if package is None:
+        raise LookupError("template package not found")
+
+    root = Path(package.source_root)
+    try:
+        return ensure_path_within_root(root / item.relative_path, root, label="template item source path")
+    except ValueError as exc:
+        raise FileNotFoundError(str(exc)) from exc
+
+
+def _render_single_docx_template(
+    conn: Connection,
+    *,
+    item,
+    context: dict,
+    output_dir: Path | None,
+    output_filename: str | None,
+) -> Path:
+    template_path = _resolve_item_template_path(conn, item)
+    if not template_path.is_file():
+        raise FileNotFoundError(f"template source file not found: {template_path}")
+
+    doc = DocxTemplate(str(template_path))
+    doc.render(context)
+
+    root = output_dir or get_settings().template_render_root
+    root.mkdir(parents=True, exist_ok=True)
+    filename = output_filename or _sanitize_filename(f"{item.item_name}.docx")
+    output_path = root / filename
+    doc.save(str(output_path))
+    return output_path
+
+
 def render_template_item_docx(
     conn: Connection,
     *,
@@ -282,6 +320,23 @@ def render_template_item_docx(
         raise ValueError(f"template item is not ready for rendering: missing {missing}")
 
     context = render_context["context"]
+    if item.render_mode == "single_docx" or item.item_type == "document":
+        output_path = _render_single_docx_template(
+            conn,
+            item=item,
+            context=context,
+            output_dir=output_dir,
+            output_filename=output_filename,
+        )
+        return {
+            "item_id": str(item.id),
+            "item_name": item.item_name,
+            "filename": item.filename,
+            "output_path": str(output_path),
+            "ready": True,
+            "context_keys": sorted(context.keys()),
+        }
+
     doc = Document()
     doc.add_heading(item.item_name, level=1)
 
