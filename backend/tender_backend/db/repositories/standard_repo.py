@@ -406,6 +406,34 @@ class StandardRepository:
             ).fetchone()
             return row[0] if row else 0
 
+    def list_matching_clauses(self, conn: Connection, *, query: str, limit: int = 50) -> list[dict]:
+        compact = "".join(query.split())
+        terms = [term for term in re.split(r"\s+", query.strip()) if len(term) >= 2]
+        terms.extend(
+            keyword
+            for keyword in ("验收", "标准", "规范", "技术", "质量", "施工", "服务", "安全")
+            if keyword in compact and keyword not in terms
+        )
+        if not terms and compact:
+            terms = [compact[index:index + 2] for index in range(max(0, min(len(compact) - 1, 8)))]
+        if not terms:
+            return []
+        where_sql = " OR ".join(["COALESCE(sc.clause_title, '') || ' ' || COALESCE(sc.clause_text, '') ILIKE %s" for _ in terms])
+        params = [f"%{term}%" for term in terms]
+        params.append(limit)
+        with conn.cursor(row_factory=dict_row) as cur:
+            return cur.execute(
+                f"""
+                SELECT sc.*, s.standard_name, s.specialty
+                FROM standard_clause sc
+                JOIN standard s ON s.id = sc.standard_id
+                WHERE {where_sql}
+                ORDER BY sc.sort_order
+                LIMIT %s
+                """,
+                params,
+            ).fetchall()
+
     def get_clause_tree(self, conn: Connection, standard_id: UUID) -> list[dict]:
         """Fetch clauses and rebuild nested children tree in Python."""
         flat = self.list_clauses(conn, standard_id=standard_id)

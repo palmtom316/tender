@@ -1,20 +1,36 @@
 from __future__ import annotations
 
+import json
 from uuid import UUID
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 from psycopg import Connection, errors
 
 from tender_backend.core.config import Settings, get_settings
 from tender_backend.db.deps import get_db_conn
+from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
+from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.db.repositories.tender_document_repository import TenderDocumentRepository
+from tender_backend.services.deepseek_api import (
+    DEEPSEEK_V4_MAX_REASONING_EFFORT,
+    DEEPSEEK_V4_PRO_MODEL,
+    deepseek_v4_thinking_options,
+)
+from tender_backend.services.extract_service.requirements_extractor import extract_requirements_from_source_chunks
 from tender_backend.services.office_document_parser import (
     OFFICE_PARSER_NAME,
     OFFICE_PARSER_VERSION,
     OfficeParseError,
     parse_office_file,
+)
+from tender_backend.services.pdf_document_parser import (
+    PDF_PARSER_NAME,
+    PDF_PARSER_VERSION,
+    PdfParseError,
+    parse_pdf_text,
 )
 from tender_backend.services.tender_document_ingestion import TenderDocumentIngestionService, UploadPayload
 
@@ -22,6 +38,8 @@ from tender_backend.services.tender_document_ingestion import TenderDocumentInge
 router = APIRouter(tags=["tender-documents"])
 
 _repo = TenderDocumentRepository()
+_requirement_repo = RequirementRepository()
+_agent_repo = AgentConfigRepository()
 
 
 class TenderDocumentOut(BaseModel):
@@ -66,10 +84,14 @@ class SourceChunkOut(BaseModel):
     tender_document_file_id: UUID
     chunk_type: str
     source_file: str
+    document_type: str | None = None
+    section_title: str | None = None
     source_locator: str
     title: str | None = None
     text: str | None = None
     table_json: dict | None = None
+    page_start: int | None = None
+    page_end: int | None = None
     sheet_name: str | None = None
     row_start: int | None = None
     row_end: int | None = None
@@ -85,6 +107,55 @@ class TenderDocumentParseOut(BaseModel):
     skipped_file_count: int
     chunk_count: int
     files: list[TenderDocumentFileOut]
+
+
+class TenderDocumentParseStatusOut(BaseModel):
+    tender_document_id: UUID
+    document_status: str
+    total_file_count: int
+    pending_file_count: int
+    parsing_file_count: int
+    completed_file_count: int
+    failed_file_count: int
+    skipped_file_count: int
+    chunk_count: int
+    files: list[TenderDocumentFileOut]
+
+
+class TenderDocumentRequirementExtractionOut(BaseModel):
+    tender_document_id: UUID
+    project_id: UUID
+    model: str
+    model_source: str
+    extracted_count: int
+    persisted_count: int
+    category_counts: dict[str, int]
+    requirements: list[dict]
+
+
+class SourceChunkUpdateBody(BaseModel):
+    chunk_type: str | None = None
+    document_type: str | None = None
+    section_title: str | None = None
+    source_locator: str | None = None
+    title: str | None = None
+    text: str | None = None
+    table_json: dict | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    sheet_name: str | None = None
+    row_start: int | None = None
+    row_end: int | None = None
+    paragraph_index: int | None = None
+    sort_order: int | None = None
+    confidence: float | None = None
+    metadata_json: dict | None = None
+
+
+class TenderDocumentFileClassificationUpdateBody(BaseModel):
+    classification: str
+    is_parsable: bool | None = None
+    review_note: str | None = None
 
 
 def _document_out(row: dict) -> TenderDocumentOut:
@@ -130,10 +201,14 @@ def _chunk_out(row: dict) -> SourceChunkOut:
         tender_document_file_id=row["tender_document_file_id"],
         chunk_type=row["chunk_type"],
         source_file=row["source_file"],
+        document_type=row.get("document_type"),
+        section_title=row.get("section_title"),
         source_locator=row["source_locator"],
         title=row.get("title"),
         text=row.get("text"),
         table_json=row.get("table_json"),
+        page_start=row.get("page_start"),
+        page_end=row.get("page_end"),
         sheet_name=row.get("sheet_name"),
         row_start=row.get("row_start"),
         row_end=row.get("row_end"),
@@ -147,10 +222,37 @@ def _service(settings: Settings) -> TenderDocumentIngestionService:
     return TenderDocumentIngestionService(storage_root=settings.tender_document_storage_root, repository=_repo)
 
 
+def _parse_status_out(document: dict, files: list[dict], chunk_count: int) -> TenderDocumentParseStatusOut:
+    counts = {
+        "pending": 0,
+        "parsing": 0,
+        "completed": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
+    for row in files:
+        status = str(row.get("parse_status") or "pending")
+        counts[status] = counts.get(status, 0) + 1
+    return TenderDocumentParseStatusOut(
+        tender_document_id=document["id"],
+        document_status=document["status"],
+        total_file_count=len(files),
+        pending_file_count=counts.get("pending", 0),
+        parsing_file_count=counts.get("parsing", 0),
+        completed_file_count=counts.get("completed", 0),
+        failed_file_count=counts.get("failed", 0),
+        skipped_file_count=counts.get("skipped", 0),
+        chunk_count=chunk_count,
+        files=[_file_out(row) for row in files],
+    )
+
+
 def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
     if not file_row["is_parsable"] or file_row["is_archive"]:
+        _repo.update_file_parse_status(conn, tender_document_file_id=file_row["id"], parse_status="skipped", error=None)
         return "skipped", 0
-    if file_row["file_type"] not in {"doc", "docx", "xls", "xlsx"}:
+    if file_row["file_type"] not in {"doc", "docx", "xls", "xlsx", "pdf", "wps"}:
+        _repo.update_file_parse_status(conn, tender_document_file_id=file_row["id"], parse_status="skipped", error=None)
         return "skipped", 0
 
     path = Path(file_row["storage_key"])
@@ -164,9 +266,20 @@ def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
         return "failed", 0
 
     _repo.update_file_parse_status(conn, tender_document_file_id=file_row["id"], parse_status="parsing", error=None)
+    parser_name: str
+    parser_version: str
+    parser_file_type: str
     try:
-        parser_file_type, chunks = parse_office_file(path, source_file=file_row["relative_path"])
-    except OfficeParseError as exc:
+        if file_row["file_type"] == "pdf":
+            parser_name = PDF_PARSER_NAME
+            parser_version = PDF_PARSER_VERSION
+            parser_file_type = "pdf"
+            chunks = parse_pdf_text(path, source_file=file_row["relative_path"])
+        else:
+            parser_name = OFFICE_PARSER_NAME
+            parser_version = OFFICE_PARSER_VERSION
+            parser_file_type, chunks = parse_office_file(path, source_file=file_row["relative_path"])
+    except (OfficeParseError, PdfParseError) as exc:
         _repo.update_file_parse_status(
             conn,
             tender_document_file_id=file_row["id"],
@@ -174,6 +287,11 @@ def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
             error=str(exc),
         )
         return "failed", 0
+
+    document_type = file_row.get("classification")
+    for chunk in chunks:
+        chunk.setdefault("document_type", document_type)
+        chunk.setdefault("section_title", chunk.get("title"))
 
     _repo.replace_source_chunks(
         conn,
@@ -187,8 +305,8 @@ def _parse_file(conn: Connection, file_row: dict) -> tuple[str, int]:
         parse_status="completed",
         error=None,
         metadata_json={
-            "parser_name": OFFICE_PARSER_NAME,
-            "parser_version": OFFICE_PARSER_VERSION,
+            "parser_name": parser_name,
+            "parser_version": parser_version,
             "parser_file_type": parser_file_type,
             "chunk_count": len(chunks),
         },
@@ -254,6 +372,31 @@ async def list_tender_document_files(
     return [_file_out(row) for row in _repo.list_files(conn, tender_document_id=tender_document_id)]
 
 
+@router.patch("/tender-document-files/{tender_document_file_id}/classification", response_model=TenderDocumentFileOut)
+async def update_tender_document_file_classification(
+    tender_document_file_id: UUID,
+    payload: TenderDocumentFileClassificationUpdateBody,
+    conn: Connection = Depends(get_db_conn),
+) -> TenderDocumentFileOut:
+    existing = _repo.get_file(conn, tender_document_file_id=tender_document_file_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="tender document file not found")
+    metadata = dict(existing.get("metadata_json") or {})
+    metadata["classification_review"] = {
+        "previous_classification": existing.get("classification"),
+        "review_note": payload.review_note,
+    }
+    row = _repo.update_file_classification(
+        conn,
+        tender_document_file_id=tender_document_file_id,
+        classification=payload.classification,
+        is_parsable=payload.is_parsable,
+        metadata_json=metadata,
+    )
+    assert row is not None
+    return _file_out(row)
+
+
 @router.post("/tender-documents/{tender_document_id}/parse", response_model=TenderDocumentParseOut)
 async def parse_tender_document(
     tender_document_id: UUID,
@@ -288,6 +431,19 @@ async def parse_tender_document(
     )
 
 
+@router.get("/tender-documents/{tender_document_id}/parse-status", response_model=TenderDocumentParseStatusOut)
+async def get_tender_document_parse_status(
+    tender_document_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> TenderDocumentParseStatusOut:
+    document = _repo.get_document(conn, tender_document_id=tender_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="tender document not found")
+    files = _repo.list_files(conn, tender_document_id=tender_document_id)
+    chunk_count = len(_repo.list_source_chunks(conn, tender_document_id=tender_document_id))
+    return _parse_status_out(document, files, chunk_count)
+
+
 @router.post("/tender-document-files/{tender_document_file_id}/parse", response_model=TenderDocumentFileOut)
 async def parse_tender_document_file(
     tender_document_file_id: UUID,
@@ -300,7 +456,7 @@ async def parse_tender_document_file(
     updated = _repo.get_file(conn, tender_document_file_id=tender_document_file_id)
     assert updated is not None
     if status == "skipped":
-        raise HTTPException(status_code=400, detail="file is not a supported Office document")
+        raise HTTPException(status_code=400, detail="file is not a supported tender source document")
     return _file_out(updated)
 
 
@@ -320,3 +476,103 @@ async def list_tender_source_chunks(
             tender_document_file_id=tender_document_file_id,
         )
     ]
+
+
+@router.get("/tender-documents/{tender_document_id}/source-chunks/download")
+async def download_tender_source_chunks(
+    tender_document_id: UUID,
+    tender_document_file_id: UUID | None = None,
+    conn: Connection = Depends(get_db_conn),
+) -> Response:
+    document = _repo.get_document(conn, tender_document_id=tender_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="tender document not found")
+    rows = _repo.list_source_chunks(
+        conn,
+        tender_document_id=tender_document_id,
+        tender_document_file_id=tender_document_file_id,
+    )
+    payload = {
+        "tender_document_id": str(tender_document_id),
+        "project_id": str(document["project_id"]),
+        "count": len(rows),
+        "chunks": rows,
+    }
+    content = json.dumps(payload, ensure_ascii=False, default=str, indent=2)
+    return Response(
+        content=content,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="tender-document-{tender_document_id}-source-chunks.json"'},
+    )
+
+
+@router.patch("/source-chunks/{source_chunk_id}", response_model=SourceChunkOut)
+async def update_source_chunk(
+    source_chunk_id: UUID,
+    payload: SourceChunkUpdateBody,
+    conn: Connection = Depends(get_db_conn),
+) -> SourceChunkOut:
+    row = _repo.update_source_chunk(
+        conn,
+        source_chunk_id=source_chunk_id,
+        fields=payload.model_dump(exclude_unset=True),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="source chunk not found")
+    return _chunk_out(row)
+
+
+@router.post(
+    "/tender-documents/{tender_document_id}/extract-requirements",
+    response_model=TenderDocumentRequirementExtractionOut,
+)
+@router.post(
+    "/tender-documents/{tender_document_id}/extract-constraints",
+    response_model=TenderDocumentRequirementExtractionOut,
+)
+async def extract_tender_document_requirements(
+    tender_document_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+) -> TenderDocumentRequirementExtractionOut:
+    document = _repo.get_document(conn, tender_document_id=tender_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="tender document not found")
+
+    chunks = _repo.list_source_chunks(conn, tender_document_id=tender_document_id)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="no source chunks found; parse the tender document first")
+
+    extracted = extract_requirements_from_source_chunks(chunks)
+    payload = [item.to_dict() for item in extracted]
+    config = _agent_repo.get_by_key(conn, "extract")
+    model = (config.primary_model if config and config.primary_model else DEEPSEEK_V4_PRO_MODEL)
+    model_source = "agent_config.extract" if config else "default"
+    thinking_options = deepseek_v4_thinking_options(reasoning_effort=DEEPSEEK_V4_MAX_REASONING_EFFORT)
+    for item in payload:
+        source_metadata = item.get("source_metadata") if isinstance(item.get("source_metadata"), dict) else {}
+        source_metadata["ai_parse_default_model"] = model
+        source_metadata["ai_parse_model_source"] = model_source
+        source_metadata["ai_parse_thinking"] = thinking_options["thinking"]
+        source_metadata["ai_parse_reasoning_effort"] = thinking_options["reasoning_effort"]
+        item["source_metadata"] = source_metadata
+    persisted = _requirement_repo.create_many(
+        conn,
+        project_id=document["project_id"],
+        requirements=payload,
+    )
+
+    category_counts: dict[str, int] = {}
+    for item in persisted:
+        category = str(item["category"])
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    return TenderDocumentRequirementExtractionOut(
+        tender_document_id=tender_document_id,
+        project_id=document["project_id"],
+        model=model,
+        model_source=model_source,
+        extracted_count=len(extracted),
+        persisted_count=len(persisted),
+        category_counts=category_counts,
+        requirements=persisted,
+    )

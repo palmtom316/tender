@@ -70,11 +70,24 @@ CREATE TABLE IF NOT EXISTS project_requirement (
   project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
   category TEXT NOT NULL,
   title TEXT NOT NULL,
+  requirement_text TEXT NULL,
   source_text TEXT NULL,
+  source_file TEXT NULL,
+  source_locator TEXT NULL,
+  confidence DOUBLE PRECISION NULL,
+  is_veto BOOLEAN NOT NULL DEFAULT false,
+  is_hard_constraint BOOLEAN NOT NULL DEFAULT false,
+  requires_human_confirm BOOLEAN NOT NULL DEFAULT false,
+  ignored_for_pricing BOOLEAN NOT NULL DEFAULT false,
+  applies_to_chapter TEXT NULL,
+  review_status TEXT NOT NULL DEFAULT 'pending',
+  review_note TEXT NULL,
+  source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   human_confirmed BOOLEAN NOT NULL DEFAULT false,
   confirmed_by TEXT NULL,
   confirmed_at TIMESTAMPTZ NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS project_fact (
@@ -86,6 +99,22 @@ CREATE TABLE IF NOT EXISTS project_fact (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS requirement_match (
+  id UUID PRIMARY KEY,
+  requirement_id UUID NOT NULL REFERENCES project_requirement(id) ON DELETE CASCADE,
+  match_status TEXT NOT NULL,
+  matched_source_type TEXT,
+  matched_source_id UUID,
+  matched_title TEXT,
+  match_score DOUBLE PRECISION,
+  evidence_summary TEXT,
+  missing_reason TEXT,
+  requires_human_confirm BOOLEAN NOT NULL DEFAULT false,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS chapter_draft (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
@@ -94,6 +123,46 @@ CREATE TABLE IF NOT EXISTS chapter_draft (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS bid_outline (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  outline_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS bid_chapter (
+  id UUID PRIMARY KEY,
+  bid_outline_id UUID NOT NULL REFERENCES bid_outline(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  parent_id UUID NULL REFERENCES bid_chapter(id) ON DELETE CASCADE,
+  chapter_code TEXT NOT NULL,
+  chapter_title TEXT NOT NULL,
+  volume_type TEXT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  outline_md TEXT NOT NULL DEFAULT '',
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (bid_outline_id, chapter_code)
+);
+
+CREATE TABLE IF NOT EXISTS bid_chapter_requirement (
+  id UUID PRIMARY KEY,
+  bid_chapter_id UUID NOT NULL REFERENCES bid_chapter(id) ON DELETE CASCADE,
+  requirement_id UUID NOT NULL REFERENCES project_requirement(id) ON DELETE CASCADE,
+  mapping_reason TEXT NULL,
+  priority_level TEXT NOT NULL DEFAULT 'normal',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (bid_chapter_id, requirement_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bid_outline_project ON bid_outline (project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bid_chapter_project ON bid_chapter (project_id, volume_type, sort_order);
+CREATE INDEX IF NOT EXISTS idx_bid_chapter_requirement_requirement ON bid_chapter_requirement (requirement_id);
 
 CREATE TABLE IF NOT EXISTS review_issue (
   id UUID PRIMARY KEY,

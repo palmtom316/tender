@@ -40,6 +40,22 @@ def test_tag_clauses_seed_defaults_to_deepseek_v4_flash() -> None:
     assert match.group(4) == "qwen-plus"
 
 
+def test_extract_seed_defaults_to_deepseek_v4_pro_max() -> None:
+    content = MIGRATION_FILE.read_text(encoding="utf-8")
+
+    match = re.search(
+        r"\(gen_random_uuid\(\),\s*'extract'.*?'(https://[^']+)'\s*,\s*'([^']+)'\s*,\s*'(https://[^']+)'\s*,\s*'([^']+)'\)",
+        content,
+        re.DOTALL,
+    )
+
+    assert match is not None
+    assert match.group(1) == "https://api.deepseek.com"
+    assert match.group(2) == "deepseek-v4-pro"
+    assert match.group(3) == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert match.group(4) == "qwen-plus"
+
+
 def test_tag_clauses_normalization_migration_updates_legacy_primary_route() -> None:
     content = NORMALIZE_MIGRATION_FILE.read_text(encoding="utf-8")
 

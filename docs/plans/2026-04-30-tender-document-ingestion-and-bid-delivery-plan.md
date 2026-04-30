@@ -15,25 +15,25 @@
 
 ## Core Principles
 
-- [ ] ZIP 和 PDF 是两条输入链路，但必须归一化到同一套解析块模型。
-- [ ] Office-first：ZIP 包内 Word/Excel 是主路径，PDF/OCR 是兼容路径。
-- [ ] 所有 AI 抽取结果必须保留来源文件、段落、页码、sheet、行列或表格定位。
-- [ ] 报价相关内容允许识别和标记，但不进入投标正文生成约束。
-- [ ] 业绩要求、项目管理团队要求、特殊要求是一类核心约束。
+- [x] ZIP 和 PDF 是两条输入链路，但必须归一化到同一套解析块模型。
+- [x] Office-first：ZIP 包内 Word/Excel 是主路径，PDF/OCR 是兼容路径。
+- [x] 所有 AI 抽取结果必须保留来源文件、段落、页码、sheet、行列或表格定位。
+- [x] 报价相关内容允许识别和标记，但不进入投标正文生成约束。
+- [x] 业绩要求、项目管理团队要求、特殊要求是一类核心约束。
 - [ ] 最终交付以 Word 为核心，必要时兼容 `.doc` 转换。
-- [ ] 否决项、资格、业绩、项目团队、特殊要求必须经过人工确认后才能进入最终导出。
+- [x] 否决项、资格、业绩、项目团队、特殊要求必须经过人工确认后才能进入最终导出。
 
 ## Target Deliverables
 
 - [x] ZIP/PDF 统一上传入口。
 - [x] ZIP 递归解包与文件分类。
 - [x] Office 文档解析能力。
-- [ ] PDF 文本解析与 OCR/MinerU 兼容能力。
+- [x] PDF 文本解析与 OCR/MinerU 兼容能力。
 - [x] 统一 source chunk 数据模型。
-- [ ] AI 结构化约束抽取。
+- [x] AI 结构化约束抽取。
 - [ ] 约束确认与编辑页面。
-- [ ] 企业库、业绩库、人员库匹配。
-- [ ] 投标文件目录与章节规划。
+- [x] 企业库、业绩库、人员库匹配。
+- [x] 投标文件目录与章节规划。
 - [ ] 章节级 AI 编写。
 - [ ] Word 投标文件生成。
 - [ ] 投标文件审查。
@@ -74,7 +74,7 @@
 - [x] 上传 PDF 后能创建解析任务。
 - [x] 文件名中文显示正常。
 - [x] `.sign` 文件只登记，不解析。
-- [ ] 文件分类结果可人工修正。
+- [x] 文件分类结果可人工修正。
 
 ## Phase 2: 文本与表格解析
 
@@ -83,38 +83,38 @@
 - [x] `.docx` 段落抽取。
 - [x] `.docx` 标题层级识别。
 - [x] `.docx` 表格抽取。
-- [ ] `.docx` 页眉页脚和封面关键文本抽取。
+- [x] `.docx` 页眉页脚和封面关键文本抽取。
 - [x] `.xlsx` sheet 抽取。
-- [ ] `.xlsx` 表头识别。
+- [x] `.xlsx` 表头识别。
 - [x] `.xlsx` 合并单元格还原。
 - [x] `.xlsx` 行列定位保留。
-- [ ] `.xlsx` 多 sheet 类型识别。
+- [x] `.xlsx` 多 sheet 类型识别。
 - [x] `.doc` 通过 LibreOffice headless 转 `.docx` 后解析。
 - [x] `.xls` 通过 LibreOffice headless 转 `.xlsx` 后解析。
-- [ ] `.wps` 尝试通过 LibreOffice 转 `.docx`。
-- [ ] `.wps` 转换失败时标记为人工确认。
-- [ ] 文本型 PDF 直接抽取文本。
+- [x] `.wps` 尝试通过 LibreOffice 转 `.docx`。
+- [x] `.wps` 转换失败时标记为人工确认。
+- [x] 文本型 PDF 直接抽取文本。
 - [ ] 扫描型 PDF 走 OCR/MinerU。
 - [ ] PDF 表格抽取并保留页码。
-- [ ] ZIP 内 PDF 自动进入 PDF 解析分支。
-- [ ] 定义统一解析块模型：
-  - [ ] `source_file`
-  - [ ] `document_type`
-  - [ ] `section_title`
-  - [ ] `text`
-  - [ ] `table_json`
-  - [ ] `page_start`
-  - [ ] `page_end`
-  - [ ] `sheet_name`
-  - [ ] `row_start`
-  - [ ] `row_end`
-  - [ ] `paragraph_index`
-  - [ ] `source_locator`
-  - [ ] `confidence`
+- [x] ZIP 内 PDF 自动进入 PDF 解析分支。
+- [x] 定义统一解析块模型：
+  - [x] `source_file`
+  - [x] `document_type`
+  - [x] `section_title`
+  - [x] `text`
+  - [x] `table_json`
+  - [x] `page_start`
+  - [x] `page_end`
+  - [x] `sheet_name`
+  - [x] `row_start`
+  - [x] `row_end`
+  - [x] `paragraph_index`
+  - [x] `source_locator`
+  - [x] `confidence`
 
 **验收标准：**
 
-- [ ] ZIP 和 PDF 都能产出统一解析块。
+- [x] ZIP 和 PDF 都能产出统一解析块。
 - [x] Excel 表格不丢 sheet、行列定位。
 - [x] Word 表格可被后续 AI 抽取使用。
 - [x] `.doc/.wps` 转换失败不会阻断整个任务。
@@ -124,139 +124,149 @@
 
 **目标：** 从解析块中抽取投标文件编写约束，形成固定 JSON schema。
 
-- [ ] 建立规则预抽取器，定位候选片段。
-- [ ] 建立 AI 结构化抽取 prompt。
-- [ ] 建立抽取结果 JSON schema。
-- [ ] 每条抽取结果必须包含来源。
-- [ ] 抽取项：项目信息。
-- [ ] 抽取项：时间要求。
-- [ ] 抽取项：资格要求。
-- [ ] 抽取项：业绩要求。
-- [ ] 抽取项：项目管理团队要求。
-- [ ] 抽取项：技术要求。
-- [ ] 抽取项：商务要求。
-- [ ] 抽取项：评分办法。
-- [ ] 抽取项：否决项。
-- [ ] 抽取项：格式要求。
-- [ ] 抽取项：合同约束。
-- [ ] 抽取项：特殊要求。
-- [ ] 识别报价相关内容并标记 `ignored_for_pricing=true`。
-- [ ] 报价内容不进入投标正文生成上下文。
-- [ ] 对低置信度约束标记 `requires_human_confirm=true`。
-- [ ] 对否决项自动标记 `is_veto=true`。
+- [x] 招标文件 AI 解析默认模型为 `deepseek-v4-pro`，并使用 `reasoning_effort=max`。
+- [x] 建立规则预抽取器，定位候选片段。
+- [x] 建立 AI 结构化抽取 prompt。
+- [x] 建立抽取结果 JSON schema。
+- [x] 每条抽取结果必须包含来源。
+- [x] 抽取项：项目信息。
+- [x] 抽取项：时间要求。
+- [x] 抽取项：资格要求。
+- [x] 抽取项：业绩要求。
+- [x] 抽取项：项目管理团队要求。
+- [x] 抽取项：技术要求。
+- [x] 抽取项：商务要求。
+- [x] 抽取项：评分办法。
+- [x] 抽取项：否决项。
+- [x] 抽取项：格式要求。
+- [x] 抽取项：合同约束。
+- [x] 抽取项：特殊要求。
+- [x] 识别报价相关内容并标记 `ignored_for_pricing=true`。
+- [x] 报价内容不进入投标正文生成上下文。
+- [x] 对低置信度约束标记 `requires_human_confirm=true`。
+- [x] 对否决项自动标记 `is_veto=true`。
 
 **核心分类定义：**
 
-- [ ] `project_info`: 项目名称、招标编号、包号、招标人、采购范围、实施地点。
-- [ ] `schedule`: 投标截止、开标、工期、服务期、交付期。
-- [ ] `qualification`: 企业资质、认证、许可、联合体限制。
-- [ ] `performance`: 类似项目业绩、金额/规模、时间范围、证明材料。
-- [ ] `project_team`: 项目经理、技术负责人、安全员、施工员、资料员、证书、社保、经验要求。
-- [ ] `technical`: 技术规范、施工/服务范围、质量标准、验收标准。
-- [ ] `business`: 保证金、履约保证、响应文件组成等非报价商务要求。
-- [ ] `scoring`: 商务评分、技术评分、响应重点。
-- [ ] `veto`: 废标、无效投标、不予受理、实质性不响应。
-- [ ] `format`: 目录、章节、签章、盖章、页码、文件命名、上传方式。
-- [ ] `contract`: 质量、安全、进度、违约、质保、验收。
-- [ ] `special`: 分包限制、现场踏勘、澄清答疑、保密、属地化、材料品牌、特殊工艺、平台上传规则。
+- [x] `project_info`: 项目名称、招标编号、包号、招标人、采购范围、实施地点。
+- [x] `schedule`: 投标截止、开标、工期、服务期、交付期。
+- [x] `qualification`: 企业资质、认证、许可、联合体限制。
+- [x] `performance`: 类似项目业绩、金额/规模、时间范围、证明材料。
+- [x] `project_team`: 项目经理、技术负责人、安全员、施工员、资料员、证书、社保、经验要求。
+- [x] `technical`: 技术规范、施工/服务范围、质量标准、验收标准。
+- [x] `business`: 保证金、履约保证、响应文件组成等非报价商务要求。
+- [x] `scoring`: 商务评分、技术评分、响应重点。
+- [x] `veto`: 废标、无效投标、不予受理、实质性不响应。
+- [x] `format`: 目录、章节、签章、盖章、页码、文件命名、上传方式。
+- [x] `contract`: 质量、安全、进度、违约、质保、验收。
+- [x] `special`: 分包限制、现场踏勘、澄清答疑、保密、属地化、材料品牌、特殊工艺、平台上传规则。
 
 **验收标准：**
 
-- [ ] 每条约束可追溯到来源。
-- [ ] 业绩要求可独立筛选。
-- [ ] 项目管理团队要求可独立筛选。
-- [ ] 特殊要求可独立筛选。
-- [ ] 报价字段不会出现在投标正文生成输入中。
+- [x] 每条约束可追溯到来源。
+- [x] 业绩要求可独立筛选。
+- [x] 项目管理团队要求可独立筛选。
+- [x] 特殊要求可独立筛选。
+- [x] 报价字段不会出现在投标正文生成输入中。
 
 ## Phase 4: 约束入库与人工确认
 
 **目标：** 将抽取结果持久化，并提供人工确认、编辑、驳回能力。
 
-- [ ] 扩展 `project_requirement` 或新增约束表。
-- [ ] 增加字段：`category`。
-- [ ] 增加字段：`title`。
-- [ ] 增加字段：`requirement_text`。
-- [ ] 增加字段：`source_file`。
-- [ ] 增加字段：`source_locator`。
-- [ ] 增加字段：`source_text`。
-- [ ] 增加字段：`confidence`。
-- [ ] 增加字段：`is_veto`。
-- [ ] 增加字段：`requires_human_confirm`。
-- [ ] 增加字段：`human_confirmed`。
-- [ ] 增加字段：`ignored_for_pricing`。
-- [ ] 增加字段：`applies_to_chapter`。
-- [ ] 增加字段：`review_status`。
-- [ ] 增加字段：`review_note`。
-- [ ] 支持约束确认。
-- [ ] 支持约束驳回。
-- [ ] 支持约束编辑。
-- [ ] 支持约束合并。
-- [ ] 支持约束拆分。
-- [ ] 支持标记硬约束。
-- [ ] 支持标记特殊要求。
-- [ ] 需求确认页按分类筛选。
-- [ ] 需求确认页展示来源片段。
-- [ ] 需求确认页展示置信度。
-- [ ] 未确认否决项阻止最终导出。
+- [x] 扩展 `project_requirement` 或新增约束表。
+- [x] 增加字段：`category`。
+- [x] 增加字段：`title`。
+- [x] 增加字段：`requirement_text`。
+- [x] 增加字段：`source_file`。
+- [x] 增加字段：`source_locator`。
+- [x] 增加字段：`source_text`。
+- [x] 增加字段：`confidence`。
+- [x] 增加字段：`is_veto`。
+- [x] 增加字段：`requires_human_confirm`。
+- [x] 增加字段：`human_confirmed`。
+- [x] 增加字段：`ignored_for_pricing`。
+- [x] 增加字段：`applies_to_chapter`。
+- [x] 增加字段：`review_status`。
+- [x] 增加字段：`review_note`。
+- [x] 支持约束确认。
+- [x] 支持约束驳回。
+- [x] 支持约束编辑。
+- [x] 支持约束合并。
+- [x] 支持约束拆分。
+- [x] 支持标记硬约束。
+- [x] 支持标记特殊要求。
+- [x] 需求确认页按分类筛选。
+- [x] 需求确认页展示来源片段。
+- [x] 需求确认页展示置信度。
+- [x] 未确认否决项阻止最终导出。
 
 **验收标准：**
 
-- [ ] 用户可逐条确认关键投标约束。
-- [ ] 用户可修正 AI 抽取错误。
-- [ ] 未确认否决项时导出失败。
-- [ ] 低置信度约束提示人工复核。
+- [x] 用户可逐条确认关键投标约束。
+- [x] 用户可修正 AI 抽取错误。
+- [x] 未确认否决项时导出失败。
+- [x] 低置信度约束提示人工复核。
+- [x] 完成解析的结构化结果可下载。
+
+## Cross-cutting Rule: 招标解析优先于模板
+
+- [x] 招标文件解析出的投标内容要求优先于模板默认内容。
+- [x] 招标文件解析出的投标格式要求优先于模板默认格式。
+- [x] 模板渲染上下文暴露 `tender_requirement_priority`、`tender_content_requirements`、`tender_format_requirements`。
+- [x] 普通 DOCX 导出追加“招标文件解析要求优先响应”章节，避免模板遗漏解析要求。
+- [x] 报价相关解析项不进入投标正文生成和模板优先级上下文。
 
 ## Phase 5: 知识库匹配
 
 **目标：** 将招标约束与企业资料、业绩、人员、标准规范进行匹配。
 
-- [ ] 企业资质匹配。
-- [ ] 企业认证匹配。
-- [ ] 企业许可匹配。
-- [ ] 企业业绩匹配。
-- [ ] 人员库匹配。
-- [ ] 人员证书匹配。
-- [ ] 人员社保/任职信息匹配。
-- [ ] 标准规范库匹配。
-- [ ] 技术条款匹配。
-- [ ] 验收标准匹配。
-- [ ] 匹配状态定义：`satisfied | likely_satisfied | missing | needs_review`。
-- [ ] 生成缺失资料清单。
-- [ ] 生成需人工确认清单。
-- [ ] 匹配结果进入章节生成上下文。
+- [x] 企业资质匹配。
+- [x] 企业认证匹配。
+- [x] 企业许可匹配。
+- [x] 企业业绩匹配。
+- [x] 人员库匹配。
+- [x] 人员证书匹配。
+- [x] 人员社保/任职信息匹配。
+- [x] 标准规范库匹配。
+- [x] 技术条款匹配。
+- [x] 验收标准匹配。
+- [x] 匹配状态定义：`satisfied | likely_satisfied | missing | needs_review`。
+- [x] 生成缺失资料清单。
+- [x] 生成需人工确认清单。
+- [x] 匹配结果进入章节生成上下文。
 
 **验收标准：**
 
-- [ ] 业绩要求能匹配企业业绩库。
-- [ ] 项目管理团队要求能匹配人员库。
-- [ ] 缺失资料能生成待补清单。
-- [ ] 不得虚构缺失的资质、业绩、人员。
+- [x] 业绩要求能匹配企业业绩库。
+- [x] 项目管理团队要求能匹配人员库。
+- [x] 缺失资料能生成待补清单。
+- [x] 不得虚构缺失的资质、业绩、人员。
 
 ## Phase 6: 投标文件结构规划
 
 **目标：** 根据招标文件要求规划投标文件目录、分册和章节约束映射。
 
-- [ ] 抽取投标文件组成要求。
-- [ ] 抽取商务文件目录要求。
-- [ ] 抽取技术文件目录要求。
-- [ ] 抽取资格审查文件目录要求。
-- [ ] 自动生成投标文件目录草案。
-- [ ] 支持商务文件分册。
-- [ ] 支持技术文件分册。
-- [ ] 支持资格文件分册。
-- [ ] 建立章节与约束映射。
-- [ ] 否决项必须映射到响应章节。
-- [ ] 评分项必须映射到响应章节。
-- [ ] 特殊要求必须映射到响应章节。
-- [ ] 生成章节写作大纲。
-- [ ] 允许人工调整章节顺序。
-- [ ] 允许人工调整约束与章节映射。
+- [x] 抽取投标文件组成要求。
+- [x] 抽取商务文件目录要求。
+- [x] 抽取技术文件目录要求。
+- [x] 抽取资格审查文件目录要求。
+- [x] 自动生成投标文件目录草案。
+- [x] 支持商务文件分册。
+- [x] 支持技术文件分册。
+- [x] 支持资格文件分册。
+- [x] 建立章节与约束映射。
+- [x] 否决项必须映射到响应章节。
+- [x] 评分项必须映射到响应章节。
+- [x] 特殊要求必须映射到响应章节。
+- [x] 生成章节写作大纲。
+- [x] 允许人工调整章节顺序。
+- [x] 允许人工调整约束与章节映射。
 
 **验收标准：**
 
-- [ ] 能根据招标要求生成投标文件目录。
-- [ ] 每个章节能看到输入约束。
-- [ ] 每条硬约束能追踪到响应章节。
+- [x] 能根据招标要求生成投标文件目录。
+- [x] 每个章节能看到输入约束。
+- [x] 每条硬约束能追踪到响应章节。
 
 ## Phase 7: AI 编写投标内容
 
@@ -381,10 +391,10 @@
 
 ### Wave 1: 最小闭环
 
-- [ ] Phase 1 上传与文件识别。
-- [ ] Phase 2 文本与表格解析。
-- [ ] Phase 3 核心约束抽取。
-- [ ] Phase 4 约束入库与人工确认。
+- [x] Phase 1 上传与文件识别。
+- [x] Phase 2 文本与表格解析。
+- [x] Phase 3 核心约束抽取。
+- [x] Phase 4 约束入库与人工确认。
 - [ ] Phase 8 基础 `.docx` 输出。
 
 **完成标志：**
@@ -396,8 +406,8 @@
 
 ### Wave 2: 编写增强
 
-- [ ] Phase 5 知识库匹配。
-- [ ] Phase 6 投标文件结构规划。
+- [x] Phase 5 知识库匹配。
+- [x] Phase 6 投标文件结构规划。
 - [ ] Phase 7 AI 编写投标内容。
 - [ ] Phase 8 Word 格式增强。
 
@@ -423,34 +433,34 @@
 
 ## Data Model To-Do
 
-- [ ] 新增 `tender_document` 表。
-- [ ] 新增 `tender_document_file` 表。
+- [x] 新增 `tender_document` 表。
+- [x] 新增 `tender_document_file` 表。
 - [x] 新增 `source_chunk` 表。
-- [ ] 新增或扩展 `project_requirement` 约束字段。
-- [ ] 新增 `requirement_match` 表。
-- [ ] 新增 `bid_outline` 表。
-- [ ] 新增 `bid_chapter` 表。
+- [x] 新增或扩展 `project_requirement` 约束字段。
+- [x] 新增 `requirement_match` 表。
+- [x] 新增 `bid_outline` 表。
+- [x] 新增 `bid_chapter` 表。
 - [ ] 新增 `bid_review_issue` 表。
 - [ ] 新增 `bid_delivery_package` 表。
-- [ ] 为来源定位字段建立索引。
-- [ ] 为项目、分类、确认状态建立索引。
+- [x] 为来源定位字段建立索引。
+- [x] 为项目、分类、确认状态建立索引。
 
 ## API To-Do
 
-- [ ] `POST /api/projects/{project_id}/tender-documents`
-- [ ] `GET /api/projects/{project_id}/tender-documents`
-- [ ] `GET /api/tender-documents/{id}`
-- [ ] `GET /api/tender-documents/{id}/files`
+- [x] `POST /api/projects/{project_id}/tender-documents`
+- [x] `GET /api/projects/{project_id}/tender-documents`
+- [x] `GET /api/tender-documents/{id}`
+- [x] `GET /api/tender-documents/{id}/files`
 - [x] `POST /api/tender-documents/{id}/parse`
-- [ ] `GET /api/tender-documents/{id}/parse-status`
+- [x] `GET /api/tender-documents/{id}/parse-status`
 - [x] `GET /api/tender-documents/{id}/source-chunks`
-- [ ] `POST /api/tender-documents/{id}/extract-constraints`
-- [ ] `GET /api/projects/{project_id}/requirements`
-- [ ] `PATCH /api/requirements/{id}`
-- [ ] `POST /api/requirements/{id}/confirm`
-- [ ] `POST /api/requirements/{id}/reject`
-- [ ] `POST /api/projects/{project_id}/match-requirements`
-- [ ] `POST /api/projects/{project_id}/bid-outline`
+- [x] `POST /api/tender-documents/{id}/extract-constraints`
+- [x] `GET /api/projects/{project_id}/requirements`
+- [x] `PATCH /api/requirements/{id}`
+- [x] `POST /api/requirements/{id}/confirm`
+- [x] `POST /api/requirements/{id}/reject`
+- [x] `POST /api/projects/{project_id}/match-requirements`
+- [x] `POST /api/projects/{project_id}/bid-outline`
 - [ ] `POST /api/projects/{project_id}/bid-chapters/{chapter_id}/generate`
 - [ ] `POST /api/projects/{project_id}/bid-review`
 - [ ] `POST /api/projects/{project_id}/delivery-package`
@@ -460,7 +470,7 @@
 
 - [ ] 上传页支持 ZIP/PDF。
 - [ ] 上传页展示解包文件树。
-- [ ] 文件分类可编辑。
+- [x] 文件分类可编辑。
 - [ ] 解析状态可视化。
 - [ ] 解析结果按文件查看。
 - [ ] 约束确认页按分类筛选。

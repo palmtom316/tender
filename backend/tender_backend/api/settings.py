@@ -11,6 +11,11 @@ from tender_backend.db.repositories.skill_definition_repo import (
     SkillDefinitionRepository,
     SkillDefinitionRow,
 )
+from tender_backend.services.deepseek_api import (
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_V4_FLASH_MODEL,
+    apply_deepseek_v4_thinking_options,
+)
 from tender_backend.services.skill_catalog import default_skill_specs
 
 router = APIRouter(tags=["settings"])
@@ -172,11 +177,14 @@ async def test_agent_connection(
                 "Content-Type": "application/json",
             }
             payload = {
-                "model": config.primary_model or "deepseek-v4-flash",
+                "model": config.primary_model or DEEPSEEK_V4_FLASH_MODEL,
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 5,
             }
+            apply_deepseek_v4_thinking_options(payload, model=payload["model"])
             url = config.base_url.rstrip("/")
+            if url == "https://api.deepseek.com/v1":
+                url = DEEPSEEK_BASE_URL
             if not url.endswith("/chat/completions"):
                 url += "/chat/completions"
             resp = httpx.post(url, json=payload, headers=headers, timeout=15.0)

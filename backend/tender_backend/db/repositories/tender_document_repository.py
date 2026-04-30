@@ -179,6 +179,36 @@ class TenderDocumentRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def update_file_classification(
+        self,
+        conn: Connection,
+        *,
+        tender_document_file_id: UUID,
+        classification: str,
+        is_parsable: bool | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                UPDATE tender_document_file
+                SET classification = %s,
+                    is_parsable = COALESCE(%s, is_parsable),
+                    metadata_json = COALESCE(%s, metadata_json),
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    classification,
+                    is_parsable,
+                    Jsonb(metadata_json) if metadata_json is not None else None,
+                    tender_document_file_id,
+                ),
+            ).fetchone()
+        conn.commit()
+        return dict(row) if row else None
+
     def update_file_parse_status(
         self,
         conn: Connection,
@@ -227,10 +257,11 @@ class TenderDocumentRepository:
                     """
                     INSERT INTO source_chunk (
                       id, tender_document_id, tender_document_file_id, chunk_type,
-                      source_file, source_locator, title, text, table_json, sheet_name,
-                      row_start, row_end, paragraph_index, sort_order, confidence, metadata_json
+                      source_file, document_type, section_title, source_locator, title,
+                      text, table_json, page_start, page_end, sheet_name, row_start,
+                      row_end, paragraph_index, sort_order, confidence, metadata_json
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         uuid4(),
@@ -238,10 +269,14 @@ class TenderDocumentRepository:
                         tender_document_file_id,
                         chunk["chunk_type"],
                         chunk["source_file"],
+                        chunk.get("document_type"),
+                        chunk.get("section_title"),
                         chunk["source_locator"],
                         chunk.get("title"),
                         chunk.get("text"),
                         Jsonb(chunk.get("table_json")) if chunk.get("table_json") is not None else None,
+                        chunk.get("page_start"),
+                        chunk.get("page_end"),
                         chunk.get("sheet_name"),
                         chunk.get("row_start"),
                         chunk.get("row_end"),
@@ -274,3 +309,54 @@ class TenderDocumentRepository:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def update_source_chunk(
+        self,
+        conn: Connection,
+        *,
+        source_chunk_id: UUID,
+        fields: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        allowed = {
+            "chunk_type",
+            "document_type",
+            "section_title",
+            "source_locator",
+            "title",
+            "text",
+            "table_json",
+            "page_start",
+            "page_end",
+            "sheet_name",
+            "row_start",
+            "row_end",
+            "paragraph_index",
+            "sort_order",
+            "confidence",
+            "metadata_json",
+        }
+        updates = {key: value for key, value in fields.items() if key in allowed}
+        if not updates:
+            with conn.cursor(row_factory=dict_row) as cur:
+                row = cur.execute("SELECT * FROM source_chunk WHERE id = %s", (source_chunk_id,)).fetchone()
+            return dict(row) if row else None
+
+        sets: list[str] = []
+        values: list[Any] = []
+        for key, value in updates.items():
+            sets.append(f"{key} = %s")
+            values.append(Jsonb(value) if key in {"table_json", "metadata_json"} else value)
+        values.append(source_chunk_id)
+
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"""
+                UPDATE source_chunk
+                SET {', '.join(sets)}
+                WHERE id = %s
+                RETURNING *
+                """,
+                values,
+            ).fetchone()
+        conn.commit()
+        return dict(row) if row else None

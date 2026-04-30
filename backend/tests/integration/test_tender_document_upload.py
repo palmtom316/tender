@@ -63,10 +63,14 @@ def _apply_tender_document_schema(conn: psycopg.Connection) -> None:
       tender_document_file_id UUID NOT NULL REFERENCES tender_document_file(id) ON DELETE CASCADE,
       chunk_type VARCHAR(32) NOT NULL,
       source_file TEXT NOT NULL,
+      document_type TEXT,
+      section_title TEXT,
       source_locator TEXT NOT NULL,
       title TEXT,
       text TEXT,
       table_json JSONB,
+      page_start INT,
+      page_end INT,
       sheet_name TEXT,
       row_start INT,
       row_end INT,
@@ -145,6 +149,14 @@ def test_upload_real_zip_tender_package(tmp_path: Path, monkeypatch: pytest.Monk
         file_list = client.get(f"/api/tender-documents/{tender_document_id}/files")
         assert file_list.status_code == 200
         assert len(file_list.json()) == len(files)
+
+        target_file = next(row for row in file_list.json() if row["classification"] == "unclassified")
+        updated = client.patch(
+            f"/api/tender-document-files/{target_file['id']}/classification",
+            json={"classification": "tender_document", "review_note": "人工修正"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["classification"] == "tender_document"
     finally:
         client.close()
         with psycopg.connect(db_url) as conn:
@@ -180,6 +192,67 @@ def test_upload_pdf_tender_document(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         assert len(body["files"]) == 1
         assert body["files"][0]["classification"] == "uploaded_pdf"
         assert body["files"][0]["is_parsable"] is True
+    finally:
+        client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_tables(conn)
+
+
+def test_parse_uploaded_pdf_tender_document(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = _db_url()
+    if not db_url:
+        pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    fitz = pytest.importorskip("fitz")
+
+    monkeypatch.setenv("TENDER_DOCUMENT_STORAGE_ROOT", str(tmp_path / "tender-documents"))
+    get_settings.cache_clear()
+
+    pdf_path = tmp_path / "tender.pdf"
+    pdf = fitz.open()
+    try:
+        page = pdf.new_page()
+        page.insert_text((72, 72), "Project name: PDF parse test\nBid deadline: 2026-05-01")
+        pdf.save(pdf_path)
+    finally:
+        pdf.close()
+
+    with psycopg.connect(db_url) as conn:
+        _apply_tender_document_schema(conn)
+        _reset_tables(conn)
+
+    client = SyncASGIClient(app)
+    try:
+        project_res = client.post("/api/projects", json={"name": "PDF 解析"})
+        assert project_res.status_code == 200
+        project_id = UUID(project_res.json()["id"])
+
+        upload = client.post(
+            f"/api/projects/{project_id}/tender-documents",
+            files={"file": (pdf_path.name, pdf_path.read_bytes(), "application/pdf")},
+        )
+        assert upload.status_code == 200
+        tender_document_id = UUID(upload.json()["id"])
+
+        parsed = client.post(f"/api/tender-documents/{tender_document_id}/parse")
+        assert parsed.status_code == 200
+        body = parsed.json()
+        assert body["parsed_file_count"] == 1
+        assert body["chunk_count"] > 0
+        assert body["files"][0]["parse_status"] == "completed"
+
+        chunks = client.get(f"/api/tender-documents/{tender_document_id}/source-chunks")
+        assert chunks.status_code == 200
+        rows = chunks.json()
+        assert any("PDF parse test" in (row["text"] or "") for row in rows)
+        assert rows[0]["document_type"] == "uploaded_pdf"
+        assert rows[0]["page_start"] == 1
+        assert rows[0]["page_end"] == 1
+
+        status = client.get(f"/api/tender-documents/{tender_document_id}/parse-status")
+        assert status.status_code == 200
+        assert status.json()["completed_file_count"] == 1
+        assert status.json()["chunk_count"] > 0
     finally:
         client.close()
         with psycopg.connect(db_url) as conn:

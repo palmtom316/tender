@@ -12,6 +12,7 @@ from tender_backend.core.config import get_settings
 from tender_backend.core.path_safety import ensure_path_within_root
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import build_item_render_context
+from tender_backend.services.tender_requirement_priority import load_tender_requirement_overrides
 
 
 def _sanitize_filename(value: str) -> str:
@@ -299,6 +300,17 @@ def _render_single_docx_template(
     filename = output_filename or _sanitize_filename(f"{item.item_name}.docx")
     output_path = root / filename
     doc.save(str(output_path))
+    overrides = context.get("tender_requirement_priority")
+    if overrides:
+        rendered = Document(str(output_path))
+        rendered.add_page_break()
+        rendered.add_heading("招标文件解析要求优先响应", level=1)
+        rendered.add_paragraph(str(overrides.get("description") or "招标文件解析要求优先于模板默认内容。"))
+        for req in context.get("tender_content_requirements", []):
+            rendered.add_paragraph(str(req.get("requirement_text") or req.get("source_text") or req.get("title") or ""))
+        for req in context.get("tender_format_requirements", []):
+            rendered.add_paragraph(str(req.get("requirement_text") or req.get("source_text") or req.get("title") or ""))
+        rendered.save(str(output_path))
     return output_path
 
 
@@ -308,13 +320,17 @@ def render_template_item_docx(
     item_id: UUID,
     output_dir: Path | None = None,
     output_filename: str | None = None,
+    project_id: UUID | None = None,
 ) -> dict[str, object]:
     repo = BidTemplatePackageRepository()
     item = repo.get_item_by_id(conn, item_id=item_id)
     if item is None:
         raise LookupError("template item not found")
 
-    render_context = build_item_render_context(conn, item_id=item_id)
+    if project_id is None:
+        render_context = build_item_render_context(conn, item_id=item_id)
+    else:
+        render_context = build_item_render_context(conn, item_id=item_id, project_id=project_id)
     if not render_context["ready"]:
         missing = ", ".join(render_context["missing_required_bindings"])
         raise ValueError(f"template item is not ready for rendering: missing {missing}")

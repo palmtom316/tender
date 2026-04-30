@@ -48,10 +48,18 @@ class LoadSectionRequirements(WorkflowStep):
         from psycopg.rows import dict_row
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(
-                "SELECT * FROM project_requirement WHERE project_id = %s ORDER BY category, created_at",
+                """
+                SELECT *
+                FROM project_requirement
+                WHERE project_id = %s
+                  AND COALESCE(ignored_for_pricing, false) = false
+                  AND COALESCE(review_status, 'pending') <> 'rejected'
+                ORDER BY category, created_at
+                """,
                 (ctx.project_id,),
             ).fetchall()
         ctx.data["requirements"] = rows
+        ctx.data["requirement_priority_policy"] = "tender_extracted_requirements_override_template"
         return StepResult(state=StepState.COMPLETED, message=f"Loaded {len(rows)} requirements")
 
 
@@ -67,6 +75,66 @@ class SearchRelatedClauses(WorkflowStep):
         results = await search_clauses(section_name, top_k=10)
         ctx.data["matched_clauses"] = results
         return StepResult(state=StepState.COMPLETED, message=f"Found {len(results)} clauses")
+
+
+class LoadRequirementMatches(WorkflowStep):
+    name = "load_requirement_matches"
+
+    async def execute(self, ctx: WorkflowContext) -> StepResult:
+        conn = ctx.data.get("_db_conn")
+        if conn is None:
+            ctx.data["requirement_matches"] = []
+            return StepResult(state=StepState.COMPLETED, message="No DB connection, skipped matches")
+        from tender_backend.db.repositories.requirement_match_repo import RequirementMatchRepository
+        rows = RequirementMatchRepository().list_by_project(conn, project_id=ctx.project_id)
+        ctx.data["requirement_matches"] = rows
+        return StepResult(state=StepState.COMPLETED, message=f"Loaded {len(rows)} requirement matches")
+
+
+class LoadBidChapterOutline(WorkflowStep):
+    name = "load_bid_chapter_outline"
+
+    async def execute(self, ctx: WorkflowContext) -> StepResult:
+        conn = ctx.data.get("_db_conn")
+        chapter_code = ctx.data.get("chapter_code")
+        if conn is None or not chapter_code:
+            ctx.data["bid_chapter"] = None
+            ctx.data["bid_chapter_requirements"] = []
+            return StepResult(state=StepState.COMPLETED, message="No chapter outline context, skipped")
+        from psycopg.rows import dict_row
+        with conn.cursor(row_factory=dict_row) as cur:
+            chapter = cur.execute(
+                """
+                SELECT bc.*
+                FROM bid_chapter bc
+                JOIN bid_outline bo ON bo.id = bc.bid_outline_id
+                WHERE bc.project_id = %s
+                  AND bc.chapter_code = %s
+                ORDER BY bo.created_at DESC, bc.sort_order
+                LIMIT 1
+                """,
+                (ctx.project_id, chapter_code),
+            ).fetchone()
+            if chapter is None:
+                ctx.data["bid_chapter"] = None
+                ctx.data["bid_chapter_requirements"] = []
+                return StepResult(state=StepState.COMPLETED, message="No bid chapter outline found")
+            mapped_requirements = cur.execute(
+                """
+                SELECT pr.*, bcr.mapping_reason, bcr.priority_level
+                FROM bid_chapter_requirement bcr
+                JOIN project_requirement pr ON pr.id = bcr.requirement_id
+                WHERE bcr.bid_chapter_id = %s
+                ORDER BY bcr.priority_level, pr.created_at
+                """,
+                (chapter["id"],),
+            ).fetchall()
+        ctx.data["bid_chapter"] = dict(chapter)
+        ctx.data["bid_chapter_requirements"] = [dict(row) for row in mapped_requirements]
+        return StepResult(
+            state=StepState.COMPLETED,
+            message=f"Loaded bid chapter outline with {len(mapped_requirements)} mapped requirements",
+        )
 
 
 class SearchReferenceSections(WorkflowStep):
@@ -90,6 +158,10 @@ class AssembleEvidencePack(WorkflowStep):
         evidence = {
             "project_facts": ctx.data.get("project_facts", {}),
             "requirements": ctx.data.get("requirements", []),
+            "requirement_matches": ctx.data.get("requirement_matches", []),
+            "bid_chapter": ctx.data.get("bid_chapter"),
+            "bid_chapter_requirements": ctx.data.get("bid_chapter_requirements", []),
+            "requirement_priority_policy": ctx.data.get("requirement_priority_policy"),
             "scoring_criteria": ctx.data.get("scoring_criteria", []),
             "matched_clauses": ctx.data.get("matched_clauses", []),
             "reference_sections": ctx.data.get("reference_sections", []),
@@ -162,6 +234,8 @@ class GenerateSectionWorkflow(BaseWorkflow):
         return [
             LoadProjectFacts(),
             LoadSectionRequirements(),
+            LoadRequirementMatches(),
+            LoadBidChapterOutline(),
             SearchRelatedClauses(),
             SearchReferenceSections(),
             AssembleEvidencePack(),

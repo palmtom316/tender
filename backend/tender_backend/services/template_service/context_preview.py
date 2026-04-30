@@ -11,6 +11,10 @@ from psycopg import Connection
 from tender_backend.db.repositories.bid_template_binding_repo import BidTemplateBindingRepository
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.db.repositories.master_data_repo import MasterDataRepository
+from tender_backend.services.tender_requirement_priority import (
+    apply_tender_requirement_context,
+    load_tender_requirement_overrides,
+)
 
 
 _VALID_SOURCE_TYPES = {
@@ -441,7 +445,19 @@ def _build_render_context_from_bindings(bindings: list[dict[str, Any]]) -> tuple
     return context, missing_required
 
 
-def build_item_render_context(conn: Connection, *, item_id: UUID) -> dict[str, Any]:
+def _apply_project_requirement_overrides(
+    conn: Connection,
+    *,
+    context: dict[str, Any],
+    project_id: UUID | None = None,
+) -> dict[str, Any]:
+    if project_id is None:
+        return context
+    overrides = load_tender_requirement_overrides(conn, project_id=project_id)
+    return apply_tender_requirement_context(context, overrides)
+
+
+def build_item_render_context(conn: Connection, *, item_id: UUID, project_id: UUID | None = None) -> dict[str, Any]:
     package_repo = BidTemplatePackageRepository()
     binding_repo = BidTemplateBindingRepository()
 
@@ -452,6 +468,7 @@ def build_item_render_context(conn: Connection, *, item_id: UUID) -> dict[str, A
     bindings = binding_repo.list_by_item(conn, template_item_id=item.id)
     resolved = _resolve_binding_payloads(conn, bindings=bindings)
     context, missing_required = _build_render_context_from_bindings(resolved)
+    context = _apply_project_requirement_overrides(conn, context=context, project_id=project_id)
     return {
         "item_id": str(item.id),
         "item_code": item.item_code,
@@ -466,7 +483,7 @@ def build_item_render_context(conn: Connection, *, item_id: UUID) -> dict[str, A
     }
 
 
-def build_package_render_context(conn: Connection, *, package_id: UUID) -> dict[str, Any]:
+def build_package_render_context(conn: Connection, *, package_id: UUID, project_id: UUID | None = None) -> dict[str, Any]:
     package_repo = BidTemplatePackageRepository()
     binding_repo = BidTemplateBindingRepository()
 
@@ -489,6 +506,7 @@ def build_package_render_context(conn: Connection, *, package_id: UUID) -> dict[
             source_cache=source_cache,
         )
         context, missing_required = _build_render_context_from_bindings(resolved)
+        context = _apply_project_requirement_overrides(conn, context=context, project_id=project_id)
         item_contexts.append({
             "item_id": str(item.id),
             "item_code": item.item_code,

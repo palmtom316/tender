@@ -402,8 +402,12 @@ def _render_attachment_item(
     *,
     item,
     bundle_dir: Path,
+    project_id: UUID | None = None,
 ) -> dict[str, object]:
-    render_context = build_item_render_context(conn, item_id=item.id)
+    if project_id is None:
+        render_context = build_item_render_context(conn, item_id=item.id)
+    else:
+        render_context = build_item_render_context(conn, item_id=item.id, project_id=project_id)
     if not render_context["ready"]:
         missing = ", ".join(render_context["missing_required_bindings"])
         raise ValueError(f"template item is not ready for rendering: missing {missing}")
@@ -549,6 +553,7 @@ def render_template_package_bundle(
     package_id: UUID,
     include_zip: bool = False,
     output_root: Path | None = None,
+    project_id: UUID | None = None,
 ) -> dict[str, object]:
     repo = BidTemplatePackageRepository()
     package = repo.get_by_id(conn, package_id=package_id)
@@ -568,7 +573,7 @@ def render_template_package_bundle(
         try:
             relative_path = _safe_relative_path(item.relative_path)
             if item.render_mode == "attachment" or item.item_type == "evidence":
-                rendered = _render_attachment_item(conn, item=item, bundle_dir=bundle_dir)
+                rendered = _render_attachment_item(conn, item=item, bundle_dir=bundle_dir, project_id=project_id)
             else:
                 item_output_dir = bundle_dir / relative_path.parent
                 rendered = render_template_item_docx(
@@ -576,6 +581,7 @@ def render_template_package_bundle(
                     item_id=item.id,
                     output_dir=item_output_dir,
                     output_filename=relative_path.name,
+                    **({"project_id": project_id} if project_id is not None else {}),
                 )
             item_results.append(
                 {

@@ -36,6 +36,27 @@ def _first_non_empty(values: list[str]) -> str | None:
     return None
 
 
+def _sheet_document_type(sheet_name: str, rows: list[list[str]]) -> str:
+    sample = f"{sheet_name} " + " ".join(" ".join(row) for row in rows[:5])
+    if any(keyword in sample for keyword in ("评分", "分值", "评审")):
+        return "scoring_sheet"
+    if any(keyword in sample for keyword in ("资格", "资质", "证书")):
+        return "qualification_sheet"
+    if any(keyword in sample for keyword in ("需求", "清单", "范围")):
+        return "demand_schedule"
+    if any(keyword in sample for keyword in ("报价", "限价", "单价", "总价")):
+        return "pricing_reference"
+    return "spreadsheet"
+
+
+def _header_row(rows: list[list[str]]) -> list[str]:
+    for row in rows[:5]:
+        non_empty = [cell for cell in row if cell]
+        if len(non_empty) >= 2:
+            return row
+    return rows[0] if rows else []
+
+
 def parse_docx(path: Path, *, source_file: str) -> list[dict[str, Any]]:
     document = Document(str(path))
     chunks: list[dict[str, Any]] = []
@@ -63,6 +84,25 @@ def parse_docx(path: Path, *, source_file: str) -> list[dict[str, Any]]:
             }
         )
         order += 1
+
+    for section_index, section in enumerate(document.sections, start=1):
+        for part_name, part in (("header", section.header), ("footer", section.footer)):
+            texts = [paragraph.text.strip() for paragraph in part.paragraphs if paragraph.text.strip()]
+            if not texts:
+                continue
+            text = "\n".join(texts)
+            chunks.append(
+                {
+                    "chunk_type": part_name,
+                    "source_file": source_file,
+                    "source_locator": f"{part_name}:section:{section_index}",
+                    "title": "页眉" if part_name == "header" else "页脚",
+                    "text": text,
+                    "sort_order": order,
+                    "metadata_json": {"section_index": section_index},
+                }
+            )
+            order += 1
 
     for table_index, table in enumerate(document.tables):
         rows = _table_to_rows(table)
@@ -111,7 +151,8 @@ def parse_xlsx(path: Path, *, source_file: str) -> list[dict[str, Any]]:
                 "source_locator": f"sheet:{sheet.title}",
                 "title": title,
                 "text": "\n".join("\t".join(row) for row in rows),
-                "table_json": {"sheet_name": sheet.title, "rows": rows},
+                "document_type": _sheet_document_type(sheet.title, rows),
+                "table_json": {"sheet_name": sheet.title, "headers": _header_row(rows), "rows": rows},
                 "sheet_name": sheet.title,
                 "row_start": 1,
                 "row_end": sheet.max_row,
@@ -119,6 +160,8 @@ def parse_xlsx(path: Path, *, source_file: str) -> list[dict[str, Any]]:
                 "metadata_json": {
                     "max_row": sheet.max_row,
                     "max_column": sheet.max_column,
+                    "header_row": _header_row(rows),
+                    "sheet_document_type": _sheet_document_type(sheet.title, rows),
                     "merged_cells": [str(cell_range) for cell_range in sheet.merged_cells.ranges],
                 },
             }
@@ -168,6 +211,9 @@ def parse_office_file(path: Path, *, source_file: str) -> tuple[str, list[dict[s
     if suffix == ".doc":
         converted = _convert_with_libreoffice(path, target_ext=".docx")
         return "doc", parse_docx(converted, source_file=source_file)
+    if suffix == ".wps":
+        converted = _convert_with_libreoffice(path, target_ext=".docx")
+        return "wps", parse_docx(converted, source_file=source_file)
     if suffix == ".xls":
         converted = _convert_with_libreoffice(path, target_ext=".xlsx")
         return "xls", parse_xlsx(converted, source_file=source_file)

@@ -7,8 +7,11 @@ from pathlib import Path
 from uuid import UUID
 
 import structlog
+from docx import Document
 from psycopg import Connection
 from psycopg.rows import dict_row
+
+from tender_backend.services.tender_requirement_priority import load_tender_requirement_overrides
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -63,6 +66,21 @@ def render_docx(
     if output_path is None:
         output_path = Path(f"/tmp/tender_export_{project_id}.docx")
     doc.save(str(output_path))
+    overrides = load_tender_requirement_overrides(conn, project_id=project_id)
+    if overrides["content_requirements"] or overrides["format_requirements"]:
+        document = Document(str(output_path))
+        document.add_page_break()
+        document.add_heading("招标文件解析要求优先响应", level=1)
+        document.add_paragraph("以下内容由招标文件解析结果生成，内容与格式要求优先于模板默认内容；如有冲突，按本节要求执行。")
+        if overrides["content_requirements"]:
+            document.add_heading("内容要求", level=2)
+            for req in overrides["content_requirements"]:
+                document.add_paragraph(str(req.get("requirement_text") or req.get("source_text") or req.get("title") or ""))
+        if overrides["format_requirements"]:
+            document.add_heading("格式要求", level=2)
+            for req in overrides["format_requirements"]:
+                document.add_paragraph(str(req.get("requirement_text") or req.get("source_text") or req.get("title") or ""))
+        document.save(str(output_path))
 
     logger.info("docx_rendered", project_id=str(project_id), output=str(output_path))
     return output_path

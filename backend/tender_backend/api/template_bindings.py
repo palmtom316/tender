@@ -71,6 +71,11 @@ class BindingRuleOut(BindingRuleBase):
 
 class RenderBundleBody(BaseModel):
     include_zip: bool = False
+    project_id: UUID | None = None
+
+
+class RenderItemBody(BaseModel):
+    project_id: UUID | None = None
 
 
 def _binding_out(row) -> BindingRuleOut:
@@ -167,9 +172,13 @@ async def get_package_context_preview(package_id: UUID, conn: Connection = Depen
 
 
 @router.get("/template-items/{template_item_id}/render-context")
-async def get_item_render_context(template_item_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
+async def get_item_render_context(
+    template_item_id: UUID,
+    project_id: UUID | None = None,
+    conn: Connection = Depends(get_db_conn),
+) -> dict[str, Any]:
     try:
-        return build_item_render_context(conn, item_id=template_item_id)
+        return build_item_render_context(conn, item_id=template_item_id, project_id=project_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -187,9 +196,13 @@ async def get_item_field_mapping_suggestions(template_item_id: UUID, conn: Conne
 
 
 @router.get("/template-packages/{package_id}/render-context")
-async def get_package_render_context(package_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict[str, Any]:
+async def get_package_render_context(
+    package_id: UUID,
+    project_id: UUID | None = None,
+    conn: Connection = Depends(get_db_conn),
+) -> dict[str, Any]:
     try:
-        return build_package_render_context(conn, package_id=package_id)
+        return build_package_render_context(conn, package_id=package_id, project_id=project_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -209,10 +222,15 @@ async def get_package_render_preflight(package_id: UUID, conn: Connection = Depe
 @router.post("/template-items/{template_item_id}/render-docx")
 async def render_template_item_docx_endpoint(
     template_item_id: UUID,
+    payload: RenderItemBody | None = None,
     conn: Connection = Depends(get_db_conn),
 ) -> dict[str, object]:
     try:
-        return render_template_item_docx(conn, item_id=template_item_id)
+        return render_template_item_docx(
+            conn,
+            item_id=template_item_id,
+            project_id=payload.project_id if payload else None,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -226,7 +244,12 @@ async def render_template_package_bundle_endpoint(
     conn: Connection = Depends(get_db_conn),
 ) -> dict[str, object]:
     try:
-        return render_template_package_bundle(conn, package_id=package_id, include_zip=payload.include_zip)
+        return render_template_package_bundle(
+            conn,
+            package_id=package_id,
+            include_zip=payload.include_zip,
+            project_id=payload.project_id,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

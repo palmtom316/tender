@@ -25,6 +25,8 @@ def test_generate_section_has_expected_steps():
     assert step_names == [
         "load_project_facts",
         "load_section_requirements",
+        "load_requirement_matches",
+        "load_bid_chapter_outline",
         "search_clauses",
         "search_sections",
         "assemble_evidence_pack",

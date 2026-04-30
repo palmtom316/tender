@@ -11,6 +11,7 @@ import pytest
 
 from tender_backend.services.extract_service.requirements_extractor import (
     extract_requirements,
+    extract_requirements_from_source_chunks,
     REQUIREMENT_CATEGORIES,
 )
 from tender_backend.services.extract_service.scoring_extractor import extract_scoring_criteria
@@ -20,6 +21,8 @@ def test_requirement_categories_defined():
     assert "veto" in REQUIREMENT_CATEGORIES
     assert "scoring" in REQUIREMENT_CATEGORIES
     assert "format" in REQUIREMENT_CATEGORIES
+    assert "project_team" in REQUIREMENT_CATEGORIES
+    assert "special" in REQUIREMENT_CATEGORIES
 
 
 def test_extract_veto_requirement():
@@ -39,6 +42,53 @@ def test_extract_qualification_requirement():
     results = asyncio.run(extract_requirements(sections))
     quals = [r for r in results if r.category == "qualification"]
     assert len(quals) >= 1
+
+
+def test_extract_core_constraints_from_source_chunks():
+    chunks = [
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "chunk_type": "paragraph",
+            "source_file": "招标文件.pdf",
+            "source_locator": "page:5:block:1",
+            "section_title": "专用资格要求",
+            "text": "投标人须具有类似项目业绩，项目经理须提供证书和社保证明。",
+            "page_start": 5,
+            "page_end": 5,
+        },
+        {
+            "id": "22222222-2222-2222-2222-222222222222",
+            "chunk_type": "paragraph",
+            "source_file": "招标文件.pdf",
+            "source_locator": "page:9:block:2",
+            "section_title": "否决项",
+            "text": "未按要求盖章的，按无效投标处理。",
+            "page_start": 9,
+            "page_end": 9,
+        },
+        {
+            "id": "33333333-3333-3333-3333-333333333333",
+            "chunk_type": "paragraph",
+            "source_file": "报价说明.pdf",
+            "source_locator": "page:2:block:1",
+            "section_title": "最高限价",
+            "text": "本项目最高限价为100万元，报价不得超过最高限价。",
+            "page_start": 2,
+            "page_end": 2,
+        },
+    ]
+
+    results = extract_requirements_from_source_chunks(chunks)
+    categories = {item.category for item in results}
+
+    assert "performance" in categories
+    assert "project_team" in categories
+    assert "veto" in categories
+    assert any(item.is_veto and item.requires_human_confirm for item in results)
+    assert any(item.category == "veto" and item.is_hard_constraint for item in results)
+    assert any(item.category == "performance" and item.is_hard_constraint for item in results)
+    assert any(item.ignored_for_pricing for item in results)
+    assert all(item.source_file and item.source_locator for item in results)
 
 
 def test_extract_scoring_from_table():
