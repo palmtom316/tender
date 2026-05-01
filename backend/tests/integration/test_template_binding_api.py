@@ -256,7 +256,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
     template.add_paragraph("投标人：{{ company.company_name }}")
     template.add_paragraph("项目人员数：{{ people|length }}")
     template.add_paragraph("附件数：{{ assets|length }}")
-    template.save(source_dir / "20258B商务文件.docx")
+    template.save(source_dir / "5.基本情况表.docx")
     upload_root = tmp_path / "uploads"
     upload_root.mkdir()
     monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
@@ -446,7 +446,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
 
         listed = client.get(f"/api/template-items/{document_item_id}/bindings")
         assert listed.status_code == 200
-        assert len(listed.json()) == 2
+        assert len(listed.json()) == 3
 
         deleted = client.delete(f"/api/template-bindings/{binding2_id}")
         assert deleted.status_code == 200

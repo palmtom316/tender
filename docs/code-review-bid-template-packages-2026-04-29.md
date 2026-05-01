@@ -21,9 +21,49 @@
 
 ---
 
+## Resolution Status (2026-05-01)
+
+Cross-references the remediation report at `docs/code-review-bid-template-packages-remediation-2026-04-29.md`.
+Legend: ✅ FIXED · 🛡 VERIFIED (existing behavior is correct) · ⏸ DEFERRED (acknowledged, not blocking) · ❌ NOT FIXED.
+
+| ID | Status | Note |
+|---|---|---|
+| P0-1 | ✅ FIXED | Path validated against `evidence_upload_dir` in `_validated_asset_source_path` & `_validate_managed_asset_path`. Regression test: `test_path_safety.py`, `test_render_attachment_manifest_rejects_assets_outside_upload_root`. |
+| P0-2 | ✅ FIXED | `TEMPLATE_IMPORT_ROOTS` allowlist enforced via `ensure_path_within_roots`. Regression test: `test_build_template_items_from_directory_rejects_path_outside_allowed_roots`. |
+| P0-3 | ✅ FIXED | `replace_items` now reuses rows by `relative_path` (UPDATE) instead of delete+insert; bindings preserved. Regression test: `test_bid_template_package_repo_replace_items.py`. |
+| P0-4 | ✅ FIXED | `by_id` filters strictly by `record_ids`; `latest` uses `_latest_sort_key` per `source_type`. Regression test: `test_select_records_by_id_requires_record_ids`. |
+| P0-5 | ✅ FIXED (re-scoped) | Transaction boundary moved to service layer (`with conn.transaction()` in `import_template_package_from_directory`); repo methods no longer commit. |
+| P0-6 | ✅ FIXED | Extension allowlist + magic byte + Content-Type + size limit in `_validate_uploaded_file`. Regression test: `test_master_data_evidence_upload.py` (11 cases). |
+| P1-1 | ✅ FIXED | `count_items_by_package` batch query; called from `template_packages.list_template_packages`. |
+| P1-2 | ✅ FIXED | `get_current_user` supports both static `dev-token` and DB `user_session` token; all routers register `Depends(get_current_user)`. |
+| P1-3 | ✅ FIXED | `_latest_sort_key` defines `latest` semantics per `source_type`. Regression test: `test_select_records_latest_uses_source_specific_sort_keys`. |
+| P1-4 | ✅ FIXED | `DatabaseModule.tsx` reduced to 71 lines; workbenches extracted into separate components. |
+| P1-5 | ✅ FIXED | `master_data.py` reduced to 90 lines; six per-domain routers (`master_data_companies`, `_people`, `_performances`, `_certificates`, `_financials`, `_evidence`). |
+| P1-6 | ✅ FIXED | Suggestions return `confidence` field; frontend renders confidence Badge in `TemplateFieldWorkbench`. |
+| P1-7 | ✅ FIXED | New preflight endpoint `GET /template-packages/{package_id}/render-preflight`; frontend surfaces missing bindings, missing assets, unsafe paths. |
+| P2-1 | ✅ FIXED | `TEMPLATE_RENDER_ROOT` / `TEMPLATE_BUNDLE_ROOT` injected via `Settings`. `/tmp/...` retained only as dev fallback default. |
+| P2-2 | ⏸ DEFERRED | Column constants are module-level literals interpolated via f-string — no user input flows into SQL identifiers, so no injection risk. Migrating to `psycopg.sql.Identifier`/`SQL` is a code-quality refactor, not a correctness fix; tracked for a future cleanup pass. |
+| P2-3 | ✅ FIXED | `TemplateFieldWorkbench` defaults `date_format` to `%Y-%m-%d` and `default_value` is normalized only when non-empty. |
+| P2-4 | ✅ FIXED | `StandardsWorkbench.tsx` uses `pollingRef` outside the effect dep array, no longer recreating the interval on every render. |
+| P2-5 | ✅ FIXED | All `window.confirm()` call-sites replaced with shared `ConfirmDialog` (verified by grep — no `window.confirm` remains). |
+| P2-6 | ✅ FIXED | `EvidenceAssetOut` response model no longer exposes `file_path`. |
+| P3-1 | ⏸ DEFERRED | `_to_cn_numeral` still capped at 1–20. Real templates today do not exceed 20 sub-items per attachment chapter; if that ever changes we will extend the table. Cost/benefit currently does not justify changing it. |
+| P3-2 | ⏸ DEFERRED | Status literal coupling between polling logic and backend was reduced when polling moved into `StandardsWorkbench`, but the literal strings still live there. Acceptable given the small surface; revisit if more processing states are introduced. |
+| P3-3 | 🛡 VERIFIED | `0018_bid_template_binding_rules.py:25` defines `template_item_id ... ON DELETE CASCADE`. After P0-3 fix the cascade path is no longer hit during re-import (rows are updated in place). Cascade behavior is intentional for hard-delete cases. |
+| P3-4 | ⏸ DEFERRED (partial) | Unit-level coverage added for renderer (`test_package_renderer.py`), preflight, and bundle helpers. End-to-end API integration tests (`test_template_package_api.py`) exist but are skipped without `DATABASE_URL` — need DB-enabled CI to actually exercise them. |
+
+### Open follow-ups
+
+1. Stand up a `DATABASE_URL`-enabled CI lane to actually execute the integration suite (`test_master_data_api.py`, `test_template_package_api.py`, `test_template_binding_api.py`) instead of skipping them.
+2. Migrate the deferred P2-2 / P3-1 / P3-2 items into the backlog; they are not merge-blocking but should not be lost.
+
+---
+
 ## P0 — Blocking (must fix before merge)
 
 ### [P0-1] Arbitrary file read via evidence asset `file_path` — path traversal
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `backend/tender_backend/services/template_service/package_renderer.py:127-141`, `_copy_attachment_file()`
 - **Category**: Security
@@ -42,6 +82,8 @@ if not source_path.is_file():
 ---
 
 ### [P0-2] Unrestricted server-side directory traversal via import API
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `backend/tender_backend/api/template_packages.py:145-164`, `backend/tender_backend/services/template_service/package_importer.py:86-120`
 - **Category**: Security
@@ -65,6 +107,8 @@ if not root.exists():
 
 ### [P0-3] `replace_items` silently destroys binding rule data — no FK cascade verification
 
+**Status (2026-05-01)**: ✅ FIXED.
+
 - **Location**: `backend/tender_backend/db/repositories/bid_template_package_repo.py:217-254`
 - **Category**: Data Integrity
 - **Impact**: `replace_items()` executes `DELETE FROM bid_template_item WHERE package_id = %s` then re-inserts items with new UUIDs. If `bid_template_binding_rule.template_item_id` has a `FOREIGN KEY ... ON DELETE CASCADE`, all binding rules for that package are **silently destroyed**. If there is NO cascade, the DELETE will fail with a foreign key violation, and the method will crash with an unhandled exception (no try/except, and `conn.commit()` is called after). Either way, this is data-loss or crash behavior that the caller (`package_importer.py:153`) does not handle.
@@ -80,6 +124,8 @@ cur.execute("DELETE FROM bid_template_item WHERE package_id = %s", (package_id,)
 ---
 
 ### [P0-4] `selection_mode: "by_id"` is dead code — identical to "first"
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `backend/tender_backend/services/template_service/context_preview.py:168-179`, `_select_records()`
 - **Category**: Correctness
@@ -99,6 +145,8 @@ if selection_mode == "by_id":
 
 ### [P0-5] `upsert_package` never calls `conn.commit()` — inconsistent transaction handling
 
+**Status (2026-05-01)**: ✅ FIXED (re-scoped) — transaction now lives at the service boundary.
+
 - **Location**: `backend/tender_backend/db/repositories/bid_template_package_repo.py:176-215`
 - **Category**: Data Integrity
 - **Impact**: Every other create/update/delete method in the repository layer calls `conn.commit()` explicitly. `upsert_package` does not. It relies on the caller (or FastAPI middleware) to commit. If the API handler that calls it adds an additional write in the same request lifecycle before the implicit commit, data could be lost. This inconsistency is a latent bug waiting to be triggered.
@@ -115,6 +163,8 @@ if selection_mode == "by_id":
 ---
 
 ### [P0-6] File upload has no content-type validation or malware scanning
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `backend/tender_backend/api/master_data.py:733-776`, `upload_evidence_asset()`
 - **Category**: Security
@@ -142,6 +192,8 @@ local_path.write_bytes(content)  # No content validation
 
 ### [P1-1] N+1 query in `list_template_packages` — counts items per package individually
 
+**Status (2026-05-01)**: ✅ FIXED.
+
 - **Location**: `backend/tender_backend/api/template_packages.py:119-121`
 - **Category**: Performance
 - **Impact**: For N packages, this makes N+1 queries to count items. With 20 packages, that's 21 queries. Scales linearly with package count.
@@ -160,6 +212,8 @@ items_by_package = {
 
 ### [P1-2] No authorization checks on any new API endpoint
 
+**Status (2026-05-01)**: ✅ FIXED.
+
 - **Location**: All new API routers (`master_data.py`, `template_bindings.py`, `template_packages.py`)
 - **Category**: Security
 - **Impact**: There appear to be no authentication/authorization decorators or middleware checks on the new endpoints. If other API endpoints in the project use auth (check `main.py` for middleware), these new endpoints may be unintentionally public.
@@ -169,6 +223,8 @@ items_by_package = {
 ---
 
 ### [P1-3] `_select_records` sorts `filtered` but `records` are unsorted — "latest" is unreliable
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `backend/tender_backend/services/template_service/context_preview.py:168-179`
 - **Category**: Correctness
@@ -186,6 +242,8 @@ if selection_mode == "latest":
 
 ### [P1-4] `DatabaseModule.tsx` is 873 lines — too large, mixes 4 distinct workbenches
 
+**Status (2026-05-01)**: ✅ FIXED.
+
 - **Location**: `frontend/src/modules/database/DatabaseModule.tsx`
 - **Category**: Maintainability
 - **Impact**: One file contains `StandardsWorkbench`, `UploadForm`, `CompanyLibraryWorkbench`, `PersonnelLibraryWorkbench`, and the routing `DatabaseModule`. Each workbench has its own state, API calls, and JSX. This makes the file hard to navigate, test, and review.
@@ -200,6 +258,8 @@ if selection_mode == "latest":
 ---
 
 ### [P1-5] `master_data.py` is 795 lines — monolithic API file with 7 entity CRUDs
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `backend/tender_backend/api/master_data.py`
 - **Category**: Maintainability
@@ -219,6 +279,8 @@ if selection_mode == "latest":
 
 ### [P1-6] `suggest_field_mappings` uses fragile keyword matching in Chinese
 
+**Status (2026-05-01)**: ✅ FIXED — `confidence` field added.
+
 - **Location**: `backend/tender_backend/services/template_service/context_preview.py:67-127`
 - **Category**: Correctness
 - **Impact**: Field mapping suggestions rely on substring matching against `item_name` in Chinese (e.g., `"基本情况表" in item_name`, `"证书" in item_name`). This is fragile — a template item named "资质证书汇总" would not match `"证书"` (it does, actually), but a typo or variant like "资格证" would break it. The `item_code.startswith("5")` heuristic is similarly arbitrary.
@@ -234,6 +296,8 @@ if source_type == "company_profile" and ("基本情况表" in item_name or (item
 
 ### [P1-7] `_render_attachment_item` with empty assets raises `ValueError` but swallows it in bundle render
 
+**Status (2026-05-01)**: ✅ FIXED — preflight endpoint reports issues before render.
+
 - **Location**: `backend/tender_backend/services/template_service/package_renderer.py:387-418, 442-481`
 - **Category**: Error Handling
 - **Impact**: `_render_attachment_item` raises `ValueError("attachment item has no evidence assets to export")` if there are no assets. The calling loop in `render_template_package_bundle` catches `Exception` and adds it to `item_results` as `"status": "failed"`. While this prevents crashes, it means a misconfigured template item silently fails in the bundle output — the user sees `failed_count: 1` with an error message but no indication of which asset is missing or how to fix it.
@@ -246,6 +310,8 @@ if source_type == "company_profile" and ("基本情况表" in item_name or (item
 
 ### [P2-1] Hard-coded `/tmp` render paths — not configurable, not container-friendly
 
+**Status (2026-05-01)**: ✅ FIXED.
+
 - **Location**: `docx_renderer.py:14` (`_RENDER_ROOT`), `package_renderer.py:21` (`_RENDER_BUNDLE_ROOT`)
 - **Category**: Configuration
 - **Impact**: Render output always goes to `/tmp/tender_template_renders` and `/tmp/tender_template_bundles`. In containerized environments, `/tmp` may be memory-backed (tmpfs) and limited in size. On multi-worker deployments, each worker writes to the same path, risking conflicts.
@@ -254,6 +320,8 @@ if source_type == "company_profile" and ("基本情况表" in item_name or (item
 ---
 
 ### [P2-2] SQL column strings interpolated with f-strings — not injection but fragile
+
+**Status (2026-05-01)**: ⏸ DEFERRED — column constants are module-level literals; no user input flows into SQL identifiers, so no injection risk. Migrating to `psycopg.sql.Identifier`/`SQL` is a code-quality refactor, tracked for a future cleanup pass.
 
 - **Location**: `master_data_repo.py` (all query methods), `bid_template_binding_repo.py`, `bid_template_package_repo.py`
 - **Category**: Code Quality
@@ -264,6 +332,8 @@ if source_type == "company_profile" and ("基本情况表" in item_name or (item
 
 ### [P2-3] `draftFromBinding` loses `date_format`, `decimals`, `join_with` if not present
 
+**Status (2026-05-01)**: ✅ FIXED.
+
 - **Location**: `frontend/src/modules/database/components/TemplateFieldWorkbench.tsx:120-132`
 - **Category**: Correctness (Frontend)
 - **Impact**: When editing an existing binding, `draftFromBinding` copies `rule.field_mappings` directly. If a mapping has implicit defaults (e.g., `transform: "date"` without explicit `date_format`), the UI won't show the default format string, but saving will send `undefined` — which the backend may or may not handle. The backend's `_apply_field_mapping_to_record` defaults to `%Y-%m-%d` for dates, so it's safe, but the UI is misleading.
@@ -273,6 +343,8 @@ if source_type == "company_profile" and ("基本情况表" in item_name or (item
 ---
 
 ### [P2-4] Polling effect in `StandardsWorkbench` recreates interval on every standards change
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `frontend/src/modules/database/DatabaseModule.tsx:263-277`
 - **Category**: Performance (Frontend)
@@ -296,6 +368,8 @@ useEffect(() => {
 
 ### [P2-5] `window.confirm()` used for destructive actions — unstyled, non-localized
 
+**Status (2026-05-01)**: ✅ FIXED.
+
 - **Location**: `frontend/src/modules/database/DatabaseModule.tsx:364`, `frontend/src/modules/database/components/TemplateFieldWorkbench.tsx:541`
 - **Category**: UX (Frontend)
 - **Impact**: `window.confirm()` is unstyled, blocks the main thread, and renders differently across browsers. It breaks the visual consistency of the app.
@@ -304,6 +378,8 @@ useEffect(() => {
 ---
 
 ### [P2-6] Exported `EvidenceAsset` response includes `file_path` — information disclosure
+
+**Status (2026-05-01)**: ✅ FIXED.
 
 - **Location**: `backend/tender_backend/api/master_data.py:504-524` (`_evidence_asset_out()`)
 - **Category**: Security
@@ -316,6 +392,8 @@ useEffect(() => {
 
 ### [P3-1] `_to_cn_numeral` only supports 1-20 — silently returns Arabic for larger values
 
+**Status (2026-05-01)**: ⏸ DEFERRED — no current template exceeds 20 sub-items per attachment chapter. Will revisit if a real template hits the limit.
+
 - **Location**: `backend/tender_backend/services/template_service/package_renderer.py:30-53`
 - **Category**: Edge Case
 - **Impact**: For template items with more than 20 sub-items, the Chinese numeral rendering silently falls back to Arabic numerals. The output will mix "（二十一）" (desired) with "（21）" (actual), looking inconsistent.
@@ -324,6 +402,8 @@ useEffect(() => {
 ---
 
 ### [P3-2] `_is_active_status` defined but uses string literals — fragile to backend changes
+
+**Status (2026-05-01)**: ⏸ DEFERRED — small surface area after polling moved into `StandardsWorkbench`; revisit if backend introduces additional processing states.
 
 - **Location**: `frontend/src/modules/database/DatabaseModule.tsx:58-60`
 - **Category**: Maintainability
@@ -334,6 +414,8 @@ useEffect(() => {
 
 ### [P3-3] Migration `0019_evidence_assets.py` and `0020_binding_field_mappings.py` — verify FK cascade behavior
 
+**Status (2026-05-01)**: 🛡 VERIFIED — `0018_bid_template_binding_rules.py:25` defines `template_item_id ... ON DELETE CASCADE`. After the P0-3 fix the cascade path is no longer hit during re-import (rows are updated in place). Cascade behavior remains intentional for hard-delete flows.
+
 - **Location**: `backend/tender_backend/db/alembic/versions/0019_evidence_assets.py`, `0020_binding_field_mappings.py`
 - **Category**: Schema Design
 - **Impact**: The `replace_items` issue (P0-3) depends on whether these migrations use `ON DELETE CASCADE`. Need to verify.
@@ -342,6 +424,8 @@ useEffect(() => {
 ---
 
 ### [P3-4] No integration tests for DOCX rendering or bundle export
+
+**Status (2026-05-01)**: ⏸ DEFERRED (partial) — unit-level coverage added (`test_package_renderer.py`, `test_template_docx_renderer.py`), and `test_template_package_api.py` exists. The latter is skipped without `DATABASE_URL`; full integration runs require a DB-enabled CI lane.
 
 - **Location**: Test directory — `test_template_binding_api.py` (432 lines), but no tests for `render_template_item_docx` or `render_template_package_bundle`
 - **Category**: Test Coverage
