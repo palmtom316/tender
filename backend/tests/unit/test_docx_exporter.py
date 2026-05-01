@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from docx import Document
 
-from tender_backend.services.export_service.docx_exporter import render_docx
+from tender_backend.services.export_service import docx_exporter
+from tender_backend.services.export_service.docx_exporter import (
+    EXPORT_MODE_MULTI_DOC_ZIP,
+    EXPORT_MODE_MULTI_DOCX_ZIP,
+    EXPORT_MODE_SINGLE_DOCX,
+    render_chapter_docx_zip,
+    render_docx,
+    render_export,
+)
 
 
 class _Cursor:
-    def __init__(self):
+    def __init__(self, drafts: list[dict] | None = None):
+        self._drafts = drafts
         self.result = []
 
     def __enter__(self):
@@ -22,7 +33,7 @@ class _Cursor:
         if "SELECT name FROM project" in query:
             self.result = [("测试项目",)]
         elif "FROM chapter_draft" in query:
-            self.result = [
+            self.result = self._drafts if self._drafts is not None else [
                 {
                     "chapter_code": "1.1",
                     "content_md": "# 1.1 资格响应\n\n## 响应内容\n- 已提供营业执照",
@@ -47,8 +58,11 @@ class _Cursor:
 
 
 class _Conn:
+    def __init__(self, drafts: list[dict] | None = None):
+        self._drafts = drafts
+
     def cursor(self, *args, **kwargs):
-        return _Cursor()
+        return _Cursor(self._drafts)
 
 
 def test_render_docx_without_template_creates_plain_word_file(tmp_path: Path, monkeypatch) -> None:
@@ -62,3 +76,137 @@ def test_render_docx_without_template_creates_plain_word_file(tmp_path: Path, mo
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "测试项目 投标文件" in text
     assert "已提供营业执照" in text
+
+
+def _multi_chapter_drafts() -> list[dict]:
+    return [
+        {
+            "chapter_code": "1.1",
+            "content_md": "# 资格响应\n\n- 已提供营业执照",
+            "chapter_title": "资格响应",
+            "volume_type": "qualification",
+            "sort_order": 1,
+        },
+        {
+            "chapter_code": "2.1",
+            "content_md": "# 商务方案\n\n- 报价说明",
+            "chapter_title": "商务方案",
+            "volume_type": "business",
+            "sort_order": 2,
+        },
+    ]
+
+
+def test_render_chapter_docx_zip_packs_each_chapter(tmp_path: Path) -> None:
+    output = tmp_path / "chapters.zip"
+    drafts = _multi_chapter_drafts()
+
+    path = render_chapter_docx_zip(_Conn(drafts), project_id=uuid4(), output_path=output)
+
+    assert path == output
+    with zipfile.ZipFile(path) as archive:
+        names = sorted(archive.namelist())
+    assert len(names) == 2
+    assert all(name.endswith(".docx") for name in names)
+    assert names[0].startswith("01_")
+    assert names[1].startswith("02_")
+    assert "资格响应" in names[0]
+    assert "商务方案" in names[1]
+
+
+def test_render_chapter_docx_zip_raises_when_no_drafts(tmp_path: Path) -> None:
+    output = tmp_path / "empty.zip"
+
+    with pytest.raises(ValueError):
+        render_chapter_docx_zip(_Conn(drafts=[]), project_id=uuid4(), output_path=output)
+
+
+def test_render_export_dispatches_modes(tmp_path: Path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_single(conn, *, project_id, template_name=None, output_path=None):
+        captured["single"] = output_path
+        target = output_path or tmp_path / "single.docx"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("single", encoding="utf-8")
+        return target
+
+    def fake_multi_docx(conn, *, project_id, output_path=None):
+        captured["multi_docx"] = output_path
+        target = output_path or tmp_path / "multi.docx.zip"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("docx-zip", encoding="utf-8")
+        return target
+
+    def fake_multi_doc(conn, *, project_id, output_path=None):
+        captured["multi_doc"] = output_path
+        target = output_path or tmp_path / "multi.doc.zip"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("doc-zip", encoding="utf-8")
+        return target
+
+    monkeypatch.setattr(docx_exporter, "render_docx", fake_single)
+    monkeypatch.setattr(docx_exporter, "render_chapter_docx_zip", fake_multi_docx)
+    monkeypatch.setattr(docx_exporter, "render_chapter_doc_zip", fake_multi_doc)
+
+    project_id = uuid4()
+    out_single = render_export(
+        _Conn(),
+        project_id=project_id,
+        mode=EXPORT_MODE_SINGLE_DOCX,
+        output_path=tmp_path / "s.docx",
+    )
+    out_docx_zip = render_export(
+        _Conn(),
+        project_id=project_id,
+        mode=EXPORT_MODE_MULTI_DOCX_ZIP,
+        output_path=tmp_path / "d.zip",
+    )
+    out_doc_zip = render_export(
+        _Conn(),
+        project_id=project_id,
+        mode=EXPORT_MODE_MULTI_DOC_ZIP,
+        output_path=tmp_path / "doc.zip",
+    )
+
+    assert out_single.read_text(encoding="utf-8") == "single"
+    assert out_docx_zip.read_text(encoding="utf-8") == "docx-zip"
+    assert out_doc_zip.read_text(encoding="utf-8") == "doc-zip"
+    assert set(captured.keys()) == {"single", "multi_docx", "multi_doc"}
+
+
+def test_render_export_rejects_unknown_mode(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        render_export(_Conn(), project_id=uuid4(), mode="unknown", output_path=tmp_path / "x")
+
+
+def test_render_chapter_doc_zip_uses_doc_converter(tmp_path: Path, monkeypatch) -> None:
+    output = tmp_path / "doc-zip.zip"
+    drafts = _multi_chapter_drafts()
+
+    def fake_convert(docx_path: Path) -> Path:
+        doc_path = docx_path.with_suffix(".doc")
+        doc_path.write_bytes(b"DOC")
+        return doc_path
+
+    monkeypatch.setattr(docx_exporter, "convert_docx_to_doc", fake_convert)
+
+    path = docx_exporter.render_chapter_doc_zip(
+        _Conn(drafts), project_id=uuid4(), output_path=output
+    )
+
+    assert path == output
+    with zipfile.ZipFile(path) as archive:
+        names = sorted(archive.namelist())
+    assert all(name.endswith(".doc") for name in names)
+    assert len(names) == 2
+
+
+def test_render_chapter_doc_zip_raises_when_libreoffice_missing(tmp_path: Path, monkeypatch) -> None:
+    output = tmp_path / "doc-zip.zip"
+    monkeypatch.setattr(docx_exporter, "convert_docx_to_doc", lambda _path: None)
+
+    with pytest.raises(RuntimeError):
+        docx_exporter.render_chapter_doc_zip(
+            _Conn(_multi_chapter_drafts()), project_id=uuid4(), output_path=output
+        )

@@ -1,6 +1,7 @@
 """API routes for export operations."""
 
 from __future__ import annotations
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,10 +15,35 @@ from tender_backend.core.project_access import require_project_access, require_r
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.services.delivery_package import build_delivery_package, get_delivery_package, list_delivery_packages
-from tender_backend.services.export_service.docx_exporter import render_docx
+from tender_backend.services.export_service.docx_exporter import (
+    EXPORT_MODES,
+    EXPORT_MODE_MULTI_DOC_ZIP,
+    EXPORT_MODE_MULTI_DOCX_ZIP,
+    EXPORT_MODE_SINGLE_DOCX,
+    render_export,
+)
 
 router = APIRouter(tags=["exports"])
 _DELIVERY_PACKAGE_PROJECT_QUERY = "SELECT project_id FROM bid_delivery_package WHERE id = %s"
+_EXPORT_RECORD_PROJECT_QUERY = "SELECT project_id FROM export_record WHERE id = %s"
+
+ExportMode = Literal["single_docx", "multi_docx_zip", "multi_doc_zip"]
+
+_MODE_TO_TEMPLATE_NAME = {
+    EXPORT_MODE_SINGLE_DOCX: "plain_docx",
+    EXPORT_MODE_MULTI_DOCX_ZIP: "chapter_docx_zip",
+    EXPORT_MODE_MULTI_DOC_ZIP: "chapter_doc_zip",
+}
+
+_MODE_TO_DOWNLOAD_SUFFIX = {
+    EXPORT_MODE_SINGLE_DOCX: (".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    EXPORT_MODE_MULTI_DOCX_ZIP: (".zip", "application/zip"),
+    EXPORT_MODE_MULTI_DOC_ZIP: (".zip", "application/zip"),
+}
+
+
+class CreateExportBody(BaseModel):
+    mode: ExportMode = EXPORT_MODE_SINGLE_DOCX
 
 
 class DeliveryPackageCreateBody(BaseModel):
@@ -42,11 +68,21 @@ async def list_exports(
 @router.post("/projects/{project_id}/exports")
 async def create_export(
     project_id: UUID,
+    body: CreateExportBody | None = None,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     require_project_access(conn, project_id=project_id, user=user)
-    output = render_docx(conn, project_id=project_id)
+    mode = (body.mode if body else EXPORT_MODE_SINGLE_DOCX)
+    if mode not in EXPORT_MODES:
+        raise HTTPException(status_code=400, detail=f"unsupported export mode: {mode}")
+    try:
+        output = render_export(conn, project_id=project_id, mode=mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    template_name = _MODE_TO_TEMPLATE_NAME.get(mode, mode)
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """
@@ -54,12 +90,57 @@ async def create_export(
             VALUES (%s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (uuid4(), project_id, "completed", "plain_docx", str(output)),
+            (uuid4(), project_id, "completed", template_name, str(output)),
         ).fetchone()
     conn.commit()
     if row is None:
         raise HTTPException(status_code=500, detail="failed to create export record")
-    return dict(row)
+    result = dict(row)
+    result["mode"] = mode
+    return result
+
+
+@router.get("/exports/{export_id}/download")
+async def download_export(
+    export_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> FileResponse:
+    require_resource_project_access(
+        conn,
+        resource_id=export_id,
+        query=_EXPORT_RECORD_PROJECT_QUERY,
+        not_found_detail="export record not found",
+        user=user,
+    )
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            "SELECT * FROM export_record WHERE id = %s",
+            (export_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="export record not found")
+    export_key = row.get("export_key")
+    if not export_key:
+        raise HTTPException(status_code=404, detail="export file path missing")
+    path = Path(export_key)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="export file not found")
+    suffix, media_type = _MODE_TO_DOWNLOAD_SUFFIX.get(
+        _template_name_to_mode(row.get("template_name")),
+        (path.suffix, "application/octet-stream"),
+    )
+    filename = path.name if path.suffix == suffix else f"{path.stem}{suffix}"
+    return FileResponse(path, media_type=media_type, filename=filename)
+
+
+def _template_name_to_mode(template_name: str | None) -> str:
+    if not template_name:
+        return EXPORT_MODE_SINGLE_DOCX
+    for mode, alias in _MODE_TO_TEMPLATE_NAME.items():
+        if alias == template_name:
+            return mode
+    return EXPORT_MODE_SINGLE_DOCX
 
 
 @router.get("/projects/{project_id}/export-gates")

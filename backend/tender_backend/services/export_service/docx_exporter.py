@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import zipfile
 from pathlib import Path
 from uuid import UUID
 
@@ -15,12 +17,22 @@ from docx.oxml.ns import qn
 from psycopg import Connection
 from psycopg.rows import dict_row
 
+from tender_backend.services.export_service.doc_converter import convert_docx_to_doc
 from tender_backend.services.tender_requirement_priority import load_tender_requirement_overrides
 
 logger = structlog.stdlib.get_logger(__name__)
 
 TEMPLATE_DIR = Path(os.environ.get("TEMPLATE_DIR", "templates"))
 EXPORT_ROOT = Path(os.environ.get("TENDER_EXPORT_ROOT", "/tmp/tender-exports"))
+
+EXPORT_MODE_SINGLE_DOCX = "single_docx"
+EXPORT_MODE_MULTI_DOCX_ZIP = "multi_docx_zip"
+EXPORT_MODE_MULTI_DOC_ZIP = "multi_doc_zip"
+EXPORT_MODES: tuple[str, ...] = (
+    EXPORT_MODE_SINGLE_DOCX,
+    EXPORT_MODE_MULTI_DOCX_ZIP,
+    EXPORT_MODE_MULTI_DOC_ZIP,
+)
 
 
 def _add_markdown_content(document: Document, content: str) -> None:
@@ -213,3 +225,171 @@ def render_volume_docx(
     if output_path is None:
         output_path = EXPORT_ROOT / str(project_id) / f"bid-{volume_type}-{project_id}.docx"
     return _render_plain_docx(conn, project_id=project_id, volume_type=volume_type, output_path=output_path)
+
+
+_FILENAME_SAFE_RE = re.compile(r"[\\/:*?\"<>|\r\n\t]+")
+
+
+def _safe_filename_segment(value: str, fallback: str = "chapter") -> str:
+    cleaned = _FILENAME_SAFE_RE.sub("_", value).strip(" ._-")
+    return cleaned or fallback
+
+
+def _load_chapter_drafts(conn: Connection, project_id: UUID) -> list[dict]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            """
+            SELECT cd.chapter_code, cd.content_md, bc.chapter_title, bc.volume_type, bc.sort_order
+            FROM chapter_draft cd
+            LEFT JOIN bid_chapter bc ON bc.project_id = cd.project_id AND bc.chapter_code = cd.chapter_code
+            WHERE cd.project_id = %s
+            ORDER BY bc.sort_order NULLS LAST, cd.chapter_code
+            """,
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _render_chapter_docx(
+    *,
+    project_name: str,
+    draft: dict,
+    output_path: Path,
+) -> Path:
+    document = Document()
+    _apply_basic_style(document)
+    chapter_code = str(draft.get("chapter_code") or "").strip()
+    chapter_title = str(draft.get("chapter_title") or "").strip()
+    heading = " ".join(part for part in (chapter_code, chapter_title) if part) or "章节"
+    document.add_heading(f"{project_name} 投标文件", level=0)
+    document.add_heading(heading, level=1)
+    _add_markdown_content(document, draft.get("content_md") or "")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    document.save(str(output_path))
+    return output_path
+
+
+def _chapter_filename(draft: dict, index: int, suffix: str) -> str:
+    chapter_code = str(draft.get("chapter_code") or "").strip()
+    chapter_title = str(draft.get("chapter_title") or "").strip()
+    code_segment = _safe_filename_segment(chapter_code, fallback=f"ch{index + 1:02d}")
+    title_segment = _safe_filename_segment(chapter_title, fallback="")
+    base = f"{index + 1:02d}_{code_segment}"
+    if title_segment:
+        base = f"{base}_{title_segment}"
+    return f"{base}{suffix}"
+
+
+def _default_zip_path(project_id: UUID, suffix: str) -> Path:
+    return EXPORT_ROOT / str(project_id) / f"bid-chapters-{suffix}-{project_id}.zip"
+
+
+def render_chapter_docx_zip(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    output_path: Path | None = None,
+) -> Path:
+    """Render each chapter draft into its own .docx and pack into a zip."""
+    drafts = _load_chapter_drafts(conn, project_id)
+    if not drafts:
+        raise ValueError("no chapter drafts found for project")
+
+    project_name = _load_project_name(conn, project_id)
+    if output_path is None:
+        output_path = _default_zip_path(project_id, "docx")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    work_dir = output_path.parent / f"_chapters-docx-{project_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    chapter_paths: list[tuple[str, Path]] = []
+    for index, draft in enumerate(drafts):
+        filename = _chapter_filename(draft, index, ".docx")
+        chapter_path = work_dir / filename
+        _render_chapter_docx(project_name=project_name, draft=draft, output_path=chapter_path)
+        chapter_paths.append((filename, chapter_path))
+
+    with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for filename, path in chapter_paths:
+            archive.write(path, filename)
+
+    logger.info(
+        "chapter_docx_zip_rendered",
+        project_id=str(project_id),
+        output=str(output_path),
+        chapter_count=len(chapter_paths),
+    )
+    return output_path
+
+
+def render_chapter_doc_zip(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    output_path: Path | None = None,
+) -> Path:
+    """Render each chapter draft into a .docx, convert to legacy .doc, pack into zip."""
+    drafts = _load_chapter_drafts(conn, project_id)
+    if not drafts:
+        raise ValueError("no chapter drafts found for project")
+
+    project_name = _load_project_name(conn, project_id)
+    if output_path is None:
+        output_path = _default_zip_path(project_id, "doc")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    work_dir = output_path.parent / f"_chapters-doc-{project_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    converted: list[tuple[str, Path]] = []
+    failures: list[str] = []
+    for index, draft in enumerate(drafts):
+        docx_filename = _chapter_filename(draft, index, ".docx")
+        docx_path = work_dir / docx_filename
+        _render_chapter_docx(project_name=project_name, draft=draft, output_path=docx_path)
+        doc_path = convert_docx_to_doc(docx_path)
+        if doc_path is None:
+            failures.append(docx_filename)
+            continue
+        converted.append((_chapter_filename(draft, index, ".doc"), doc_path))
+
+    if failures:
+        raise RuntimeError(
+            "DOC conversion unavailable or failed for chapters: " + ", ".join(failures)
+        )
+
+    with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for filename, path in converted:
+            archive.write(path, filename)
+
+    logger.info(
+        "chapter_doc_zip_rendered",
+        project_id=str(project_id),
+        output=str(output_path),
+        chapter_count=len(converted),
+    )
+    return output_path
+
+
+def render_export(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    mode: str = EXPORT_MODE_SINGLE_DOCX,
+    template_name: str = "default_technical_bid.docx",
+    output_path: Path | None = None,
+) -> Path:
+    """Dispatch export rendering based on the requested mode."""
+    if mode == EXPORT_MODE_SINGLE_DOCX:
+        return render_docx(
+            conn,
+            project_id=project_id,
+            template_name=template_name,
+            output_path=output_path,
+        )
+    if mode == EXPORT_MODE_MULTI_DOCX_ZIP:
+        return render_chapter_docx_zip(conn, project_id=project_id, output_path=output_path)
+    if mode == EXPORT_MODE_MULTI_DOC_ZIP:
+        return render_chapter_doc_zip(conn, project_id=project_id, output_path=output_path)
+    raise ValueError(f"unsupported export mode: {mode}")

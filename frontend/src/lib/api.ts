@@ -353,7 +353,10 @@ export interface ExportRecord {
   template_name: string | null;
   export_key: string | null;
   created_at: string;
+  mode?: ExportMode;
 }
+
+export type ExportMode = "single_docx" | "multi_docx_zip" | "multi_doc_zip";
 
 export function fetchExportGates(
   projectId: string,
@@ -373,9 +376,14 @@ export function fetchExports(
   });
 }
 
-export function createExport(projectId: string): Promise<ExportRecord> {
+export function createExport(
+  projectId: string,
+  mode: ExportMode = "single_docx",
+): Promise<ExportRecord> {
   return request<ExportRecord>(`/projects/${projectId}/exports`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
   });
 }
 

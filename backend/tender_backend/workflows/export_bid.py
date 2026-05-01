@@ -85,14 +85,27 @@ class RenderDocx(WorkflowStep):
         conn = ctx.data.get("_db_conn")
         if conn is None:
             return StepResult(state=StepState.FAILED, message="No DB connection")
-        from tender_backend.services.export_service.docx_exporter import render_docx
+        from tender_backend.services.export_service.docx_exporter import (
+            EXPORT_MODE_SINGLE_DOCX,
+            EXPORT_MODES,
+            render_export,
+        )
         template_name = ctx.data.get("template_name", "default_technical_bid.docx")
+        mode = ctx.data.get("export_mode", EXPORT_MODE_SINGLE_DOCX)
+        if mode not in EXPORT_MODES:
+            return StepResult(state=StepState.FAILED, message=f"unsupported export mode: {mode}")
         try:
-            output = render_docx(conn, project_id=UUID(ctx.project_id), template_name=template_name)
+            output = render_export(
+                conn,
+                project_id=UUID(ctx.project_id),
+                mode=mode,
+                template_name=template_name,
+            )
             ctx.data["docx_path"] = str(output)
-        except FileNotFoundError as exc:
+            ctx.data["export_mode"] = mode
+        except (FileNotFoundError, ValueError, RuntimeError) as exc:
             return StepResult(state=StepState.FAILED, message=str(exc))
-        return StepResult(state=StepState.COMPLETED, message=f"DOCX rendered: {output}")
+        return StepResult(state=StepState.COMPLETED, message=f"Export rendered: {output}")
 
 
 class ConvertToPdf(WorkflowStep):
@@ -100,6 +113,10 @@ class ConvertToPdf(WorkflowStep):
 
     async def execute(self, ctx: WorkflowContext) -> StepResult:
         from pathlib import Path
+        from tender_backend.services.export_service.docx_exporter import EXPORT_MODE_SINGLE_DOCX
+        if ctx.data.get("export_mode", EXPORT_MODE_SINGLE_DOCX) != EXPORT_MODE_SINGLE_DOCX:
+            ctx.data["pdf_path"] = None
+            return StepResult(state=StepState.COMPLETED, message="PDF conversion skipped for non-single-docx mode")
         docx_path = ctx.data.get("docx_path")
         if not docx_path:
             return StepResult(state=StepState.FAILED, message="No DOCX path")
@@ -122,13 +139,13 @@ class SaveExportRecord(WorkflowStep):
         if conn is None:
             return StepResult(state=StepState.FAILED, message="No DB connection")
         export_key = ctx.data.get("docx_path", "")
+        template_name = ctx.data.get("export_mode") or ctx.data.get("template_name", "default")
         conn.execute(
             """
             INSERT INTO export_record (id, project_id, status, template_name, export_key)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (uuid4().hex, ctx.project_id, "completed",
-             ctx.data.get("template_name", "default"), export_key),
+            (uuid4().hex, ctx.project_id, "completed", template_name, export_key),
         )
         conn.commit()
         return StepResult(state=StepState.COMPLETED, message="Export record saved")

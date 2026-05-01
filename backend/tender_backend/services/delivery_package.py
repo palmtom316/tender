@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -14,9 +12,17 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from tender_backend.services.export_service.doc_converter import convert_docx_to_doc
 from tender_backend.services.export_service.docx_exporter import EXPORT_ROOT, render_docx, render_volume_docx
 from tender_backend.services.review_service.compliance_matrix import build_compliance_matrix
 from tender_backend.services.review_service.review_engine import build_project_review
+
+__all__ = [
+    "build_delivery_package",
+    "convert_docx_to_doc",
+    "get_delivery_package",
+    "list_delivery_packages",
+]
 
 
 def _write_json(path: Path, payload: Any) -> Path:
@@ -167,27 +173,3 @@ def list_delivery_packages(conn: Connection, *, project_id: UUID) -> list[dict[s
             (project_id,),
         ).fetchall()
     return [dict(row) for row in rows]
-
-
-def convert_docx_to_doc(docx_path: Path) -> Path | None:
-    binary = shutil.which("libreoffice") or shutil.which("soffice")
-    if binary is None:
-        return None
-    result = subprocess.run(
-        [
-            binary,
-            "--headless",
-            "--convert-to",
-            "doc",
-            "--outdir",
-            str(docx_path.parent),
-            str(docx_path),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        return None
-    doc_path = docx_path.with_suffix(".doc")
-    return doc_path if doc_path.is_file() else None
