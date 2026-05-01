@@ -59,7 +59,7 @@ def test_collect_outline_clause_nos_recovers_compact_heading_codes() -> None:
     assert norm_processor._collect_outline_clause_nos(sections) == {"2", "6.6", "3.5.3", "8.4"}
 
 
-def test_deterministic_entries_from_block_keeps_long_normative_clause_with_list_text() -> None:
+def test_deterministic_entries_from_block_drops_long_normative_clause_with_list_text() -> None:
     block = BlockSegment(
         segment_type="normative_clause_block",
         chapter_label="3.1.1 架空电力线路工程使用的原材料及器材应符合下列规定：",
@@ -75,28 +75,9 @@ def test_deterministic_entries_from_block_keeps_long_normative_clause_with_list_
         confidence="high",
     )
 
-    entries = norm_processor._deterministic_entries_from_block(block)
-
-    assert entries == [
-        {
-            "clause_no": "3.1.1",
-            "clause_title": None,
-            "clause_text": (
-                "架空电力线路工程使用的原材料及器材应符合下列规定：\n"
-                "1 应有该批产品出厂质量检验合格证书。\n"
-                "2 应有符合国家现行标准的各项质量检验资料。"
-            ),
-            "summary": None,
-            "tags": [],
-            "page_start": 8,
-            "page_end": 8,
-            "clause_type": "normative",
-            "source_type": "text",
-            "source_ref": "document_section:s1",
-            "source_refs": ["document_section:s1"],
-            "source_label": "3.1.1 架空电力线路工程使用的原材料及器材应符合下列规定：",
-        },
-    ]
+    # b215498 后：含列表标志（"下列"、换行后数字）的 normative 条款交由 AI 解析，
+    # 确定性路径不再吸收，避免 deterministic 输出与 AI 解构不一致。
+    assert norm_processor._deterministic_entries_from_block(block) == []
 
 
 def test_deterministic_entries_from_block_keeps_appendix_host_with_clause_text() -> None:
@@ -270,7 +251,7 @@ def test_deterministic_inline_clause_entries_from_scope_rejects_decimal_measurem
     assert [entry["clause_no"] for entry in entries] == ["5.1", "5.1.3", "5.1.4", "5.1.8"]
 
 
-def test_should_skip_block_for_ai_skips_sparse_header_only_table_block() -> None:
+def test_should_skip_block_for_ai_does_not_skip_sparse_header_only_table_block() -> None:
     block = BlockSegment(
         segment_type="table_requirement_block",
         chapter_label="表格: 表6.1.9电缆最大牵引强度",
@@ -289,8 +270,10 @@ def test_should_skip_block_for_ai_skips_sparse_header_only_table_block() -> None
         confidence="medium",
     )
 
+    # b215498 后：稀疏 table_requirement_block 的确定性抽取仍会得到空结果，
+    # 但块本身不再被预先 skip——AI 路径有机会基于上下文恢复表头/标题信息。
     assert norm_processor._deterministic_entries_from_block(block) == []
-    assert norm_processor._should_skip_block_for_ai(block) is True
+    assert norm_processor._should_skip_block_for_ai(block) is False
 
 
 def test_appendix_block_deterministic_path_does_not_supplement_table_cell_noise() -> None:
@@ -326,7 +309,9 @@ def test_appendix_block_deterministic_path_does_not_supplement_table_cell_noise(
             allowed_clause_nos={"D.0.6", "B", "C"},
         )
 
-    assert [entry["clause_no"] for entry in entries] == ["D.0.6"]
+    # b215498 后：附录条款若文本超过 140 字符（含 table HTML），不再走确定性抽取，
+    # 全量交给 AI；这里用例长度 144，断言路径不再产出条款，避免噪声推断。
+    assert entries == []
 
 
 def test_appendix_block_deterministic_path_does_not_promote_voltage_prefix_to_fake_clause() -> None:

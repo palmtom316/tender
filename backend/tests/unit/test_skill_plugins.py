@@ -267,6 +267,13 @@ def _setup_quality_gate_process(monkeypatch, standard_id: UUID) -> None:
     monkeypatch.setattr(norm_processor, "_fetch_tables", lambda conn, current_document_id: [])
     monkeypatch.setattr(norm_processor, "_fetch_document", lambda conn, current_document_id: None)
     monkeypatch.setattr(norm_processor, "_active_parse_skill_names", lambda conn: set())
+    # b215498 后 _should_use_single_standard_block_path 收紧到白名单标准；这两个质量门测试
+    # 关注的是质量报告分支而非路径选择，强制走 deterministic block 路径以避免触发 AI gateway。
+    monkeypatch.setattr(
+        norm_processor,
+        "_should_use_single_standard_block_path",
+        lambda *args, **kwargs: True,
+    )
     monkeypatch.setattr(norm_processor, "build_single_standard_blocks", lambda sections, tables: [
         BlockSegment(
             segment_type="normative_clause_block",
