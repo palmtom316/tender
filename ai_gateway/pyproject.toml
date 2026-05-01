@@ -1,6 +1,6 @@
 [project]
 name = "tender-ai-gateway"
-version = "0.1.0"
+version = "1.0.0"
 description = "AI gateway for model routing and BYOK credential proxy."
 readme = "README.md"
 requires-python = ">=3.11"

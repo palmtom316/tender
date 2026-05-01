@@ -1,6 +1,6 @@
 [project]
 name = "tender-backend"
-version = "0.1.0"
+version = "1.0.0"
 description = "Business API for the tender authoring system."
 readme = "README.md"
 requires-python = ">=3.11"

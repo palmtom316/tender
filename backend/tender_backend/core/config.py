@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     vl_repair_page_delay_ms: int = 0
     vl_repair_ai_gateway_timeout_seconds: float = 300.0
     template_import_roots: str = ""
-    version: str = "0.1.0"
+    version: str = "1.0.0"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

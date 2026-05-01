@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "Tender AI Gateway"
     app_env: str = "development"
     api_prefix: str = "/api"
-    version: str = "0.1.0"
+    version: str = "1.0.0"
     default_primary_model: str = "deepseek-v4-flash"
     default_fallback_model: str = "qwen-max"
     deepseek_api_key: str = ""
