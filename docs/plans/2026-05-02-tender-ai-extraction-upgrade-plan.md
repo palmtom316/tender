@@ -28,9 +28,9 @@
 - [x] Docker 镜像固化所有依赖（含 LibreOffice）
 - [x] AI 关键条款抽取器 + API + 单测
 - [ ] 端到端跑通包1，给出 AI vs keyword 对比
-- [ ] AI 招标摘要表 + 抽取器 + API + 前端摘要卡片（后端已完成，前端待做）
-- [ ] 原文对照 UI（点击 requirement → 侧滑 source_chunk）
-- [ ] 评分表 AI 结构化表 + 抽取器 + API
+- [x] AI 招标摘要表 + 抽取器 + API + 前端摘要卡片
+- [x] 原文对照 UI（点击 requirement → 侧滑 source_chunk）
+- [x] 评分表 AI 结构化表 + 抽取器 + API（规则结构化已完成，AI增强与端到端验证待完整抽取测试阶段）
 
 ## Phases
 
@@ -66,22 +66,23 @@
 - [x] `services/extract_service/tender_facts_extractor.py`：调 AI Gateway `extract_tender_facts` profile，并支持规则 fallback
 - [x] 新接口 `POST /api/tender-documents/{id}/extract-facts` + `GET /api/projects/{id}/tender-summary`
 - [x] 单测覆盖
-- [ ] 前端：项目首屏顶部加摘要卡片
+- [x] 前端：要求确认页顶部加摘要卡片
 
 ### Phase 4 — 原文对照 UI（待开始）
 
 - [x] 后端：`GET /api/source-chunks/{chunk_id}` 单条详情接口（已有 list 但缺 by-id）
-- [ ] 前端 `Requirement` 类型扩展：`source_chunk_id` / `source_file` / `source_locator` / `paragraph_index` / `page_start`
-- [ ] 新组件 `SourceChunkViewer`：右侧 Drawer，table 类型渲染 `<table>`，段落渲染 `text`
-- [ ] `RequirementsContent` 卡片点击 → 打开 viewer
-- [ ] 前端 e2e 手测
+- [x] 前端 `Requirement` 类型扩展：`source_chunk_id` / `source_file` / `source_locator`
+- [x] 新组件 `SourceChunkViewer`：右侧 Drawer，table 类型渲染 `<table>`，段落渲染 `text`
+- [x] `RequirementsContent` 卡片点击 → 打开 viewer
+- [ ] 前端 e2e 手测（本轮只做 build/单测，不跑端到端）
 
 ### Phase 5 — 评分表 AI 结构化（待开始）
 
-- [ ] alembic 0034：`project_scoring_criteria` 表（id, project_id, source_chunk_id, dimension_name, max_score, scoring_method, sub_items_json, source_file, source_locator）
-- [ ] `services/extract_service/ai_scoring_extractor.py`：扫描 `chunk_type='table' AND document_type='scoring_sheet'` 的 chunk，逐表 AI 提取
-- [ ] 新接口 `POST /api/tender-documents/{id}/extract-scoring-criteria`
-- [ ] 单测 + 端到端验证
+- [x] alembic 0035：扩展现有 `scoring_criteria` 表（source_chunk_id, source_file, source_locator, sub_items_json, extraction_method）。注：0034 已用于 tender_summary。
+- [x] `services/extract_service/scoring_extractor.py`：扫描 `chunk_type='table'` 的 source chunks 并结构化评分项
+- [x] 新接口 `POST /api/tender-documents/{id}/extract-scoring-criteria`
+- [x] 单测
+- [ ] 端到端验证（本轮不跑完整招标文件抽取）
 
 ## 验收标准
 

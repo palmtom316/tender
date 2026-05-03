@@ -187,8 +187,53 @@ export interface Requirement {
   category: string;
   title: string;
   source_text: string | null;
+  requirement_text?: string | null;
+  source_file?: string | null;
+  source_locator?: string | null;
+  source_chunk_id?: string | null;
+  confidence?: number | null;
   human_confirmed: boolean;
   confirmed_by: string | null;
+}
+
+export interface SourceChunk {
+  id: string;
+  tender_document_id: string;
+  tender_document_file_id: string;
+  chunk_type: string;
+  source_file: string;
+  document_type: string | null;
+  section_title: string | null;
+  source_locator: string;
+  title: string | null;
+  text: string | null;
+  table_json: { rows?: string[][]; headers?: string[]; [key: string]: unknown } | null;
+  page_start: number | null;
+  page_end: number | null;
+  sheet_name: string | null;
+  row_start: number | null;
+  row_end: number | null;
+  paragraph_index: number | null;
+  sort_order: number;
+  confidence: number;
+}
+
+export interface TenderSummary {
+  project_id: string;
+  tender_document_id: string | null;
+  project_name: string | null;
+  tenderer: string | null;
+  tender_agency: string | null;
+  project_location: string | null;
+  construction_period: string | null;
+  quality_requirement: string | null;
+  control_price: string | null;
+  bid_bond: string | null;
+  bid_open_time: string | null;
+  bid_deadline: string | null;
+  raw_facts_json: Record<string, unknown>;
+  source_chunk_ids_json: string[];
+  extracted_model: string | null;
 }
 
 export function fetchRequirements(
@@ -209,6 +254,14 @@ export function confirmRequirement(id: string): Promise<Requirement> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ confirmed: true }),
   });
+}
+
+export function fetchSourceChunk(id: string, options?: { signal?: AbortSignal }): Promise<SourceChunk> {
+  return request<SourceChunk>(`/source-chunks/${id}`, { signal: options?.signal });
+}
+
+export function fetchTenderSummary(projectId: string, options?: { signal?: AbortSignal }): Promise<TenderSummary> {
+  return request<TenderSummary>(`/projects/${projectId}/tender-summary`, { signal: options?.signal });
 }
 
 // ── Drafts ──

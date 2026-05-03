@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchRequirements, confirmRequirement } from "../../lib/api";
+import { fetchRequirements, confirmRequirement, fetchTenderSummary } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
+import { SourceChunkViewer } from "./SourceChunkViewer";
 
 const CATEGORY_LABELS: Record<string, string> = {
   veto: "否决项",
@@ -20,6 +21,7 @@ export function RequirementsContent() {
   const { projectId } = useNavigation();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>("");
+  const [sourceChunkId, setSourceChunkId] = useState<string | null>(null);
 
   const { data: requirements = [], isLoading } = useQuery({
     queryKey: ["requirements", projectId, filter],
@@ -28,6 +30,16 @@ export function RequirementsContent() {
       return fetchRequirements(projectId, filter || undefined, { signal });
     },
     enabled: !!projectId,
+  });
+
+  const { data: tenderSummary } = useQuery({
+    queryKey: ["tender-summary", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchTenderSummary(projectId, { signal });
+    },
+    enabled: !!projectId,
+    retry: false,
   });
 
   const confirm = useMutation({
@@ -54,6 +66,35 @@ export function RequirementsContent() {
   return (
     <div>
       <h1 className="section-heading">要求确认</h1>
+
+      {tenderSummary && (
+        <section className="tender-summary-card" aria-label="招标摘要">
+          <div className="tender-summary-card__header">
+            <div>
+              <span className="tender-summary-card__eyebrow">Tender Brief</span>
+              <h2>{tenderSummary.project_name ?? "招标摘要"}</h2>
+            </div>
+            {tenderSummary.extracted_model && <Badge variant="info">{tenderSummary.extracted_model}</Badge>}
+          </div>
+          <div className="tender-summary-card__grid">
+            {[
+              ["招标人", tenderSummary.tenderer],
+              ["代理机构", tenderSummary.tender_agency],
+              ["建设地点", tenderSummary.project_location],
+              ["工期/服务期", tenderSummary.construction_period],
+              ["质量要求", tenderSummary.quality_requirement],
+              ["控制价", tenderSummary.control_price],
+              ["保证金", tenderSummary.bid_bond],
+              ["截止/开标", tenderSummary.bid_deadline ?? tenderSummary.bid_open_time],
+            ].map(([label, value]) => (
+              <div className="tender-summary-card__item" key={label}>
+                <span>{label}</span>
+                <strong>{value || "待抽取"}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {vetoUnconfirmed > 0 && (
         <div className="warning-banner">
@@ -109,6 +150,14 @@ export function RequirementsContent() {
             </div>
             <h3 className="requirement-title">{r.title}</h3>
             {r.source_text && <p className="source-text">{r.source_text}</p>}
+            <div className="requirement-actions">
+              {r.source_file && <span className="requirement-source-file">{r.source_file.split("/").pop()}</span>}
+              {r.source_chunk_id && (
+                <ClayButton variant="ghost" size="sm" onClick={() => setSourceChunkId(r.source_chunk_id ?? null)}>
+                  查看原文
+                </ClayButton>
+              )}
+            </div>
           </Card>
         ))}
         {!isLoading && requirements.length === 0 && (
@@ -119,6 +168,7 @@ export function RequirementsContent() {
           </div>
         )}
       </div>
+      <SourceChunkViewer chunkId={sourceChunkId} onClose={() => setSourceChunkId(null)} />
     </div>
   );
 }

@@ -19,6 +19,24 @@ class ExtractedScoringCriteria:
     max_score: float
     scoring_method: str | None
     source_page: int | None = None
+    source_chunk_id: str | None = None
+    source_file: str | None = None
+    source_locator: str | None = None
+    sub_items_json: list[dict[str, Any]] | None = None
+    extraction_method: str = "rule"
+
+    def to_repository_dict(self) -> dict[str, Any]:
+        return {
+            "dimension": self.dimension,
+            "max_score": self.max_score,
+            "scoring_method": self.scoring_method,
+            "source_page": self.source_page,
+            "source_chunk_id": self.source_chunk_id,
+            "source_file": self.source_file,
+            "source_locator": self.source_locator,
+            "sub_items_json": self.sub_items_json or [],
+            "extraction_method": self.extraction_method,
+        }
 
 
 async def extract_scoring_criteria(
@@ -84,10 +102,36 @@ async def extract_scoring_criteria(
                 max_score=max_score,
                 scoring_method=method,
                 source_page=table.get("page"),
+                source_chunk_id=str(table.get("id")) if table.get("id") else table.get("source_chunk_id"),
+                source_file=table.get("source_file"),
+                source_locator=table.get("source_locator"),
             ))
 
     logger.info("scoring_criteria_extracted", count=len(results))
     return results
+
+
+async def extract_scoring_criteria_from_source_chunks(
+    chunks: list[dict[str, Any]],
+) -> list[ExtractedScoringCriteria]:
+    tables: list[dict[str, Any]] = []
+    for chunk in chunks:
+        if chunk.get("chunk_type") != "table":
+            continue
+        table_json = chunk.get("table_json") or {}
+        if not table_json:
+            continue
+        tables.append(
+            {
+                "id": str(chunk.get("id")) if chunk.get("id") else None,
+                "source_chunk_id": str(chunk.get("id")) if chunk.get("id") else None,
+                "source_file": chunk.get("source_file"),
+                "source_locator": chunk.get("source_locator"),
+                "page": chunk.get("page_start"),
+                "raw_json": table_json,
+            }
+        )
+    return await extract_scoring_criteria(tables)
 
 
 def _find_column(headers: list, keywords: list[str]) -> int | None:

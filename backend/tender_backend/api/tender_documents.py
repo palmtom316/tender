@@ -16,6 +16,7 @@ from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
+from tender_backend.db.repositories.scoring_repo import ScoringRepository
 from tender_backend.db.repositories.tender_ai_extraction_repo import TenderAiExtractionRepository
 from tender_backend.db.repositories.tender_document_repository import TenderDocumentRepository
 from tender_backend.db.repositories.tender_summary_repo import TenderSummaryRepository
@@ -33,6 +34,7 @@ from tender_backend.services.extract_service.ai_requirements_extractor import (
     extract_requirements_with_ai,
 )
 from tender_backend.services.extract_service.tender_facts_extractor import extract_tender_summary_with_ai
+from tender_backend.services.extract_service.scoring_extractor import extract_scoring_criteria_from_source_chunks
 from tender_backend.services.office_document_parser import (
     OFFICE_PARSER_NAME,
     OFFICE_PARSER_VERSION,
@@ -55,6 +57,7 @@ _requirement_repo = RequirementRepository()
 _agent_repo = AgentConfigRepository()
 _ai_extraction_repo = TenderAiExtractionRepository()
 _summary_repo = TenderSummaryRepository()
+_scoring_repo = ScoringRepository()
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 _DOCUMENT_PROJECT_QUERY = "SELECT project_id FROM tender_document WHERE id = %s"
 _FILE_PROJECT_QUERY = """
@@ -260,6 +263,14 @@ class TenderSummaryOut(BaseModel):
     raw_facts_json: dict
     source_chunk_ids_json: list
     extracted_model: str | None = None
+
+
+class TenderScoringExtractionOut(BaseModel):
+    tender_document_id: UUID
+    project_id: UUID
+    extracted_count: int
+    persisted_count: int
+    criteria: list[dict]
 
 
 class SourceChunkUpdateBody(BaseModel):
@@ -1141,6 +1152,41 @@ async def get_project_tender_summary(
     if row is None:
         raise HTTPException(status_code=404, detail="tender summary not found")
     return _summary_out(row)
+
+
+@router.post(
+    "/tender-documents/{tender_document_id}/extract-scoring-criteria",
+    response_model=TenderScoringExtractionOut,
+)
+async def extract_tender_document_scoring_criteria(
+    tender_document_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderScoringExtractionOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    document = _repo.get_document(conn, tender_document_id=tender_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="tender document not found")
+    chunks = _repo.list_source_chunks(conn, tender_document_id=tender_document_id)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="no source chunks found; parse the tender document first")
+
+    extracted = await extract_scoring_criteria_from_source_chunks(chunks)
+    payload = [item.to_repository_dict() for item in extracted]
+    persisted = _scoring_repo.create_many(conn, project_id=document["project_id"], criteria=payload)
+    return TenderScoringExtractionOut(
+        tender_document_id=tender_document_id,
+        project_id=document["project_id"],
+        extracted_count=len(extracted),
+        persisted_count=len(persisted),
+        criteria=persisted,
+    )
 
 
 @router.post(
