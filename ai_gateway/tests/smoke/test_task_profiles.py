@@ -28,12 +28,16 @@ def test_parse_profiles_use_deepseek_v4_flash_only() -> None:
         assert TASK_PROFILES[task_name]["primary_model"] == "deepseek-v4-flash"
 
 
-def test_tender_extraction_profiles_use_v4_pro() -> None:
-    for task_name in (
-        "extract_tender_requirements",
-        "extract_tender_facts",
-        "extract_scoring_criteria",
-    ):
+def test_tender_requirement_profile_uses_flash_first_for_throughput() -> None:
+    profile = TASK_PROFILES["extract_tender_requirements"]
+
+    assert profile["primary_model"] == "deepseek-v4-flash"
+    assert profile["fallback_model"] == "deepseek-v4-pro"
+    assert profile["max_retries"] == 0
+
+
+def test_high_value_tender_profiles_allow_v4_pro() -> None:
+    for task_name in ("extract_tender_facts", "extract_scoring_criteria"):
         profile = TASK_PROFILES[task_name]
         assert profile["primary_model"] == "deepseek-v4-pro"
         assert profile["fallback_model"] == "deepseek-v4-flash"

@@ -16,7 +16,12 @@ from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
+from tender_backend.db.repositories.tender_ai_extraction_repo import TenderAiExtractionRepository
 from tender_backend.db.repositories.tender_document_repository import TenderDocumentRepository
+from tender_backend.services.extract_service.ai_extraction_planner import (
+    DEFAULT_MODEL_POLICY,
+    build_extraction_batch_plan,
+)
 from tender_backend.services.deepseek_api import (
     DEEPSEEK_V4_MAX_REASONING_EFFORT,
     DEEPSEEK_V4_PRO_MODEL,
@@ -46,6 +51,7 @@ router = APIRouter(tags=["tender-documents"], dependencies=[Depends(get_current_
 _repo = TenderDocumentRepository()
 _requirement_repo = RequirementRepository()
 _agent_repo = AgentConfigRepository()
+_ai_extraction_repo = TenderAiExtractionRepository()
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 _DOCUMENT_PROJECT_QUERY = "SELECT project_id FROM tender_document WHERE id = %s"
 _FILE_PROJECT_QUERY = """
@@ -159,13 +165,80 @@ class TenderDocumentAiExtractionOut(BaseModel):
     model: str
     extracted_count: int
     persisted_count: int
+    total_batches: int
     dropped_invalid: int
     failed_batches: int
+    failed_batch_files: list[str]
+    zero_requirement_source_files: list[str]
     total_input_tokens: int
     total_output_tokens: int
     category_counts: dict[str, int]
     extraction_method_counts: dict[str, int]
     requirements: list[dict]
+
+
+class TenderDocumentAiExtractionAcceptedOut(BaseModel):
+    tender_document_id: UUID
+    project_id: UUID
+    run_id: UUID
+    status: str
+    total_batches: int
+    skipped_batches: int
+    message: str
+
+
+class TenderAiExtractionRunCreateBody(BaseModel):
+    mode: str = "requirements"
+    model_policy: str = DEFAULT_MODEL_POLICY
+    force_replan: bool = False
+
+
+class TenderAiExtractionRunOut(BaseModel):
+    id: UUID
+    tender_document_id: UUID
+    project_id: UUID
+    status: str
+    mode: str
+    model_policy: str
+    total_batches: int
+    succeeded_batches: int
+    failed_batches: int
+    skipped_batches: int
+    total_chunks: int
+    covered_chunks: int
+    extracted_requirements: int
+    total_input_tokens: int
+    total_output_tokens: int
+    error: str | None = None
+    metadata_json: dict
+
+
+class TenderAiExtractionBatchOut(BaseModel):
+    id: UUID
+    run_id: UUID
+    tender_document_id: UUID
+    tender_document_file_id: UUID | None = None
+    source_file: str
+    batch_index: int
+    status: str
+    chunk_ids_json: list
+    chunk_count: int
+    input_char_count: int
+    estimated_input_tokens: int
+    model: str
+    reasoning_effort: str | None = None
+    response_format: str
+    retry_count: int
+    max_retries: int
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+    extracted_requirements: int
+    dropped_invalid: int
+    error_type: str | None = None
+    error_message: str | None = None
+    skip_reason: str | None = None
+    metadata_json: dict
 
 
 class SourceChunkUpdateBody(BaseModel):
@@ -250,6 +323,58 @@ def _chunk_out(row: dict) -> SourceChunkOut:
         paragraph_index=row.get("paragraph_index"),
         sort_order=row["sort_order"],
         confidence=float(row["confidence"]),
+    )
+
+
+def _ai_run_out(row: dict) -> TenderAiExtractionRunOut:
+    return TenderAiExtractionRunOut(
+        id=row["id"],
+        tender_document_id=row["tender_document_id"],
+        project_id=row["project_id"],
+        status=row["status"],
+        mode=row["mode"],
+        model_policy=row["model_policy"],
+        total_batches=row["total_batches"],
+        succeeded_batches=row["succeeded_batches"],
+        failed_batches=row["failed_batches"],
+        skipped_batches=row["skipped_batches"],
+        total_chunks=row["total_chunks"],
+        covered_chunks=row["covered_chunks"],
+        extracted_requirements=row["extracted_requirements"],
+        total_input_tokens=row["total_input_tokens"],
+        total_output_tokens=row["total_output_tokens"],
+        error=row.get("error"),
+        metadata_json=row.get("metadata_json") or {},
+    )
+
+
+def _ai_batch_out(row: dict) -> TenderAiExtractionBatchOut:
+    return TenderAiExtractionBatchOut(
+        id=row["id"],
+        run_id=row["run_id"],
+        tender_document_id=row["tender_document_id"],
+        tender_document_file_id=row.get("tender_document_file_id"),
+        source_file=row["source_file"],
+        batch_index=row["batch_index"],
+        status=row["status"],
+        chunk_ids_json=row.get("chunk_ids_json") or [],
+        chunk_count=row["chunk_count"],
+        input_char_count=row["input_char_count"],
+        estimated_input_tokens=row["estimated_input_tokens"],
+        model=row["model"],
+        reasoning_effort=row.get("reasoning_effort"),
+        response_format=row["response_format"],
+        retry_count=row["retry_count"],
+        max_retries=row["max_retries"],
+        input_tokens=row["input_tokens"],
+        output_tokens=row["output_tokens"],
+        latency_ms=row["latency_ms"],
+        extracted_requirements=row["extracted_requirements"],
+        dropped_invalid=row["dropped_invalid"],
+        error_type=row.get("error_type"),
+        error_message=row.get("error_message"),
+        skip_reason=row.get("skip_reason"),
+        metadata_json=row.get("metadata_json") or {},
     )
 
 
@@ -674,6 +799,179 @@ async def update_source_chunk(
     return _chunk_out(row)
 
 
+def _enqueue_ai_extraction_run(run_id: UUID) -> None:
+    from tender_backend.workers.tasks_extract import run_tender_ai_extraction
+
+    run_tender_ai_extraction.delay(run_id=str(run_id))
+
+
+def _create_ai_extraction_run(
+    conn: Connection,
+    *,
+    document: dict,
+    mode: str,
+    model_policy: str,
+    enqueue: bool = True,
+) -> dict:
+    chunks = _repo.list_source_chunks(conn, tender_document_id=document["id"])
+    if not chunks:
+        raise HTTPException(status_code=400, detail="no source chunks found; parse the tender document first")
+    run = _ai_extraction_repo.create_run(
+        conn,
+        tender_document_id=document["id"],
+        project_id=document["project_id"],
+        mode=mode,
+        model_policy=model_policy,
+        metadata_json={"planner": "token_aware_v1"},
+    )
+    plans = build_extraction_batch_plan(chunks, model_policy=model_policy)
+    _ai_extraction_repo.create_batches(
+        conn,
+        run_id=run["id"],
+        tender_document_id=document["id"],
+        batches=[plan.to_repository_dict() for plan in plans],
+    )
+    run = _ai_extraction_repo.refresh_run_progress(conn, run_id=run["id"]) or run
+    conn.commit()
+    if enqueue:
+        _enqueue_ai_extraction_run(run["id"])
+    return run
+
+
+@router.post(
+    "/tender-documents/{tender_document_id}/ai-extraction-runs",
+    response_model=TenderAiExtractionRunOut,
+)
+async def create_tender_ai_extraction_run(
+    tender_document_id: UUID,
+    payload: TenderAiExtractionRunCreateBody | None = None,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderAiExtractionRunOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    document = _repo.get_document(conn, tender_document_id=tender_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="tender document not found")
+    body = payload or TenderAiExtractionRunCreateBody()
+    run = _create_ai_extraction_run(
+        conn,
+        document=document,
+        mode=body.mode,
+        model_policy=body.model_policy,
+        enqueue=True,
+    )
+    return _ai_run_out(run)
+
+
+@router.get("/tender-ai-extraction-runs/{run_id}", response_model=TenderAiExtractionRunOut)
+async def get_tender_ai_extraction_run(
+    run_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderAiExtractionRunOut:
+    run = _ai_extraction_repo.get_run(conn, run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="tender ai extraction run not found")
+    require_resource_project_access(
+        conn,
+        resource_id=run["tender_document_id"],
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    refreshed = _ai_extraction_repo.refresh_run_progress(conn, run_id=run_id) or run
+    conn.commit()
+    return _ai_run_out(refreshed)
+
+
+@router.get("/tender-ai-extraction-runs/{run_id}/batches", response_model=list[TenderAiExtractionBatchOut])
+async def list_tender_ai_extraction_batches(
+    run_id: UUID,
+    status: str | None = None,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> list[TenderAiExtractionBatchOut]:
+    run = _ai_extraction_repo.get_run(conn, run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="tender ai extraction run not found")
+    require_resource_project_access(
+        conn,
+        resource_id=run["tender_document_id"],
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    return [_ai_batch_out(row) for row in _ai_extraction_repo.list_batches(conn, run_id=run_id, status=status)]
+
+
+@router.post("/tender-ai-extraction-runs/{run_id}/retry-failed", response_model=TenderAiExtractionRunOut)
+async def retry_failed_tender_ai_extraction_batches(
+    run_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderAiExtractionRunOut:
+    run = _ai_extraction_repo.get_run(conn, run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="tender ai extraction run not found")
+    require_resource_project_access(
+        conn,
+        resource_id=run["tender_document_id"],
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    reset_count = _ai_extraction_repo.reset_failed_batches(conn, run_id=run_id)
+    refreshed = _ai_extraction_repo.refresh_run_progress(conn, run_id=run_id) or run
+    conn.commit()
+    if reset_count:
+        _enqueue_ai_extraction_run(run_id)
+    return _ai_run_out(refreshed)
+
+
+@router.post("/tender-ai-extraction-runs/{run_id}/cancel", response_model=TenderAiExtractionRunOut)
+async def cancel_tender_ai_extraction_run(
+    run_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderAiExtractionRunOut:
+    run = _ai_extraction_repo.get_run(conn, run_id=run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="tender ai extraction run not found")
+    require_resource_project_access(
+        conn,
+        resource_id=run["tender_document_id"],
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE tender_ai_extraction_batch
+            SET status = 'skipped', skip_reason = 'run_cancelled', updated_at = now()
+            WHERE run_id = %s AND status = 'pending'
+            """,
+            (run_id,),
+        )
+        cur.execute(
+            """
+            UPDATE tender_ai_extraction_run
+            SET status = 'cancelled', finished_at = now(), updated_at = now()
+            WHERE id = %s
+            """,
+            (run_id,),
+        )
+    conn.commit()
+    cancelled = _ai_extraction_repo.get_run(conn, run_id=run_id) or run
+    return _ai_run_out(cancelled)
+
+
 @router.post(
     "/tender-documents/{tender_document_id}/extract-requirements",
     response_model=TenderDocumentRequirementExtractionOut,
@@ -740,20 +1038,18 @@ async def extract_tender_document_requirements(
 
 @router.post(
     "/tender-documents/{tender_document_id}/ai-extract-requirements",
-    response_model=TenderDocumentAiExtractionOut,
+    response_model=TenderDocumentAiExtractionAcceptedOut,
 )
 async def ai_extract_tender_document_requirements(
     tender_document_id: UUID,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),
-) -> TenderDocumentAiExtractionOut:
-    """Run AI-powered requirement extraction over the tender document.
+) -> TenderDocumentAiExtractionAcceptedOut:
+    """Compatibility entry point: create an async AI extraction run.
 
-    Calls the AI Gateway with `task_type=extract_tender_requirements`
-    (deepseek-v4-pro + reasoning_effort=max). Persists results into
-    project_requirement and conflicts on (project_id, category, source_chunk_id,
-    source_locator) — when a prior keyword candidate exists for the same chunk
-    and category the row is upgraded to extraction_method='merged'.
+    Full-package AI extraction is intentionally not executed inside this HTTP
+    request. The run/batch worker pipeline provides progress, retry and
+    completion gates for large tender packages.
     """
     require_resource_project_access(
         conn,
@@ -766,59 +1062,19 @@ async def ai_extract_tender_document_requirements(
     if document is None:
         raise HTTPException(status_code=404, detail="tender document not found")
 
-    chunks = _repo.list_source_chunks(conn, tender_document_id=tender_document_id)
-    if not chunks:
-        raise HTTPException(
-            status_code=400,
-            detail="no source chunks found; parse the tender document first",
-        )
-
-    persist_lock = asyncio.Lock()
-    persisted: list[dict] = []
-
-    async def _persist(batch_requirements):
-        if not batch_requirements:
-            return
-        payload = [item.to_repository_dict() for item in batch_requirements]
-        async with persist_lock:
-            rows = await asyncio.to_thread(
-                _requirement_repo.create_many,
-                conn,
-                project_id=document["project_id"],
-                requirements=payload,
-            )
-        persisted.extend(rows)
-
-    summary = await extract_requirements_with_ai(
-        chunks,
-        conn=conn,
-        on_batch_persisted=_persist,
+    run = _create_ai_extraction_run(
+        conn,
+        document=document,
+        mode="requirements",
+        model_policy=DEFAULT_MODEL_POLICY,
+        enqueue=True,
     )
-
-    category_counts: dict[str, int] = {}
-    method_counts: dict[str, int] = {}
-    for item in persisted:
-        category = str(item["category"])
-        category_counts[category] = category_counts.get(category, 0) + 1
-        method = str(item.get("extraction_method") or "ai")
-        method_counts[method] = method_counts.get(method, 0) + 1
-
-    failed_batches = sum(1 for b in summary.batches if b.extracted == 0 and b.input_tokens == 0)
-    dropped_invalid = sum(b.dropped_invalid for b in summary.batches)
-    resolved_models = {b.resolved_model for b in summary.batches if b.resolved_model}
-    model_label = ", ".join(sorted(resolved_models)) or DEEPSEEK_V4_PRO_MODEL
-
-    return TenderDocumentAiExtractionOut(
+    return TenderDocumentAiExtractionAcceptedOut(
         tender_document_id=tender_document_id,
         project_id=document["project_id"],
-        model=model_label,
-        extracted_count=len(summary.requirements),
-        persisted_count=len(persisted),
-        dropped_invalid=dropped_invalid,
-        failed_batches=failed_batches,
-        total_input_tokens=summary.total_input_tokens,
-        total_output_tokens=summary.total_output_tokens,
-        category_counts=category_counts,
-        extraction_method_counts=method_counts,
-        requirements=persisted,
+        run_id=run["id"],
+        status=run["status"],
+        total_batches=run["total_batches"],
+        skipped_batches=run["skipped_batches"],
+        message="AI extraction accepted; poll /api/tender-ai-extraction-runs/{run_id}",
     )

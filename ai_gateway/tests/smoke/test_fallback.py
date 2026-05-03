@@ -204,3 +204,46 @@ def test_call_with_fallback_forwards_request_extra_body(monkeypatch) -> None:
     )
 
     assert captured["extra_body"] == {"reasoning_effort": "high"}
+
+
+def test_call_with_fallback_forwards_response_format_and_stream(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeChunk:
+        choices = [SimpleNamespace(delta=SimpleNamespace(content="[]"))]
+
+    class _FakeOpenAI:
+        def __init__(self, *, api_key, base_url, timeout, max_retries) -> None:
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+        def _create(self, **kwargs):
+            captured["response_format"] = kwargs.get("response_format")
+            captured["stream"] = kwargs.get("stream")
+            return iter([_FakeChunk()])
+
+    monkeypatch.setattr(fallback, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(
+        fallback,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_primary_model="deepseek-v4-flash",
+            default_fallback_model="qwen-max",
+            deepseek_base_url="https://api.deepseek.com/v1",
+            deepseek_api_key="deepseek-key",
+            qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            qwen_api_key="qwen-key",
+            default_timeout=60,
+            default_retry_count=2,
+        ),
+    )
+
+    result = fallback.call_with_fallback(
+        task_type="extract_tender_requirements",
+        messages=[{"role": "user", "content": "test"}],
+        response_format={"type": "json_object"},
+        stream=True,
+    )
+
+    assert result.content == "[]"
+    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["stream"] is True

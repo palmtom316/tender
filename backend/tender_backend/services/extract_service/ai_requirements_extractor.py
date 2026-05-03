@@ -23,7 +23,11 @@ import structlog
 from psycopg import Connection
 
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
-from tender_backend.services.deepseek_api import DEEPSEEK_V4_PRO_MODEL
+from tender_backend.services.deepseek_api import (
+    DEEPSEEK_V4_MAX_REASONING_EFFORT,
+    DEEPSEEK_V4_PRO_MODEL,
+    is_deepseek_v4_model,
+)
 from tender_backend.services.extract_service.requirements_extractor import (
     HARD_CONSTRAINT_CATEGORIES,
     HUMAN_CONFIRM_CATEGORIES,
@@ -184,19 +188,25 @@ def _build_overrides(conn: Connection) -> tuple[dict | None, dict | None]:
 
     primary = None
     if config.base_url and config.api_key:
+        primary_model = config.primary_model or DEEPSEEK_V4_PRO_MODEL
         primary = {
             "base_url": config.base_url,
             "api_key": config.api_key,
-            "model": config.primary_model or DEEPSEEK_V4_PRO_MODEL,
+            "model": primary_model,
         }
+        if is_deepseek_v4_model(primary_model):
+            primary["extra_body"] = {"reasoning_effort": DEEPSEEK_V4_MAX_REASONING_EFFORT}
 
     fallback = None
     if config.fallback_base_url and config.fallback_api_key:
+        fallback_model = config.fallback_model or "deepseek-v4-flash"
         fallback = {
             "base_url": config.fallback_base_url,
             "api_key": config.fallback_api_key,
-            "model": config.fallback_model or "deepseek-v4-flash",
+            "model": fallback_model,
         }
+        if is_deepseek_v4_model(fallback_model):
+            fallback["extra_body"] = {"reasoning_effort": DEEPSEEK_V4_MAX_REASONING_EFFORT}
 
     return primary, fallback
 
@@ -207,6 +217,7 @@ async def _call_ai_gateway(
     prompt: str,
     primary_override: dict | None,
     fallback_override: dict | None,
+    response_format: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "task_type": "extract_tender_requirements",
@@ -220,6 +231,8 @@ async def _call_ai_gateway(
         payload["primary_override"] = primary_override
     if fallback_override:
         payload["fallback_override"] = fallback_override
+    if response_format == "json_object":
+        payload["response_format"] = {"type": "json_object"}
 
     resp = await client.post(
         _ai_gateway_chat_url(),
@@ -336,6 +349,8 @@ class BatchUsage:
     used_fallback: bool
     resolved_model: str
     latency_ms: int
+    failed: bool = False
+    error_type: str | None = None
 
 
 @dataclass
@@ -366,6 +381,7 @@ async def _process_batch(
     chunk_index: dict[str, dict[str, Any]],
     primary_override: dict | None,
     fallback_override: dict | None,
+    response_format: str | None,
     seen_keys: set[tuple[str, str]],
     seen_lock: asyncio.Lock,
     on_batch_persisted: Callable[[list["AiExtractedRequirement"]], Awaitable[None]] | None,
@@ -373,8 +389,8 @@ async def _process_batch(
     prompt = _build_prompt(batch, source_file)
     try:
         response = await _call_ai_gateway(
-            client, prompt=prompt,
-            primary_override=primary_override, fallback_override=fallback_override,
+            client, prompt=prompt, primary_override=primary_override,
+            fallback_override=fallback_override, response_format=response_format,
         )
     except Exception as exc:
         logger.exception(
@@ -386,7 +402,8 @@ async def _process_batch(
             usage=BatchUsage(source_file=source_file, chunks_in_batch=len(batch),
                              extracted=0, dropped_invalid=0, input_tokens=0,
                              output_tokens=0, used_fallback=False,
-                             resolved_model="", latency_ms=0),
+                             resolved_model="", latency_ms=0,
+                             failed=True, error_type=type(exc).__name__),
             requirements=[],
         )
 
@@ -441,6 +458,7 @@ async def extract_requirements_with_ai(
     *,
     conn: Connection,
     concurrency: int = _DEFAULT_CONCURRENCY,
+    response_format: str | None = "json_object",
     on_batch_persisted: Callable[[list[AiExtractedRequirement]], Awaitable[None]] | None = None,
 ) -> AiExtractionRunSummary:
     """Run AI extraction — one batch per source_file, concurrent, with checkpoints."""
@@ -473,6 +491,7 @@ async def extract_requirements_with_ai(
                     chunk_index=chunk_index,
                     primary_override=primary_override,
                     fallback_override=fallback_override,
+                    response_format=response_format,
                     seen_keys=seen_keys, seen_lock=seen_lock,
                     on_batch_persisted=on_batch_persisted,
                 )
@@ -494,8 +513,41 @@ async def extract_requirements_with_ai(
     return AiExtractionRunSummary(requirements=all_requirements, batches=all_batches)
 
 
+async def extract_requirements_for_batch(
+    chunks: list[dict[str, Any]],
+    *,
+    conn: Connection,
+    source_file: str,
+    response_format: str | None = "json_object",
+    on_batch_persisted: Callable[[list[AiExtractedRequirement]], Awaitable[None]] | None = None,
+) -> AiExtractionRunSummary:
+    """Run AI extraction for a preplanned batch.
+
+    The caller owns batch status and retry behavior. This function keeps the
+    model call and normalization logic shared with the legacy full-run helper.
+    """
+    chunk_index = {str(c["id"]): c for c in chunks if c.get("id") is not None}
+    primary_override, fallback_override = _build_overrides(conn)
+    seen_keys: set[tuple[str, str]] = set()
+    seen_lock = asyncio.Lock()
+    async with httpx.AsyncClient() as client:
+        result = await _process_batch(
+            client,
+            source_file=source_file,
+            batch=chunks,
+            chunk_index=chunk_index,
+            primary_override=primary_override,
+            fallback_override=fallback_override,
+            response_format=response_format,
+            seen_keys=seen_keys,
+            seen_lock=seen_lock,
+            on_batch_persisted=on_batch_persisted,
+        )
+    return AiExtractionRunSummary(requirements=result.requirements, batches=[result.usage])
+
+
 __all__ = [
     "AiExtractedRequirement", "AiExtractionError",
     "AiExtractionRunSummary", "BatchUsage",
-    "extract_requirements_with_ai",
+    "extract_requirements_for_batch", "extract_requirements_with_ai",
 ]

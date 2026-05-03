@@ -2,6 +2,7 @@
 
 Queues:
   - io_tasks: I/O-bound work (parsing, export, storage)
+  - ai_tasks: long-running AI extraction batches
   - workflow_tasks: Workflow orchestration
 """
 
@@ -26,11 +27,16 @@ app.conf.update(
     enable_utc=True,
     task_routes={
         "tender_backend.workers.tasks_parse.*": {"queue": "io_tasks"},
+        "tender_backend.workers.tasks_extract.*": {"queue": "ai_tasks"},
         "tender_backend.workers.tasks_workflow.*": {"queue": "workflow_tasks"},
     },
     task_default_queue="io_tasks",
     task_track_started=True,
     worker_prefetch_multiplier=1,
+    imports=(
+        "tender_backend.workers.tasks_parse",
+        "tender_backend.workers.tasks_extract",
+    ),
 )
 
 app.autodiscover_tasks(["tender_backend.workers"])

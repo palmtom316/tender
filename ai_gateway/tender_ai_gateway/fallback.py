@@ -126,6 +126,8 @@ def call_with_fallback(
     primary_override: Any | None = None,
     fallback_override: Any | None = None,
     extra_body: dict[str, Any] | None = None,
+    response_format: dict[str, Any] | None = None,
+    stream: bool = False,
 ) -> CompletionResult:
     """Call primary provider, fall back to secondary on failure.
 
@@ -168,8 +170,26 @@ def call_with_fallback(
             }
             if merged_extra:
                 create_kwargs["extra_body"] = merged_extra
+            if response_format:
+                create_kwargs["response_format"] = response_format
+            if stream:
+                create_kwargs["stream"] = True
             resp = client.chat.completions.create(**create_kwargs)
             latency_ms = int((time.perf_counter() - start) * 1000)
+
+            if stream:
+                content_parts: list[str] = []
+                for event in resp:
+                    delta = event.choices[0].delta if event.choices else None
+                    if delta and delta.content:
+                        content_parts.append(delta.content)
+                return CompletionResult(
+                    content="".join(content_parts),
+                    model=provider.model,
+                    provider=provider.name,
+                    latency_ms=latency_ms,
+                    used_fallback=attempt > 0,
+                )
 
             usage = resp.usage
             input_tokens = usage.prompt_tokens if usage else 0

@@ -25,6 +25,8 @@ class ChatRequest(BaseModel):
     messages: list[dict[str, Any]]
     temperature: float = 0.3
     max_tokens: int | None = None
+    stream: bool = False
+    response_format: dict[str, Any] | None = None
     primary_override: ProviderOverride | None = None
     fallback_override: ProviderOverride | None = None
     extra_body: dict[str, Any] | None = None
@@ -69,6 +71,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
             primary_override=request.primary_override,
             fallback_override=request.fallback_override,
             extra_body=request.extra_body,
+            response_format=request.response_format,
+            stream=request.stream,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"All providers failed: {exc}")

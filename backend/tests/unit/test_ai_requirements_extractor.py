@@ -85,12 +85,13 @@ def _patch_call_ai(monkeypatch, handler) -> dict[str, list]:
     """
     captured: dict[str, list] = {"calls": []}
 
-    async def _fake(client, *, prompt, primary_override, fallback_override):
+    async def _fake(client, *, prompt, primary_override, fallback_override, response_format=None):
         captured["calls"].append(
             {
                 "prompt": prompt,
                 "primary_override": primary_override,
                 "fallback_override": fallback_override,
+                "response_format": response_format,
             }
         )
         return await handler(prompt, primary_override, fallback_override)
@@ -335,6 +336,53 @@ def test_passes_v4_pro_with_reasoning_effort(monkeypatch, fake_conn) -> None:
     primary = call["primary_override"]
     assert primary["model"] == "deepseek-v4-pro"
     assert primary["extra_body"] == {"reasoning_effort": "max"}
+
+
+def test_passes_json_response_format_to_ai_gateway(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    chunk = _chunk(text="测试")
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response(
+            [
+                {
+                    "source_chunk_id": str(chunk["id"]),
+                    "category": "technical",
+                    "title": "T",
+                    "requirement_text": "T",
+                    "confidence": 0.9,
+                }
+            ]
+        )
+
+    captured_payloads: list[dict] = []
+
+    async def _fake_post(self, url, json, timeout):
+        captured_payloads.append(json)
+
+        class _Resp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return _ai_response(
+                    [
+                        {
+                            "source_chunk_id": str(chunk["id"]),
+                            "category": "technical",
+                            "title": "T",
+                            "requirement_text": "T",
+                            "confidence": 0.9,
+                        }
+                    ]
+                )
+
+        return _Resp()
+
+    monkeypatch.setattr(mod.httpx.AsyncClient, "post", _fake_post)
+    asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
+
+    assert captured_payloads[0]["response_format"] == {"type": "json_object"}
 
 
 def test_invokes_on_batch_persisted_per_batch(monkeypatch, fake_conn) -> None:

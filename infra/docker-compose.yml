@@ -161,6 +161,32 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  worker-ai:
+    image: tender-backend:dev
+    container_name: tender-worker-ai
+    profiles: ["app"]
+    working_dir: /workspace/backend
+    command: ["celery", "-A", "tender_backend.workers.celery_app", "worker", "-Q", "ai_tasks", "-l", "info", "--concurrency=2"]
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      AI_GATEWAY_URL: http://ai-gateway:8100
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+    volumes:
+      - ../backend:/workspace/backend
+    depends_on:
+      backend:
+        condition: service_started
+      ai-gateway:
+        condition: service_started
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     image: node:20-alpine
     container_name: tender-frontend
