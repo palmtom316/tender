@@ -306,6 +306,14 @@ class TenderDocumentRepository:
             rows = cur.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def get_source_chunk(self, conn: Connection, *, source_chunk_id: UUID) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                "SELECT * FROM source_chunk WHERE id = %s",
+                (source_chunk_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def update_source_chunk(
         self,
         conn: Connection,

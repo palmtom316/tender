@@ -18,6 +18,7 @@ from tender_backend.db.repositories.agent_config_repo import AgentConfigReposito
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.db.repositories.tender_ai_extraction_repo import TenderAiExtractionRepository
 from tender_backend.db.repositories.tender_document_repository import TenderDocumentRepository
+from tender_backend.db.repositories.tender_summary_repo import TenderSummaryRepository
 from tender_backend.services.extract_service.ai_extraction_planner import (
     DEFAULT_MODEL_POLICY,
     build_extraction_batch_plan,
@@ -31,6 +32,7 @@ from tender_backend.services.extract_service.requirements_extractor import extra
 from tender_backend.services.extract_service.ai_requirements_extractor import (
     extract_requirements_with_ai,
 )
+from tender_backend.services.extract_service.tender_facts_extractor import extract_tender_summary_with_ai
 from tender_backend.services.office_document_parser import (
     OFFICE_PARSER_NAME,
     OFFICE_PARSER_VERSION,
@@ -52,6 +54,7 @@ _repo = TenderDocumentRepository()
 _requirement_repo = RequirementRepository()
 _agent_repo = AgentConfigRepository()
 _ai_extraction_repo = TenderAiExtractionRepository()
+_summary_repo = TenderSummaryRepository()
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 _DOCUMENT_PROJECT_QUERY = "SELECT project_id FROM tender_document WHERE id = %s"
 _FILE_PROJECT_QUERY = """
@@ -241,6 +244,24 @@ class TenderAiExtractionBatchOut(BaseModel):
     metadata_json: dict
 
 
+class TenderSummaryOut(BaseModel):
+    project_id: UUID
+    tender_document_id: UUID | None = None
+    project_name: str | None = None
+    tenderer: str | None = None
+    tender_agency: str | None = None
+    project_location: str | None = None
+    construction_period: str | None = None
+    quality_requirement: str | None = None
+    control_price: str | None = None
+    bid_bond: str | None = None
+    bid_open_time: str | None = None
+    bid_deadline: str | None = None
+    raw_facts_json: dict
+    source_chunk_ids_json: list
+    extracted_model: str | None = None
+
+
 class SourceChunkUpdateBody(BaseModel):
     chunk_type: str | None = None
     document_type: str | None = None
@@ -375,6 +396,26 @@ def _ai_batch_out(row: dict) -> TenderAiExtractionBatchOut:
         error_message=row.get("error_message"),
         skip_reason=row.get("skip_reason"),
         metadata_json=row.get("metadata_json") or {},
+    )
+
+
+def _summary_out(row: dict) -> TenderSummaryOut:
+    return TenderSummaryOut(
+        project_id=row["project_id"],
+        tender_document_id=row.get("tender_document_id"),
+        project_name=row.get("project_name"),
+        tenderer=row.get("tenderer"),
+        tender_agency=row.get("tender_agency"),
+        project_location=row.get("project_location"),
+        construction_period=row.get("construction_period"),
+        quality_requirement=row.get("quality_requirement"),
+        control_price=row.get("control_price"),
+        bid_bond=row.get("bid_bond"),
+        bid_open_time=row.get("bid_open_time"),
+        bid_deadline=row.get("bid_deadline"),
+        raw_facts_json=row.get("raw_facts_json") or {},
+        source_chunk_ids_json=row.get("source_chunk_ids_json") or [],
+        extracted_model=row.get("extracted_model"),
     )
 
 
@@ -738,6 +779,25 @@ async def list_tender_source_chunks(
     ]
 
 
+@router.get("/source-chunks/{source_chunk_id}", response_model=SourceChunkOut)
+async def get_tender_source_chunk(
+    source_chunk_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> SourceChunkOut:
+    require_resource_project_access(
+        conn,
+        resource_id=source_chunk_id,
+        query=_SOURCE_CHUNK_PROJECT_QUERY,
+        not_found_detail="source chunk not found",
+        user=user,
+    )
+    row = _repo.get_source_chunk(conn, source_chunk_id=source_chunk_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="source chunk not found")
+    return _chunk_out(row)
+
+
 @router.get("/tender-documents/{tender_document_id}/source-chunks/download")
 async def download_tender_source_chunks(
     tender_document_id: UUID,
@@ -1034,6 +1094,53 @@ async def extract_tender_document_requirements(
         category_counts=category_counts,
         requirements=persisted,
     )
+
+
+@router.post("/tender-documents/{tender_document_id}/extract-facts", response_model=TenderSummaryOut)
+async def extract_tender_document_facts(
+    tender_document_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderSummaryOut:
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    document = _repo.get_document(conn, tender_document_id=tender_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="tender document not found")
+    chunks = _repo.list_source_chunks(conn, tender_document_id=tender_document_id)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="no source chunks found; parse the tender document first")
+
+    extraction = await extract_tender_summary_with_ai(chunks, conn=conn)
+    row = _summary_repo.upsert(
+        conn,
+        project_id=document["project_id"],
+        tender_document_id=tender_document_id,
+        summary=extraction.summary,
+        raw_facts_json=extraction.raw_facts,
+        source_chunk_ids=extraction.source_chunk_ids,
+        extracted_model=extraction.model,
+    )
+    conn.commit()
+    return _summary_out(row)
+
+
+@router.get("/projects/{project_id}/tender-summary", response_model=TenderSummaryOut)
+async def get_project_tender_summary(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderSummaryOut:
+    require_project_access(conn, project_id=project_id, user=user)
+    row = _summary_repo.get_by_project(conn, project_id=project_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="tender summary not found")
+    return _summary_out(row)
 
 
 @router.post(

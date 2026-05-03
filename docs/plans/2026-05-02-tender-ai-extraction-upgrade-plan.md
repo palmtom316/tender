@@ -28,7 +28,7 @@
 - [x] Docker 镜像固化所有依赖（含 LibreOffice）
 - [x] AI 关键条款抽取器 + API + 单测
 - [ ] 端到端跑通包1，给出 AI vs keyword 对比
-- [ ] AI 招标摘要表 + 抽取器 + API + 前端摘要卡片
+- [ ] AI 招标摘要表 + 抽取器 + API + 前端摘要卡片（后端已完成，前端待做）
 - [ ] 原文对照 UI（点击 requirement → 侧滑 source_chunk）
 - [ ] 评分表 AI 结构化表 + 抽取器 + API
 
@@ -56,21 +56,21 @@
 
 #### 待完成
 - [ ] 跑 alembic 升级到 0032
-- [ ] 真实端到端：对包1 调 `ai-extract-requirements`，记录 token 消耗、延时、AI vs keyword 数量与质量对比
-- [ ] 评估前 20 条 AI 抽取的 title/category 质量，给出问题样本
+- [ ] 真实端到端：对包1 调 `ai-extract-requirements`，记录 token 消耗、延时、AI vs keyword 数量与质量对比（2026-05-04 按用户要求暂不跑完整招标文件抽取）
+- [ ] 评估前 20 条 AI 抽取的 title/category 质量，给出问题样本（依赖真实端到端抽取结果）
 - [ ] 可选：根据评估结果调整 prompt 或 chunk 策略
 
 ### Phase 3 — AI 招标摘要（待开始）
 
-- [ ] alembic 0033：新建 `tender_summary` 表（project_id PK + 项目名称/招标人/招标代理/建设地点/工期/质量要求/控制价/保证金/开标时间/截止时间 + `raw_facts_json` + `extracted_at`）
-- [ ] `services/extract_service/tender_facts_extractor.py`：调 AI Gateway `extract_tender_facts` profile
-- [ ] 新接口 `POST /api/tender-documents/{id}/extract-facts` + `GET /api/projects/{id}/tender-summary`
-- [ ] 单测覆盖
+- [x] alembic 0034：新建 `tender_summary` 表（project_id PK + 项目名称/招标人/招标代理/建设地点/工期/质量要求/控制价/保证金/开标时间/截止时间 + `raw_facts_json` + `extracted_at`）。注：0033 已用于异步抽取 run/batch 表。
+- [x] `services/extract_service/tender_facts_extractor.py`：调 AI Gateway `extract_tender_facts` profile，并支持规则 fallback
+- [x] 新接口 `POST /api/tender-documents/{id}/extract-facts` + `GET /api/projects/{id}/tender-summary`
+- [x] 单测覆盖
 - [ ] 前端：项目首屏顶部加摘要卡片
 
 ### Phase 4 — 原文对照 UI（待开始）
 
-- [ ] 后端：`GET /api/source-chunks/{chunk_id}` 单条详情接口（已有 list 但缺 by-id）
+- [x] 后端：`GET /api/source-chunks/{chunk_id}` 单条详情接口（已有 list 但缺 by-id）
 - [ ] 前端 `Requirement` 类型扩展：`source_chunk_id` / `source_file` / `source_locator` / `paragraph_index` / `page_start`
 - [ ] 新组件 `SourceChunkViewer`：右侧 Drawer，table 类型渲染 `<table>`，段落渲染 `text`
 - [ ] `RequirementsContent` 卡片点击 → 打开 viewer
