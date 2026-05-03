@@ -23,6 +23,9 @@ from tender_backend.services.deepseek_api import (
     deepseek_v4_thinking_options,
 )
 from tender_backend.services.extract_service.requirements_extractor import extract_requirements_from_source_chunks
+from tender_backend.services.extract_service.ai_requirements_extractor import (
+    extract_requirements_with_ai,
+)
 from tender_backend.services.office_document_parser import (
     OFFICE_PARSER_NAME,
     OFFICE_PARSER_VERSION,
@@ -147,6 +150,21 @@ class TenderDocumentRequirementExtractionOut(BaseModel):
     extracted_count: int
     persisted_count: int
     category_counts: dict[str, int]
+    requirements: list[dict]
+
+
+class TenderDocumentAiExtractionOut(BaseModel):
+    tender_document_id: UUID
+    project_id: UUID
+    model: str
+    extracted_count: int
+    persisted_count: int
+    dropped_invalid: int
+    failed_batches: int
+    total_input_tokens: int
+    total_output_tokens: int
+    category_counts: dict[str, int]
+    extraction_method_counts: dict[str, int]
     requirements: list[dict]
 
 
@@ -716,5 +734,91 @@ async def extract_tender_document_requirements(
         extracted_count=len(extracted),
         persisted_count=len(persisted),
         category_counts=category_counts,
+        requirements=persisted,
+    )
+
+
+@router.post(
+    "/tender-documents/{tender_document_id}/ai-extract-requirements",
+    response_model=TenderDocumentAiExtractionOut,
+)
+async def ai_extract_tender_document_requirements(
+    tender_document_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> TenderDocumentAiExtractionOut:
+    """Run AI-powered requirement extraction over the tender document.
+
+    Calls the AI Gateway with `task_type=extract_tender_requirements`
+    (deepseek-v4-pro + reasoning_effort=max). Persists results into
+    project_requirement and conflicts on (project_id, category, source_chunk_id,
+    source_locator) — when a prior keyword candidate exists for the same chunk
+    and category the row is upgraded to extraction_method='merged'.
+    """
+    require_resource_project_access(
+        conn,
+        resource_id=tender_document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="tender document not found",
+        user=user,
+    )
+    document = _repo.get_document(conn, tender_document_id=tender_document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="tender document not found")
+
+    chunks = _repo.list_source_chunks(conn, tender_document_id=tender_document_id)
+    if not chunks:
+        raise HTTPException(
+            status_code=400,
+            detail="no source chunks found; parse the tender document first",
+        )
+
+    persist_lock = asyncio.Lock()
+    persisted: list[dict] = []
+
+    async def _persist(batch_requirements):
+        if not batch_requirements:
+            return
+        payload = [item.to_repository_dict() for item in batch_requirements]
+        async with persist_lock:
+            rows = await asyncio.to_thread(
+                _requirement_repo.create_many,
+                conn,
+                project_id=document["project_id"],
+                requirements=payload,
+            )
+        persisted.extend(rows)
+
+    summary = await extract_requirements_with_ai(
+        chunks,
+        conn=conn,
+        on_batch_persisted=_persist,
+    )
+
+    category_counts: dict[str, int] = {}
+    method_counts: dict[str, int] = {}
+    for item in persisted:
+        category = str(item["category"])
+        category_counts[category] = category_counts.get(category, 0) + 1
+        method = str(item.get("extraction_method") or "ai")
+        method_counts[method] = method_counts.get(method, 0) + 1
+
+    failed_batches = sum(1 for b in summary.batches if b.extracted == 0 and b.input_tokens == 0)
+    dropped_invalid = sum(b.dropped_invalid for b in summary.batches)
+    resolved_models = {b.resolved_model for b in summary.batches if b.resolved_model}
+    model_label = ", ".join(sorted(resolved_models)) or DEEPSEEK_V4_PRO_MODEL
+
+    return TenderDocumentAiExtractionOut(
+        tender_document_id=tender_document_id,
+        project_id=document["project_id"],
+        model=model_label,
+        extracted_count=len(summary.requirements),
+        persisted_count=len(persisted),
+        dropped_invalid=dropped_invalid,
+        failed_batches=failed_batches,
+        total_input_tokens=summary.total_input_tokens,
+        total_output_tokens=summary.total_output_tokens,
+        category_counts=category_counts,
+        extraction_method_counts=method_counts,
         requirements=persisted,
     )

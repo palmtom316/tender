@@ -94,23 +94,21 @@ services:
     restart: unless-stopped
 
   backend:
-    image: python:3.12-slim
+    build:
+      context: ../backend
+    image: tender-backend:dev
     container_name: tender-backend
     profiles: ["app"]
     working_dir: /workspace/backend
-    command:
-      [
-        "sh",
-        "-c",
-        "pip install -e '.[dev]' && uvicorn tender_backend.main:app --host 0.0.0.0 --port 8000 --reload",
-      ]
     environment:
-      APP_ENV: local
+      APP_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       OPENSEARCH_URL: http://opensearch:9200
       AI_GATEWAY_URL: http://ai-gateway:8100
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     volumes:
       - ../backend:/workspace/backend
     depends_on:
@@ -126,43 +124,41 @@ services:
       - "${BACKEND_PORT:-8000}:8000"
 
   ai-gateway:
-    image: python:3.12-slim
+    build:
+      context: ../ai_gateway
+    image: tender-ai-gateway:dev
     container_name: tender-ai-gateway
     profiles: ["app"]
     working_dir: /workspace/ai_gateway
-    command:
-      [
-        "sh",
-        "-c",
-        "pip install -e '.[dev]' && uvicorn tender_ai_gateway.main:app --host 0.0.0.0 --port 8100 --reload",
-      ]
     environment:
-      APP_ENV: local
+      APP_ENV: development
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     volumes:
       - ../ai_gateway:/workspace/ai_gateway
     ports:
       - "${AI_GATEWAY_PORT:-8100}:8100"
 
   worker-io:
-    image: python:3.12-slim
+    image: tender-backend:dev
     container_name: tender-worker-io
     profiles: ["app"]
     working_dir: /workspace/backend
-    command:
-      [
-        "sh",
-        "-c",
-        "pip install -e '.[dev]' && celery -A tender_backend.workers.celery_app worker -Q io_tasks -l info",
-      ]
+    command: ["celery", "-A", "tender_backend.workers.celery_app", "worker", "-Q", "io_tasks", "-l", "info"]
     environment:
-      APP_ENV: local
+      APP_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
       CELERY_BROKER_URL: redis://redis:6379/0
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     volumes:
       - ../backend:/workspace/backend
     depends_on:
-      - redis
-      - postgres
+      backend:
+        condition: service_started
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:

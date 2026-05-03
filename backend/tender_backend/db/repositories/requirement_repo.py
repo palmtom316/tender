@@ -72,8 +72,8 @@ class RequirementRepository:
                         (id, project_id, category, title, requirement_text, source_text,
                          source_file, source_locator, confidence, is_veto,
                          requires_human_confirm, ignored_for_pricing, source_chunk_id,
-                         source_metadata, is_hard_constraint)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         source_metadata, is_hard_constraint, extraction_method)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (project_id, category, source_chunk_id, source_locator)
                     WHERE source_chunk_id IS NOT NULL
                     DO UPDATE SET
@@ -87,6 +87,11 @@ class RequirementRepository:
                       ignored_for_pricing = EXCLUDED.ignored_for_pricing,
                       source_metadata = EXCLUDED.source_metadata,
                       is_hard_constraint = EXCLUDED.is_hard_constraint,
+                      extraction_method = CASE
+                          WHEN project_requirement.extraction_method = EXCLUDED.extraction_method
+                              THEN project_requirement.extraction_method
+                          ELSE 'merged'
+                      END,
                       updated_at = now()
                     RETURNING *
                     """,
@@ -106,6 +111,7 @@ class RequirementRepository:
                         UUID(source_chunk_id) if source_chunk_id else None,
                         Jsonb(requirement.get("source_metadata") or {}),
                         requirement.get("is_hard_constraint", False),
+                        requirement.get("extraction_method", "keyword"),
                     ),
                 ).fetchone()
                 if row is not None:

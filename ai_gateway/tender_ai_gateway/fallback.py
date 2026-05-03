@@ -33,6 +33,16 @@ class ProviderConfig:
     base_url: str
     api_key: str
     model: str
+    extra_body: dict[str, Any] | None = None
+
+
+def _override_extra_body(override: Any | None) -> dict[str, Any] | None:
+    if override is None:
+        return None
+    extra = getattr(override, "extra_body", None)
+    if not extra:
+        return None
+    return dict(extra)
 
 
 def _get_providers(
@@ -56,6 +66,7 @@ def _get_providers(
             base_url=primary_override.base_url,
             api_key=primary_override.api_key,
             model=primary_override.model or primary_model,
+            extra_body=_override_extra_body(primary_override),
         )
     else:
         primary = ProviderConfig(
@@ -71,6 +82,7 @@ def _get_providers(
             base_url=fallback_override.base_url,
             api_key=fallback_override.api_key,
             model=fallback_override.model or fallback_model,
+            extra_body=_override_extra_body(fallback_override),
         )
     else:
         fallback = ProviderConfig(
@@ -83,10 +95,26 @@ def _get_providers(
     return primary, fallback
 
 
-def _reject_disallowed_model(model: str) -> None:
+# Tasks that may use deepseek-v4-pro despite the global cost-control guard.
+# Tender extraction needs v4-pro's reasoning quality for recall and structural
+# fidelity; everything else stays on flash.
+_V4_PRO_ALLOWED_TASKS = frozenset(
+    {
+        "extract_tender_requirements",
+        "extract_tender_facts",
+        "extract_scoring_criteria",
+    }
+)
+
+
+def _reject_disallowed_model(model: str, task_type: str) -> None:
     normalized = str(model or "").strip().lower()
     if normalized in {"deepseek-v4-pro", "deepseek/deepseek-v4-pro"}:
-        raise ValueError("deepseek-v4-pro is disabled for cost control; use deepseek-v4-flash")
+        if task_type in _V4_PRO_ALLOWED_TASKS:
+            return
+        raise ValueError(
+            f"deepseek-v4-pro is disabled for task '{task_type}' (cost control); use deepseek-v4-flash"
+        )
 
 
 def call_with_fallback(
@@ -97,8 +125,13 @@ def call_with_fallback(
     max_tokens: int | None = None,
     primary_override: Any | None = None,
     fallback_override: Any | None = None,
+    extra_body: dict[str, Any] | None = None,
 ) -> CompletionResult:
-    """Call primary provider, fall back to secondary on failure."""
+    """Call primary provider, fall back to secondary on failure.
+
+    `extra_body` (and any per-override `extra_body`) is forwarded to the OpenAI
+    SDK so model-specific fields like `reasoning_effort` reach the provider.
+    """
     settings = get_settings()
     profile = TASK_PROFILES.get(task_type, {})
     primary, fallback = _get_providers(task_type, primary_override, fallback_override)
@@ -110,7 +143,7 @@ def call_with_fallback(
         if not provider.api_key:
             logger.warning("skipping_provider_no_key", extra={"provider": provider.name})
             continue
-        _reject_disallowed_model(provider.model)
+        _reject_disallowed_model(provider.model, task_type)
 
         client = OpenAI(
             api_key=provider.api_key,
@@ -119,14 +152,23 @@ def call_with_fallback(
             max_retries=max_retries,
         )
 
+        merged_extra: dict[str, Any] = {}
+        if extra_body:
+            merged_extra.update(extra_body)
+        if provider.extra_body:
+            merged_extra.update(provider.extra_body)
+
         start = time.perf_counter()
         try:
-            resp = client.chat.completions.create(
-                model=provider.model,
-                messages=messages,  # type: ignore[arg-type]
-                temperature=temperature,
-                max_tokens=effective_max_tokens,
-            )
+            create_kwargs: dict[str, Any] = {
+                "model": provider.model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": effective_max_tokens,
+            }
+            if merged_extra:
+                create_kwargs["extra_body"] = merged_extra
+            resp = client.chat.completions.create(**create_kwargs)
             latency_ms = int((time.perf_counter() - start) * 1000)
 
             usage = resp.usage

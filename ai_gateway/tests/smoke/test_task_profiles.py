@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from tender_ai_gateway.task_profiles import TASK_PROFILES
 
 
@@ -13,6 +11,12 @@ def test_vision_repair_profile_uses_extended_timeout() -> None:
 
 
 def test_parse_profiles_use_deepseek_v4_flash_only() -> None:
+    """Non-tender parse profiles stay on flash for cost control.
+
+    Tender extraction tasks (extract_tender_*, extract_scoring_criteria) are
+    explicitly whitelisted to use v4-pro elsewhere — see _V4_PRO_ALLOWED_TASKS
+    in fallback.py.
+    """
     for task_name in (
         "generate_section",
         "review_section",
@@ -23,7 +27,17 @@ def test_parse_profiles_use_deepseek_v4_flash_only() -> None:
     ):
         assert TASK_PROFILES[task_name]["primary_model"] == "deepseek-v4-flash"
 
-    assert "deepseek-v4-pro" not in json.dumps(TASK_PROFILES).lower()
+
+def test_tender_extraction_profiles_use_v4_pro() -> None:
+    for task_name in (
+        "extract_tender_requirements",
+        "extract_tender_facts",
+        "extract_scoring_criteria",
+    ):
+        profile = TASK_PROFILES[task_name]
+        assert profile["primary_model"] == "deepseek-v4-pro"
+        assert profile["fallback_model"] == "deepseek-v4-flash"
+        assert profile["max_retries"] == 0
 
 
 def test_tag_clause_profile_has_large_output_budget() -> None:

@@ -14,6 +14,7 @@ class ProviderOverride(BaseModel):
     base_url: str
     api_key: str
     model: str
+    extra_body: dict[str, Any] | None = None
 
 
 class ChatRequest(BaseModel):
@@ -26,6 +27,7 @@ class ChatRequest(BaseModel):
     max_tokens: int | None = None
     primary_override: ProviderOverride | None = None
     fallback_override: ProviderOverride | None = None
+    extra_body: dict[str, Any] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -66,6 +68,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
             max_tokens=request.max_tokens,
             primary_override=request.primary_override,
             fallback_override=request.fallback_override,
+            extra_body=request.extra_body,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"All providers failed: {exc}")
