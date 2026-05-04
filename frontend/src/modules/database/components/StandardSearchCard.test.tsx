@@ -30,11 +30,10 @@ describe("StandardSearchCard", () => {
       expect(searchStandardClauses).toHaveBeenCalledWith("变压器");
     });
 
+    expect(await screen.findByText("没有匹配条款")).toBeInTheDocument();
     expect(
-      await screen.findByText("未找到匹配的规范条款，请尝试更换关键词。"),
+      screen.getByText("尝试更换关键词，或确认规范已完成 AI 解析。"),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByText("输入关键词后，可在这里查看命中的规范条款。"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("检索规范条款")).not.toBeInTheDocument();
   });
 });

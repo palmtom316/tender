@@ -182,7 +182,7 @@ describe("StandardViewerModal diagnostics", () => {
       />,
     );
 
-    expect(screen.getByText("PDF 组件加载中...")).toBeInTheDocument();
+    expect(screen.getByLabelText("PDF 组件加载中")).toBeInTheDocument();
     expect(await screen.findByTestId("pdf-pane")).toBeInTheDocument();
     expect(screen.getByText("解析诊断")).toBeInTheDocument();
     expect(screen.getByText("MinerU 2.0")).toBeInTheDocument();
