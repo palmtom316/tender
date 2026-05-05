@@ -40,6 +40,30 @@ class ProviderConfig:
     extra_body: dict[str, Any] | None = None
 
 
+def _read_field(value: Any, field: str, default: Any = None) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, dict):
+        return value.get(field, default)
+    return getattr(value, field, default)
+
+
+def _extract_usage_metrics(usage: Any) -> tuple[int, int, int, int, int]:
+    input_tokens = int(_read_field(usage, "prompt_tokens", 0) or 0)
+    output_tokens = int(_read_field(usage, "completion_tokens", 0) or 0)
+    prompt_cache_hit_tokens = int(_read_field(usage, "prompt_cache_hit_tokens", 0) or 0)
+    prompt_cache_miss_tokens = int(_read_field(usage, "prompt_cache_miss_tokens", 0) or 0)
+    completion_tokens_details = _read_field(usage, "completion_tokens_details")
+    reasoning_tokens = int(_read_field(completion_tokens_details, "reasoning_tokens", 0) or 0)
+    return (
+        input_tokens,
+        output_tokens,
+        prompt_cache_hit_tokens,
+        prompt_cache_miss_tokens,
+        reasoning_tokens,
+    )
+
+
 def _override_extra_body(override: Any | None) -> dict[str, Any] | None:
     if override is None:
         return None
@@ -47,6 +71,24 @@ def _override_extra_body(override: Any | None) -> dict[str, Any] | None:
     if not extra:
         return None
     return dict(extra)
+
+
+def _thinking_enabled(extra_body: dict[str, Any] | None) -> bool:
+    if not isinstance(extra_body, dict):
+        return False
+    thinking = extra_body.get("thinking")
+    return isinstance(thinking, dict) and thinking.get("type") == "enabled"
+
+
+def _sanitize_extra_body_for_thinking(extra_body: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not extra_body:
+        return None
+    sanitized = dict(extra_body)
+    if not _thinking_enabled(sanitized):
+        sanitized.pop("reasoning_effort", None)
+    if not sanitized:
+        return None
+    return sanitized
 
 
 def _get_providers(
@@ -163,51 +205,74 @@ def call_with_fallback(
             merged_extra.update(extra_body)
         if provider.extra_body:
             merged_extra.update(provider.extra_body)
+        sanitized_extra = _sanitize_extra_body_for_thinking(merged_extra)
+        thinking_enabled = _thinking_enabled(sanitized_extra)
 
         start = time.perf_counter()
         try:
             create_kwargs: dict[str, Any] = {
                 "model": provider.model,
                 "messages": messages,
-                "temperature": temperature,
                 "max_tokens": effective_max_tokens,
             }
-            if merged_extra:
-                create_kwargs["extra_body"] = merged_extra
+            if not thinking_enabled:
+                create_kwargs["temperature"] = temperature
+            if sanitized_extra:
+                create_kwargs["extra_body"] = sanitized_extra
             if response_format:
                 create_kwargs["response_format"] = response_format
             if stream:
                 create_kwargs["stream"] = True
+                create_kwargs["stream_options"] = {"include_usage": True}
             resp = client.chat.completions.create(**create_kwargs)
-            latency_ms = int((time.perf_counter() - start) * 1000)
 
             if stream:
                 content_parts: list[str] = []
                 finish_reason: str | None = None
+                input_tokens = 0
+                output_tokens = 0
+                prompt_cache_hit_tokens = 0
+                prompt_cache_miss_tokens = 0
+                reasoning_tokens = 0
                 for event in resp:
+                    usage = _read_field(event, "usage")
+                    if usage is not None:
+                        (
+                            input_tokens,
+                            output_tokens,
+                            prompt_cache_hit_tokens,
+                            prompt_cache_miss_tokens,
+                            reasoning_tokens,
+                        ) = _extract_usage_metrics(usage)
                     delta = event.choices[0].delta if event.choices else None
                     if delta and delta.content:
                         content_parts.append(delta.content)
                     if event.choices:
                         finish_reason = getattr(event.choices[0], "finish_reason", finish_reason)
+                latency_ms = int((time.perf_counter() - start) * 1000)
                 return CompletionResult(
                     content="".join(content_parts),
                     model=provider.model,
                     provider=provider.name,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
                     latency_ms=latency_ms,
                     used_fallback=attempt > 0,
                     finish_reason=finish_reason,
+                    prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+                    prompt_cache_miss_tokens=prompt_cache_miss_tokens,
+                    reasoning_tokens=reasoning_tokens,
                 )
 
+            latency_ms = int((time.perf_counter() - start) * 1000)
             usage = resp.usage
-            input_tokens = usage.prompt_tokens if usage else 0
-            output_tokens = usage.completion_tokens if usage else 0
-            prompt_cache_hit_tokens = int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0)
-            prompt_cache_miss_tokens = int(getattr(usage, "prompt_cache_miss_tokens", 0) or 0)
-            completion_tokens_details = getattr(usage, "completion_tokens_details", None)
-            reasoning_tokens = int(
-                getattr(completion_tokens_details, "reasoning_tokens", 0) or 0
-            )
+            (
+                input_tokens,
+                output_tokens,
+                prompt_cache_hit_tokens,
+                prompt_cache_miss_tokens,
+                reasoning_tokens,
+            ) = _extract_usage_metrics(usage)
             finish_reason = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
 
             return CompletionResult(

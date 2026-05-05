@@ -163,14 +163,14 @@ def test_call_with_fallback_allows_v4_pro_for_tender_extraction(monkeypatch) -> 
             base_url="https://api.deepseek.com/v1",
             api_key="deepseek-key",
             model="deepseek-v4-pro",
-            extra_body={"reasoning_effort": "max"},
+            extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "max"},
         ),
     )
 
     assert result.content == "[]"
     assert captured["model"] == "deepseek-v4-pro"
     assert captured["max_tokens"] == 16384
-    assert captured["extra_body"] == {"reasoning_effort": "max"}
+    assert captured["extra_body"] == {"thinking": {"type": "enabled"}, "reasoning_effort": "max"}
     assert result.finish_reason == "stop"
     assert result.prompt_cache_hit_tokens == 4
     assert result.prompt_cache_miss_tokens == 6
@@ -210,10 +210,162 @@ def test_call_with_fallback_forwards_request_extra_body(monkeypatch) -> None:
     fallback.call_with_fallback(
         task_type="tag_clauses",
         messages=[{"role": "user", "content": "test"}],
-        extra_body={"reasoning_effort": "high"},
+        extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
     )
 
-    assert captured["extra_body"] == {"reasoning_effort": "high"}
+    assert captured["extra_body"] == {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+
+
+def test_call_with_fallback_strips_temperature_when_thinking_enabled(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeOpenAI:
+        def __init__(self, *, api_key, base_url, timeout, max_retries) -> None:
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+        def _create(self, **kwargs):
+            captured["kwargs"] = kwargs
+            usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1)
+            choice = SimpleNamespace(message=SimpleNamespace(content="ok"))
+            return SimpleNamespace(choices=[choice], usage=usage)
+
+    monkeypatch.setattr(fallback, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(
+        fallback,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_primary_model="deepseek-v4-flash",
+            default_fallback_model="qwen-max",
+            deepseek_base_url="https://api.deepseek.com/v1",
+            deepseek_api_key="deepseek-key",
+            qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            qwen_api_key="qwen-key",
+            default_timeout=60,
+            default_retry_count=2,
+        ),
+    )
+
+    fallback.call_with_fallback(
+        task_type="extract_tender_requirements",
+        messages=[{"role": "user", "content": "test"}],
+        primary_override=SimpleNamespace(
+            base_url="https://api.deepseek.com/v1",
+            api_key="deepseek-key",
+            model="deepseek-v4-flash",
+            extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
+        ),
+    )
+
+    assert "temperature" not in captured["kwargs"]
+
+
+def test_call_with_fallback_stream_measures_full_latency_and_collects_usage(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    perf_counter_values = iter([10.0, 10.25])
+
+    class _FakeOpenAI:
+        def __init__(self, *, api_key, base_url, timeout, max_retries) -> None:
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+        def _create(self, **kwargs):
+            captured["kwargs"] = kwargs
+            return [
+                SimpleNamespace(
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="hello "), finish_reason=None)],
+                    usage=None,
+                ),
+                SimpleNamespace(
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="world"), finish_reason="stop")],
+                    usage=None,
+                ),
+                SimpleNamespace(
+                    choices=[],
+                    usage=SimpleNamespace(
+                        prompt_tokens=12,
+                        completion_tokens=34,
+                        prompt_cache_hit_tokens=5,
+                        prompt_cache_miss_tokens=7,
+                        completion_tokens_details=SimpleNamespace(reasoning_tokens=9),
+                    ),
+                ),
+            ]
+
+    monkeypatch.setattr(fallback, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(fallback.time, "perf_counter", lambda: next(perf_counter_values))
+    monkeypatch.setattr(
+        fallback,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_primary_model="deepseek-v4-flash",
+            default_fallback_model="qwen-max",
+            deepseek_base_url="https://api.deepseek.com/v1",
+            deepseek_api_key="deepseek-key",
+            qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            qwen_api_key="qwen-key",
+            default_timeout=60,
+            default_retry_count=2,
+        ),
+    )
+
+    result = fallback.call_with_fallback(
+        task_type="extract_tender_requirements",
+        messages=[{"role": "user", "content": "test"}],
+        stream=True,
+    )
+
+    assert captured["kwargs"]["stream"] is True
+    assert captured["kwargs"]["stream_options"] == {"include_usage": True}
+    assert result.content == "hello world"
+    assert result.latency_ms == 250
+    assert result.input_tokens == 12
+    assert result.output_tokens == 34
+    assert result.prompt_cache_hit_tokens == 5
+    assert result.prompt_cache_miss_tokens == 7
+    assert result.reasoning_tokens == 9
+    assert result.finish_reason == "stop"
+
+
+def test_call_with_fallback_strips_reasoning_effort_when_thinking_disabled(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeOpenAI:
+        def __init__(self, *, api_key, base_url, timeout, max_retries) -> None:
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+        def _create(self, **kwargs):
+            captured["extra_body"] = kwargs.get("extra_body")
+            usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1)
+            choice = SimpleNamespace(message=SimpleNamespace(content="ok"))
+            return SimpleNamespace(choices=[choice], usage=usage)
+
+    monkeypatch.setattr(fallback, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(
+        fallback,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_primary_model="deepseek-v4-flash",
+            default_fallback_model="qwen-max",
+            deepseek_base_url="https://api.deepseek.com/v1",
+            deepseek_api_key="deepseek-key",
+            qwen_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            qwen_api_key="qwen-key",
+            default_timeout=60,
+            default_retry_count=2,
+        ),
+    )
+
+    fallback.call_with_fallback(
+        task_type="extract_tender_requirements",
+        messages=[{"role": "user", "content": "test"}],
+        primary_override=SimpleNamespace(
+            base_url="https://api.deepseek.com/v1",
+            api_key="deepseek-key",
+            model="deepseek-v4-flash",
+            extra_body={"thinking": {"type": "disabled"}, "reasoning_effort": "high"},
+        ),
+    )
+
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_call_with_fallback_forwards_response_format_and_stream(monkeypatch) -> None:

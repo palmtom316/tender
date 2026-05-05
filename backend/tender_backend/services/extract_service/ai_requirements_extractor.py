@@ -26,8 +26,8 @@ from tender_backend.db.repositories.agent_config_repo import AgentConfigReposito
 from tender_backend.services.deepseek_api import (
     DEEPSEEK_V4_MAX_REASONING_EFFORT,
     DEEPSEEK_V4_PRO_MODEL,
+    deepseek_v4_thinking_options,
     is_deepseek_v4_model,
-    normalize_deepseek_v4_reasoning_effort,
 )
 from tender_backend.services.extract_service.requirements_extractor import (
     HARD_CONSTRAINT_CATEGORIES,
@@ -51,44 +51,111 @@ _SYSTEM_PROMPT = (
     "只输出 JSON 对象，不要任何解释、Markdown 围栏或前后缀。"
 )
 
-_INSTRUCTION = """\
-任务：从下方 source_chunks 数组中抽取投标文件编写约束。
-
-本批次来自文件：{source_file}（共 {chunk_count} 个 chunk）。请逐一检查每个 chunk。
+_RULES_BLOCK = """\
+任务：从 source_chunks 数组中抽取投标文件编写约束。
 
 判定规则：
-- 抽取所有"对投标人提出明确要求/限制"的条款（资格、业绩、人员、技术、商务、格式、合同、特殊要求、否决条款等）。
-- 招标人的内部说明、目录、纯页眉页脚不抽取。
+- 抽取所有对投标人提出明确要求、限制、禁止、必须、应当提交的条款。
+- 重点覆盖资格、业绩、人员、技术、商务、格式、合同、特殊要求、否决条款。
+- 招标人的内部说明、目录、纯页眉页脚、纯背景介绍不抽取。
 - 报价/定价类信息标 ignored_for_pricing=true，仍可输出。
-- 凡含"否决/废标/无效投标/不予受理/实质性不响应/投标无效"的，is_veto=true。
-- 严格使用以下 category 之一：{categories}。
-- 输出条款的 source_chunk_id 必须是输入数组里出现过的 id；不准虚构。
-- 一个 chunk 可对应 0~N 条 requirement；同一条款不要重复输出。
+- 凡含否决、废标、无效投标、不予受理、实质性不响应、投标无效的，is_veto=true。
+- 输出条款的 source_chunk_id 必须来自输入数组，严禁虚构。
+- 同一 chunk 可对应 0 到多条 requirement，但同一条款不要重复输出。
+"""
 
+_SCHEMA_BLOCK = """\
 输出 JSON 对象，格式固定如下：
-{{
+{
   "requirements": [
-    {{
+    {
       "source_chunk_id": "<输入数组里的 id 字符串>",
-      "category": "<上述 12 个 category 之一>",
-      "title": "<≤80 字的简短标题，应概括该条款的核心要求>",
-      "requirement_text": "<≤500 字的精炼条款，可对原文进行概括但不要丢失关键数字/资质名/期限>",
+      "category": "<必须是给定 category 之一>",
+      "title": "<不超过 80 字的简短标题>",
+      "requirement_text": "<不超过 500 字，保留关键数字、资质名、期限>",
       "is_veto": <bool>,
       "is_hard_constraint": <bool>,
       "ignored_for_pricing": <bool>,
-      "confidence": <0~1 的浮点数>
-    }}
+      "confidence": <0~1 浮点数>
+    }
   ],
-  "batch_quality": {{
+  "batch_quality": {
     "has_requirements": <bool>,
-    "coverage_note": "<若无要求，说明原因；若有缺口风险，说明风险>",
+    "coverage_note": "<无要求时说明原因；有缺口风险时说明风险>",
     "suspected_missing": <bool>
-  }}
-}}
-
-source_chunks (JSON)：
-{payload}
+  }
+}
 """
+
+_PROMPT_PREFIX_TEMPLATE = """\
+{rules}
+严格使用以下 category 之一：{categories}。
+
+{schema}
+"""
+_TABLE_RULES_BLOCK = """\
+任务：从 source_chunks 中的表格与表格邻近说明中抽取投标文件编写约束。
+
+判定规则：
+- 重点识别资格表、评分表、报价参考表、人员与业绩表中的硬性约束。
+- 优先输出表头、分值、条件、提交材料、否决条件、递交要求相关条目。
+- 对纯数据行、空行、合计行、说明性注释不要机械重复输出。
+- 若同一要求在表头和正文同时出现，只保留更完整的一条。
+"""
+_CRITICAL_RULES_BLOCK = """\
+任务：从高风险关键片段中抽取投标文件编写约束。
+
+判定规则：
+- 重点覆盖资格、评分、否决、废标、递交、技术规范中的关键限制。
+- 不做泛泛总结，只保留会影响投标有效性、得分、资格、递交完整性的条款。
+- 对否决、废标、无效投标类条款优先标记 is_veto=true。
+"""
+_PREFILTER_SIGNAL_KEYWORDS = (
+    "应",
+    "须",
+    "必须",
+    "不得",
+    "禁止",
+    "提交",
+    "提供",
+    "递交",
+    "资格",
+    "资质",
+    "业绩",
+    "人员",
+    "评分",
+    "评审",
+    "否决",
+    "废标",
+    "无效投标",
+    "技术要求",
+    "技术规范",
+    "保证金",
+    "工期",
+    "服务期",
+    "合同",
+    "格式",
+    "盖章",
+    "签章",
+    "报价",
+)
+_PREFILTER_NEGATIVE_TITLE_KEYWORDS = ("目录", "封面", "前言", "说明", "概述", "声明")
+_QUALITY_POLICY_MAX_TOKENS = {
+    "fast_prefilter": 16_384,
+    "flash_extract": 24_576,
+    "table_or_critical_extract": 24_576,
+    "pro_review": 32_768,
+}
+_REFERENCE_ONLY_PATTERNS = (
+    "详见",
+    "见附件",
+    "参见",
+    "按分类",
+    "以招标公告",
+    "以附件",
+    "制作要求详见",
+    "递交要求详见",
+)
 
 
 @dataclass
@@ -139,7 +206,15 @@ def _serialize_chunk_for_prompt(chunk: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": str(chunk["id"]),
         "chunk_type": chunk.get("chunk_type"),
+        "document_type": chunk.get("document_type"),
+        "section_title": chunk.get("section_title"),
         "source_locator": chunk.get("source_locator"),
+        "page_start": chunk.get("page_start"),
+        "page_end": chunk.get("page_end"),
+        "sheet_name": chunk.get("sheet_name"),
+        "row_start": chunk.get("row_start"),
+        "row_end": chunk.get("row_end"),
+        "paragraph_index": chunk.get("paragraph_index"),
         "title": chunk.get("title"),
     }
     text = (chunk.get("text") or "").strip()
@@ -161,6 +236,108 @@ def _group_chunks_by_file(chunks: list[dict[str, Any]]) -> list[tuple[str, list[
     return list(groups.items())
 
 
+def _chunk_text_for_prefilter(chunk: dict[str, Any]) -> str:
+    parts = [
+        str(chunk.get("document_type") or ""),
+        str(chunk.get("section_title") or ""),
+        str(chunk.get("title") or ""),
+        str(chunk.get("text") or ""),
+    ]
+    table = chunk.get("table_json") or {}
+    if table.get("rows"):
+        parts.append(str(table.get("rows")))
+    return " ".join(part for part in parts if part)
+
+
+def _prefilter_score(chunk: dict[str, Any]) -> int:
+    text = _chunk_text_for_prefilter(chunk)
+    if not text.strip():
+        return -10
+    score = 0
+    title = str(chunk.get("section_title") or chunk.get("title") or "")
+    if title and any(keyword in title for keyword in _PREFILTER_NEGATIVE_TITLE_KEYWORDS):
+        score -= 2
+    if any(keyword in text for keyword in _PREFILTER_SIGNAL_KEYWORDS):
+        score += 2
+    if any(modal in text for modal in ("应", "须", "必须", "不得", "禁止")):
+        score += 2
+    table = chunk.get("table_json") or {}
+    if table.get("rows"):
+        score += 1
+        if any(keyword in str(table.get("rows")) for keyword in _PREFILTER_SIGNAL_KEYWORDS):
+            score += 2
+    if str(chunk.get("document_type") or "") in {
+        "qualification_requirement",
+        "qualification_sheet",
+        "technical_scoring",
+        "business_scoring",
+        "scoring",
+        "scoring_sheet",
+        "pricing_reference",
+        "bid_submission_requirement",
+    }:
+        score += 3
+    return score
+
+
+def _select_candidate_chunks(
+    batch: list[dict[str, Any]],
+    *,
+    quality_policy: str | None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    original_count = len(batch)
+    if not batch:
+        return batch, {"original_chunk_count": 0, "candidate_chunk_count": 0, "prefilter_dropped_chunks": 0}
+    if quality_policy in {None, "legacy", "pro_review", "table_or_critical_extract"}:
+        return batch, {
+            "original_chunk_count": original_count,
+            "candidate_chunk_count": original_count,
+            "prefilter_dropped_chunks": 0,
+        }
+
+    scored = [(chunk, _prefilter_score(chunk)) for chunk in batch]
+    candidates = [chunk for chunk, score in scored if score > 0]
+    if not candidates:
+        fallback_keep = min(8, len(batch))
+        ranked = sorted(scored, key=lambda item: item[1], reverse=True)
+        candidates = [chunk for chunk, _score in ranked[:fallback_keep]]
+    stats = {
+        "original_chunk_count": original_count,
+        "candidate_chunk_count": len(candidates),
+        "prefilter_dropped_chunks": max(0, original_count - len(candidates)),
+    }
+    return candidates, stats
+
+
+def _run_stage1_prefilter(
+    batch: list[dict[str, Any]],
+    *,
+    quality_policy: str | None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    return _select_candidate_chunks(batch, quality_policy=quality_policy)
+
+
+def run_stage1_prefilter(
+    batch: list[dict[str, Any]],
+    *,
+    quality_policy: str | None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    return _run_stage1_prefilter(batch, quality_policy=quality_policy)
+
+
+def _prompt_variant_for_policy(quality_policy: str | None, batch: list[dict[str, Any]]) -> str:
+    policy = str(quality_policy or "").strip() or "legacy"
+    if policy == "table_or_critical_extract":
+        if any((chunk.get("table_json") or {}).get("rows") for chunk in batch):
+            return "table"
+        return "critical"
+    return "general"
+
+
+def _max_tokens_hint_for_policy(quality_policy: str | None) -> int | None:
+    return _QUALITY_POLICY_MAX_TOKENS.get(str(quality_policy or "").strip() or "legacy")
+
+
 def _split_into_batches(chunks: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     batches: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
@@ -174,17 +351,104 @@ def _split_into_batches(chunks: list[dict[str, Any]]) -> list[list[dict[str, Any
     return batches
 
 
-def _build_prompt(batch: list[dict[str, Any]], source_file: str) -> str:
+def _build_prompt(batch: list[dict[str, Any]], source_file: str, *, variant: str = "general") -> str:
+    rules = _RULES_BLOCK
+    if variant == "table":
+        rules = _TABLE_RULES_BLOCK
+    elif variant == "critical":
+        rules = _CRITICAL_RULES_BLOCK
+    prefix = _PROMPT_PREFIX_TEMPLATE.format(
+        rules=rules,
+        categories=", ".join(sorted(_VALID_CATEGORIES)),
+        schema=_SCHEMA_BLOCK,
+    )
     payload = json.dumps(
         [_serialize_chunk_for_prompt(c) for c in batch],
         ensure_ascii=False,
     )
-    return _INSTRUCTION.format(
-        categories=", ".join(sorted(_VALID_CATEGORIES)),
-        source_file=source_file.split("/")[-1] if "/" in source_file else source_file,
-        chunk_count=len(batch),
-        payload=payload,
+    short_name = source_file.split("/")[-1] if "/" in source_file else source_file
+    return (
+        f"{prefix}\n"
+        f"抽取模式：{variant}\n"
+        f"本批次文件：{short_name}\n"
+        f"本批次 chunk 数：{len(batch)}\n\n"
+        f"source_chunks (JSON)：\n{payload}\n"
     )
+
+
+def _batch_text(batch: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for chunk in batch:
+        parts.extend(
+            str(value or "")
+            for value in (
+                chunk.get("document_type"),
+                chunk.get("section_title"),
+                chunk.get("title"),
+                chunk.get("text"),
+            )
+        )
+        table = chunk.get("table_json") or {}
+        if table.get("rows"):
+            parts.append(str(table.get("rows")))
+    return " ".join(part for part in parts if part).strip()
+
+
+def _reference_targets_from_text(text: str) -> list[str]:
+    targets: list[str] = []
+    for marker in ("附件", "招标公告", "采购文件", "评分细则", "专用资格要求", "技术规范书"):
+        if marker in text and marker not in targets:
+            targets.append(marker)
+    return targets
+
+
+def _infer_empty_batch_quality(
+    *,
+    source_file: str,
+    batch: list[dict[str, Any]],
+    llm_batch_quality: dict[str, Any] | None,
+) -> dict[str, Any]:
+    quality = dict(llm_batch_quality or {})
+    if quality.get("has_requirements") is True:
+        quality.setdefault("suspected_missing", False)
+        quality.setdefault("empty_reason", None)
+        quality.setdefault("reference_targets", [])
+        return quality
+
+    text = _batch_text(batch)
+    filename = source_file.rsplit("/", 1)[-1]
+    inferred_reason = "uncertain_missing"
+    reference_targets: list[str] = []
+
+    if any(keyword in filename for keyword in ("空白", "模板")) or (
+        "空白" in text and any(keyword in text for keyword in ("模板", "待填", "示例"))
+    ):
+        inferred_reason = "template_blank"
+    elif any(pattern in text for pattern in _REFERENCE_ONLY_PATTERNS):
+        inferred_reason = "reference_only"
+        reference_targets = _reference_targets_from_text(text)
+    elif quality.get("suspected_missing") is False:
+        inferred_reason = "true_empty"
+
+    quality.setdefault("has_requirements", False)
+    quality["empty_reason"] = str(quality.get("empty_reason") or inferred_reason)
+    if quality["empty_reason"] in {"template_blank", "reference_only", "true_empty"}:
+        quality["suspected_missing"] = False
+    else:
+        quality["suspected_missing"] = bool(quality.get("suspected_missing", True))
+    quality["reference_targets"] = list(quality.get("reference_targets") or reference_targets)
+    quality.setdefault("coverage_note", "")
+    return quality
+
+
+def _normalize_nonempty_batch_quality(batch_quality: dict[str, Any] | None) -> dict[str, Any]:
+    quality = dict(batch_quality or {})
+    quality["has_requirements"] = True
+    quality["suspected_missing"] = bool(quality.get("suspected_missing", False))
+    quality.setdefault("coverage_note", "")
+    quality.setdefault("empty_reason", None)
+    quality.setdefault("reference_targets", [])
+    return quality
 
 
 def _ai_gateway_chat_url() -> str:
@@ -196,6 +460,7 @@ def _provider_override(
     base_url: str | None,
     api_key: str | None,
     model: str | None,
+    thinking_enabled: bool | None = None,
     reasoning_effort: str | None = None,
 ) -> dict | None:
     if not base_url or not api_key:
@@ -205,9 +470,13 @@ def _provider_override(
         "api_key": api_key,
         "model": model or DEEPSEEK_V4_PRO_MODEL,
     }
-    normalized_effort = normalize_deepseek_v4_reasoning_effort(reasoning_effort)
-    if normalized_effort and is_deepseek_v4_model(override["model"]):
-        override["extra_body"] = {"reasoning_effort": normalized_effort}
+    if is_deepseek_v4_model(override["model"]):
+        extra_body = deepseek_v4_thinking_options(
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+        )
+        if extra_body:
+            override["extra_body"] = extra_body
     return override
 
 
@@ -215,14 +484,22 @@ def _build_overrides(
     conn: Connection,
     *,
     model: str | None = None,
+    thinking_enabled: bool | None = None,
     reasoning_effort: str | None = None,
     fallback_model: str | None = None,
+    fallback_thinking_enabled: bool | None = None,
     fallback_reasoning_effort: str | None = None,
     force_legacy_max_reasoning: bool = False,
 ) -> tuple[dict | None, dict | None]:
     config = AgentConfigRepository().get_by_key(conn, "extract")
     if not config or not config.enabled:
         return None, None
+    effective_thinking_enabled = thinking_enabled
+    if effective_thinking_enabled is None and reasoning_effort is not None:
+        effective_thinking_enabled = True
+    effective_fallback_thinking_enabled = fallback_thinking_enabled
+    if effective_fallback_thinking_enabled is None and fallback_reasoning_effort is not None:
+        effective_fallback_thinking_enabled = True
 
     primary_model = model or config.primary_model or DEEPSEEK_V4_PRO_MODEL
     primary_effort = reasoning_effort
@@ -232,6 +509,7 @@ def _build_overrides(
         base_url=config.base_url,
         api_key=config.api_key,
         model=primary_model,
+        thinking_enabled=effective_thinking_enabled,
         reasoning_effort=primary_effort,
     )
 
@@ -243,6 +521,7 @@ def _build_overrides(
         base_url=config.fallback_base_url,
         api_key=config.fallback_api_key,
         model=resolved_fallback_model,
+        thinking_enabled=effective_fallback_thinking_enabled,
         reasoning_effort=fallback_effort,
     )
 
@@ -257,6 +536,7 @@ async def _call_ai_gateway(
     fallback_override: dict | None,
     response_format: str | None = None,
     stream: bool = False,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "task_type": "extract_tender_requirements",
@@ -264,8 +544,14 @@ async def _call_ai_gateway(
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
-        "temperature": 0.0,
     }
+    thinking_enabled = None
+    if primary_override and isinstance(primary_override.get("extra_body"), dict):
+        thinking = primary_override["extra_body"].get("thinking")
+        if isinstance(thinking, dict):
+            thinking_enabled = thinking.get("type") == "enabled"
+    if thinking_enabled is not True:
+        payload["temperature"] = 0.0
     if primary_override:
         payload["primary_override"] = primary_override
     if fallback_override:
@@ -274,6 +560,8 @@ async def _call_ai_gateway(
         payload["response_format"] = {"type": "json_object"}
     if stream:
         payload["stream"] = True
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
 
     resp = await client.post(
         _ai_gateway_chat_url(),
@@ -407,11 +695,18 @@ class BatchUsage:
     latency_ms: int
     failed: bool = False
     error_type: str | None = None
+    error_message: str | None = None
     finish_reason: str | None = None
     prompt_cache_hit_tokens: int = 0
     prompt_cache_miss_tokens: int = 0
     reasoning_tokens: int = 0
     batch_quality: dict[str, Any] | None = None
+    prompt_cache_hit_ratio: float = 0.0
+    original_chunk_count: int = 0
+    candidate_chunk_count: int = 0
+    prefilter_dropped_chunks: int = 0
+    max_tokens_hint: int = 0
+    output_tokens_to_max_ratio: float = 0.0
 
 
 @dataclass
@@ -444,16 +739,46 @@ async def _process_batch(
     fallback_override: dict | None,
     response_format: str | None,
     stream: bool,
+    quality_policy: str | None,
     seen_keys: set[tuple[str, str]],
     seen_lock: asyncio.Lock,
     on_batch_persisted: Callable[[list["AiExtractedRequirement"]], Awaitable[None]] | None,
 ) -> _BatchResult:
-    prompt = _build_prompt(batch, source_file)
+    candidate_batch, prefilter_stats = _run_stage1_prefilter(batch, quality_policy=quality_policy)
+    if not candidate_batch:
+        return _BatchResult(
+            usage=BatchUsage(
+                source_file=source_file,
+                chunks_in_batch=0,
+                extracted=0,
+                dropped_invalid=0,
+                input_tokens=0,
+                output_tokens=0,
+                used_fallback=False,
+                resolved_model="",
+                latency_ms=0,
+                batch_quality={
+                    "has_requirements": False,
+                    "coverage_note": "prefilter produced no candidate chunks",
+                    "suspected_missing": False,
+                    "empty_reason": "true_empty",
+                    "reference_targets": [],
+                },
+                original_chunk_count=prefilter_stats["original_chunk_count"],
+                candidate_chunk_count=0,
+                prefilter_dropped_chunks=prefilter_stats["prefilter_dropped_chunks"],
+            ),
+            requirements=[],
+        )
+    prompt_variant = _prompt_variant_for_policy(quality_policy, candidate_batch)
+    prompt = _build_prompt(candidate_batch, source_file, variant=prompt_variant)
+    max_tokens_hint = _max_tokens_hint_for_policy(quality_policy)
     try:
         response = await _call_ai_gateway(
             client, prompt=prompt, primary_override=primary_override,
             fallback_override=fallback_override, response_format=response_format,
             stream=stream,
+            max_tokens=max_tokens_hint,
         )
     except Exception as exc:
         logger.exception(
@@ -462,16 +787,29 @@ async def _process_batch(
             error_type=type(exc).__name__,
         )
         return _BatchResult(
-            usage=BatchUsage(source_file=source_file, chunks_in_batch=len(batch),
+            usage=BatchUsage(source_file=source_file, chunks_in_batch=len(candidate_batch),
                              extracted=0, dropped_invalid=0, input_tokens=0,
                              output_tokens=0, used_fallback=False,
                              resolved_model="", latency_ms=0,
-                             failed=True, error_type=type(exc).__name__),
+                             failed=True, error_type=type(exc).__name__,
+                             error_message=str(exc),
+                             original_chunk_count=prefilter_stats["original_chunk_count"],
+                             candidate_chunk_count=prefilter_stats["candidate_chunk_count"],
+                             prefilter_dropped_chunks=prefilter_stats["prefilter_dropped_chunks"],
+                             max_tokens_hint=max_tokens_hint or 0),
             requirements=[],
         )
 
     content = response.get("content") or ""
     parsed_items, batch_quality = _parse_llm_json_payload(content)
+    if parsed_items:
+        batch_quality = _normalize_nonempty_batch_quality(batch_quality)
+    else:
+        batch_quality = _infer_empty_batch_quality(
+            source_file=source_file,
+            batch=candidate_batch,
+            llm_batch_quality=batch_quality,
+        )
     requirements: list[AiExtractedRequirement] = []
     dropped_in_batch = 0
 
@@ -493,6 +831,9 @@ async def _process_batch(
 
     usage = BatchUsage(
         source_file=source_file, chunks_in_batch=len(batch),
+        original_chunk_count=prefilter_stats["original_chunk_count"],
+        candidate_chunk_count=prefilter_stats["candidate_chunk_count"],
+        prefilter_dropped_chunks=prefilter_stats["prefilter_dropped_chunks"],
         extracted=len(requirements), dropped_invalid=dropped_in_batch,
         input_tokens=int(response.get("input_tokens") or 0),
         output_tokens=int(response.get("output_tokens") or 0),
@@ -504,10 +845,25 @@ async def _process_batch(
         prompt_cache_miss_tokens=int(response.get("prompt_cache_miss_tokens") or 0),
         reasoning_tokens=int(response.get("reasoning_tokens") or 0),
         batch_quality=batch_quality,
+        prompt_cache_hit_ratio=(
+            int(response.get("prompt_cache_hit_tokens") or 0)
+            / max(
+                1,
+                int(response.get("prompt_cache_hit_tokens") or 0)
+                + int(response.get("prompt_cache_miss_tokens") or 0),
+            )
+        ),
+        max_tokens_hint=max_tokens_hint or 0,
+        output_tokens_to_max_ratio=(
+            int(response.get("output_tokens") or 0) / max(1, int(max_tokens_hint or 0))
+            if max_tokens_hint
+            else 0.0
+        ),
     )
     logger.info(
         "ai_extract_batch_done",
         source_file=source_file, chunks_in_batch=len(batch),
+        candidate_chunks=usage.candidate_chunk_count,
         extracted=usage.extracted, dropped=dropped_in_batch,
         resolved_model=usage.resolved_model,
         input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
@@ -534,6 +890,7 @@ async def extract_requirements_with_ai(
     chunk_index = {str(c["id"]): c for c in chunks if c.get("id") is not None}
     primary_override, fallback_override = _build_overrides(
         conn,
+        thinking_enabled=True,
         force_legacy_max_reasoning=True,
     )
 
@@ -565,6 +922,7 @@ async def extract_requirements_with_ai(
                     fallback_override=fallback_override,
                     response_format=response_format,
                     stream=stream,
+                    quality_policy="legacy",
                     seen_keys=seen_keys, seen_lock=seen_lock,
                     on_batch_persisted=on_batch_persisted,
                 )
@@ -599,6 +957,7 @@ async def extract_requirements_for_batch(
     fallback_override: dict | None = None,
     response_format: str | None = "json_object",
     stream: bool = False,
+    quality_policy: str | None = None,
     on_batch_persisted: Callable[[list[AiExtractedRequirement]], Awaitable[None]] | None = None,
 ) -> AiExtractionRunSummary:
     """Run AI extraction for a preplanned batch.
@@ -629,6 +988,7 @@ async def extract_requirements_for_batch(
             fallback_override=fallback_override,
             response_format=response_format,
             stream=stream,
+            quality_policy=quality_policy,
             seen_keys=seen_keys,
             seen_lock=seen_lock,
             on_batch_persisted=on_batch_persisted,
@@ -640,15 +1000,19 @@ def build_batch_overrides(
     conn: Connection,
     *,
     model: str | None = None,
+    thinking_enabled: bool | None = None,
     reasoning_effort: str | None = None,
     fallback_model: str | None = None,
+    fallback_thinking_enabled: bool | None = None,
     fallback_reasoning_effort: str | None = None,
 ) -> tuple[dict | None, dict | None]:
     return _build_overrides(
         conn,
         model=model,
+        thinking_enabled=thinking_enabled,
         reasoning_effort=reasoning_effort,
         fallback_model=fallback_model,
+        fallback_thinking_enabled=fallback_thinking_enabled,
         fallback_reasoning_effort=fallback_reasoning_effort,
     )
 
@@ -658,4 +1022,5 @@ __all__ = [
     "AiExtractionRunSummary", "BatchUsage",
     "build_batch_overrides",
     "extract_requirements_for_batch", "extract_requirements_with_ai",
+    "run_stage1_prefilter",
 ]

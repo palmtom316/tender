@@ -218,7 +218,12 @@ class TenderAiExtractionRepository:
         *,
         model: str,
         reasoning_effort: str | None = None,
+        thinking_enabled: bool | None = None,
+        quality_policy: str | None = None,
     ) -> int:
+        thinking_text = None if thinking_enabled is None else ("true" if thinking_enabled else "false")
+        filter_thinking = thinking_text is not None
+        filter_quality = quality_policy is not None
         with conn.cursor() as cur:
             row = cur.execute(
                 """
@@ -227,8 +232,21 @@ class TenderAiExtractionRepository:
                 WHERE status = 'running'
                   AND model = %s
                   AND reasoning_effort IS NOT DISTINCT FROM %s
+                  AND (
+                    NOT %s OR COALESCE(metadata_json->>'thinking_enabled', '') = %s
+                  )
+                  AND (
+                    NOT %s OR COALESCE(metadata_json->>'quality_policy', '') = %s
+                  )
                 """,
-                (model, reasoning_effort),
+                (
+                    model,
+                    reasoning_effort,
+                    filter_thinking,
+                    thinking_text,
+                    filter_quality,
+                    quality_policy,
+                ),
             ).fetchone()
         if row is None:
             return 0

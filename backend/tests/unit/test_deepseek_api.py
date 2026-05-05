@@ -14,6 +14,9 @@ def test_deepseek_v4_thinking_options_do_not_default_to_max_reasoning_effort() -
     assert deepseek_v4_thinking_options(reasoning_effort=DEEPSEEK_V4_MAX_REASONING_EFFORT) == {
         "reasoning_effort": "max",
     }
+    assert deepseek_v4_thinking_options(thinking_enabled=False) == {
+        "thinking": {"type": "disabled"},
+    }
 
 
 def test_apply_deepseek_v4_thinking_options_only_for_v4_models() -> None:
@@ -22,9 +25,11 @@ def test_apply_deepseek_v4_thinking_options_only_for_v4_models() -> None:
     apply_deepseek_v4_thinking_options(
         payload,
         model=DEEPSEEK_V4_PRO_MODEL,
+        thinking_enabled=True,
         reasoning_effort=DEEPSEEK_V4_MAX_REASONING_EFFORT,
     )
 
+    assert payload["thinking"] == {"type": "enabled"}
     assert payload["reasoning_effort"] == "max"
 
     other_payload = {"model": "qwen-plus"}

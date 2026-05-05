@@ -130,6 +130,23 @@ def test_count_running_batches_for_provider_returns_count() -> None:
         model="deepseek-v4-pro",
         reasoning_effort="max",
     ) == 3
+    _, params = conn.queries[-1]
+    assert params == ("deepseek-v4-pro", "max", False, None, False, None)
+
+
+def test_count_running_batches_for_provider_with_optional_filters_emits_explicit_flags() -> None:
+    repo = TenderAiExtractionRepository()
+    conn = _Conn()
+
+    assert repo.count_running_batches_for_provider(
+        conn,
+        model="deepseek-v4-flash",
+        reasoning_effort=None,
+        thinking_enabled=False,
+        quality_policy="fast_prefilter",
+    ) == 3
+    _, params = conn.queries[-1]
+    assert params == ("deepseek-v4-flash", None, True, "false", True, "fast_prefilter")
 
 
 def test_defer_batch_marks_pending_without_incrementing_retry() -> None:

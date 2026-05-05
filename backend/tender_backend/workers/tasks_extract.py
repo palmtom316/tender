@@ -17,6 +17,7 @@ from tender_backend.services.deepseek_api import DEEPSEEK_V4_MAX_REASONING_EFFOR
 from tender_backend.services.extract_service.ai_requirements_extractor import (
     build_batch_overrides,
     extract_requirements_for_batch,
+    run_stage1_prefilter,
 )
 from tender_backend.services.extract_service.retry_policy import (
     backoff_countdown_seconds,
@@ -66,6 +67,30 @@ def _batch_is_high_value(batch: dict[str, Any]) -> bool:
     return bool(metadata.get("high_value"))
 
 
+def _batch_quality_policy(batch: dict[str, Any]) -> str:
+    return str(_batch_metadata(batch).get("quality_policy") or "legacy")
+
+
+def _batch_thinking_enabled(batch: dict[str, Any]) -> bool | None:
+    value = _batch_metadata(batch).get("thinking_enabled")
+    if value is None:
+        return None
+    return bool(value)
+
+
+def _quality_policy_priority(batch: dict[str, Any]) -> int:
+    quality_policy = _batch_quality_policy(batch)
+    if quality_policy == "pro_review":
+        return 0
+    if quality_policy == "table_or_critical_extract":
+        return 1
+    if quality_policy == "flash_extract":
+        return 2
+    if quality_policy == "fast_prefilter":
+        return 3
+    return 9
+
+
 def _batch_has_review_keywords(chunks: list[dict[str, Any]]) -> bool:
     for chunk in chunks:
         text = " ".join(
@@ -94,11 +119,10 @@ def _needs_review_for_empty_output(
     if usage is None or usage.failed or usage.extracted > 0:
         return False
     batch_quality = usage.batch_quality or {}
-    if batch_quality.get("suspected_missing") is True:
-        return True
-    if _batch_is_high_value(batch) and _batch_has_review_keywords(chunks):
-        return True
-    return False
+    empty_reason = str(batch_quality.get("empty_reason") or "").strip()
+    if empty_reason in {"template_blank", "reference_only", "true_empty"}:
+        return False
+    return batch_quality.get("suspected_missing") is True
 
 
 def _review_batch_already_created(batch: dict[str, Any]) -> bool:
@@ -109,6 +133,7 @@ def _build_review_metadata(batch: dict[str, Any], usage) -> dict[str, Any]:
     metadata = _batch_metadata(batch)
     review_metadata = {
         **metadata,
+        "task_type": str(metadata.get("task_type") or "extract_tender_requirements"),
         "review_of_batch_id": str(batch["id"]),
         "review_reason": "empty_high_value_output",
         "review_source_model": batch.get("model"),
@@ -150,6 +175,7 @@ def _build_retry_batches(batch: dict[str, Any], *, error_type: str, error_messag
                 "max_retries": 1,
                 "metadata_json": {
                     **metadata,
+                    "task_type": str(metadata.get("task_type") or "extract_tender_requirements"),
                     "retry_of_batch_id": str(batch["id"]),
                     "retry_part_index": part_index,
                     "retry_part_count": len(chunk_id_groups),
@@ -158,21 +184,102 @@ def _build_retry_batches(batch: dict[str, Any], *, error_type: str, error_messag
                     "retry_source_model": batch.get("model"),
                     "retry_source_reasoning_effort": batch.get("reasoning_effort"),
                     "retry_strategy": "split_batch_and_degrade_effort",
+                    "stage": "retry",
                 },
             }
         )
     return retry_batches
 
 
+def _handle_batch_failure(
+    *,
+    conn,
+    batch: dict[str, Any],
+    batch_uuid,
+    batch_id: str,
+    error_type: str,
+    error_message: str,
+) -> dict[str, Any]:
+    retry_count = int(batch.get("retry_count") or 0)
+    retryable = retry_count + 1 < int(batch.get("max_retries") or 0)
+    if should_create_retry_batches(
+        retry_count=retry_count,
+        metadata=_batch_metadata(batch),
+        error_type=error_type,
+        error_message=error_message,
+    ):
+        retry_batches = _build_retry_batches(
+            batch,
+            error_type=error_type,
+            error_message=error_message,
+        )
+        created_retry_batches = _ai_repo.create_retry_batches(
+            conn,
+            source_batch=batch,
+            retry_batches=retry_batches,
+        )
+        _ai_repo.mark_batch_superseded(
+            conn,
+            batch_id=batch_uuid,
+            metadata_json={
+                **_batch_metadata(batch),
+                "planned_model": batch.get("model"),
+                "planned_reasoning_effort": batch.get("reasoning_effort"),
+                "retry_batch_ids": [str(item["id"]) for item in created_retry_batches],
+                "retry_reason": error_type,
+                "retry_error_message": error_message[:500],
+                "retry_strategy": "split_batch_and_degrade_effort",
+            },
+        )
+        for retry_batch in created_retry_batches:
+            run_tender_ai_extraction_batch.apply_async(
+                kwargs={"batch_id": str(retry_batch["id"])},
+                countdown=backoff_countdown_seconds(
+                    retry_count=retry_count,
+                    error_type=error_type,
+                    error_message=error_message,
+                ),
+            )
+        run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
+        conn.commit()
+        return {"batch_id": batch_id, "run_status": run.get("status") if run else None}
+
+    _ai_repo.mark_batch_failed(
+        conn,
+        batch_id=batch_uuid,
+        error_type=error_type,
+        error_message=error_message,
+        retryable=retryable,
+    )
+    if retryable:
+        countdown = backoff_countdown_seconds(
+            retry_count=retry_count,
+            error_type=error_type,
+            error_message=error_message,
+        )
+        if countdown:
+            run_tender_ai_extraction_batch.apply_async(
+                kwargs={"batch_id": batch_id},
+                countdown=countdown,
+            )
+    run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
+    conn.commit()
+    return {"batch_id": batch_id, "run_status": run.get("status") if run else None}
+
+
 def _dispatch_batch(batch: dict[str, Any]) -> bool:
     limit = provider_limit_for(
         model=batch.get("model"),
         reasoning_effort=batch.get("reasoning_effort"),
+        thinking_enabled=_batch_thinking_enabled(batch),
+        quality_policy=_batch_quality_policy(batch),
     )
     running = _ai_repo.count_running_batches_for_provider(
         batch["_conn"],
         model=limit.model,
         reasoning_effort=limit.reasoning_effort,
+        thinking_enabled=limit.thinking_enabled,
+        quality_policy=limit.quality_policy,
     )
     if running >= limit.max_running:
         countdown = 15
@@ -198,11 +305,15 @@ def _provider_limit_countdown(conn, batch: dict[str, Any]) -> int:
     limit = provider_limit_for(
         model=batch.get("model"),
         reasoning_effort=batch.get("reasoning_effort"),
+        thinking_enabled=_batch_thinking_enabled(batch),
+        quality_policy=_batch_quality_policy(batch),
     )
     running = _ai_repo.count_running_batches_for_provider(
         conn,
         model=limit.model,
         reasoning_effort=limit.reasoning_effort,
+        thinking_enabled=limit.thinking_enabled,
+        quality_policy=limit.quality_policy,
     )
     if running <= limit.max_running:
         return 0
@@ -222,11 +333,69 @@ def _resolve_batch_overrides(
     *,
     batch: dict[str, Any],
 ) -> tuple[dict | None, dict | None]:
+    metadata = _batch_metadata(batch)
     return build_batch_overrides(
         conn,
         model=batch.get("model"),
+        thinking_enabled=metadata.get("thinking_enabled"),
         reasoning_effort=batch.get("reasoning_effort"),
     )
+
+
+def _output_tokens_to_max_ratio(*, usage, batch: dict[str, Any]) -> float:
+    if usage is None:
+        return 0.0
+    hint = int(
+        _batch_metadata(batch).get("max_tokens_hint")
+        or getattr(usage, "max_tokens_hint", 0)
+        or 0
+    )
+    if hint <= 0:
+        return 0.0
+    return float(usage.output_tokens) / float(hint)
+
+
+def _build_followup_batch_from_prefilter(
+    *,
+    batch: dict[str, Any],
+    candidate_chunks: list[dict[str, Any]],
+    prefilter_stats: dict[str, int],
+) -> dict[str, Any] | None:
+    if not candidate_chunks:
+        return None
+    metadata = _batch_metadata(batch)
+    next_quality_policy = str(metadata.get("next_quality_policy") or "flash_extract")
+    next_model = str(metadata.get("next_model") or "deepseek-v4-flash")
+    next_reasoning_effort = metadata.get("next_reasoning_effort")
+    chunk_ids = [str(chunk.get("id")) for chunk in candidate_chunks if chunk.get("id")]
+    if not chunk_ids:
+        return None
+    return {
+        "tender_document_file_id": batch.get("tender_document_file_id"),
+        "source_file": batch["source_file"],
+        "batch_index": int(batch["batch_index"]) + 50_000,
+        "chunk_ids": chunk_ids,
+        "status": "pending",
+        "chunk_count": len(chunk_ids),
+        "input_char_count": int(batch.get("input_char_count") or 0),
+        "estimated_input_tokens": int(batch.get("estimated_input_tokens") or 0),
+        "model": next_model,
+        "reasoning_effort": next_reasoning_effort,
+        "response_format": batch.get("response_format", "json_object"),
+        "max_retries": 1,
+        "metadata_json": {
+            **metadata,
+            "task_type": str(metadata.get("task_type") or "extract_tender_requirements"),
+            "quality_policy": next_quality_policy,
+            "thinking_enabled": False,
+            "planned_thinking": "disabled",
+            "prefilter_of_batch_id": str(batch["id"]),
+            "prefilter_candidate_chunk_count": prefilter_stats.get("candidate_chunk_count", len(chunk_ids)),
+            "prefilter_original_chunk_count": prefilter_stats.get("original_chunk_count", len(chunk_ids)),
+            "prefilter_dropped_chunks": prefilter_stats.get("prefilter_dropped_chunks", 0),
+            "stage": "followup",
+        },
+    }
 
 
 @app.task(name="tender_backend.workers.tasks_extract.run_tender_ai_extraction", bind=True)
@@ -241,6 +410,13 @@ def run_tender_ai_extraction(self, *, run_id: str) -> dict:
         if run is None:
             raise ValueError(f"tender ai extraction run not found: {run_id}")
         batches = _ai_repo.list_batches(conn, run_id=run_uuid, status="pending")
+        batches.sort(
+            key=lambda batch: (
+                _quality_policy_priority(batch),
+                str(batch.get("source_file") or ""),
+                int(batch.get("batch_index") or 0),
+            )
+        )
         for batch in batches:
             batch["_conn"] = conn
             if _dispatch_batch(batch):
@@ -262,6 +438,11 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
         if batch is None:
             existing = _ai_repo.get_batch(conn, batch_id=batch_uuid)
             return {"batch_id": batch_id, "status": existing.get("status") if existing else "missing"}
+        queue_to_start_ms = 0
+        created_at = batch.get("created_at")
+        started_at = batch.get("started_at")
+        if created_at is not None and started_at is not None:
+            queue_to_start_ms = max(0, int((started_at - created_at).total_seconds() * 1000))
         provider_limit_countdown = _provider_limit_countdown(conn, batch)
         if provider_limit_countdown:
             _ai_repo.defer_batch(
@@ -295,6 +476,7 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
     async def _persist(batch_requirements):
         if not batch_requirements:
             return
+        persist_started = asyncio.get_running_loop().time()
         payload = [item.to_repository_dict() for item in batch_requirements]
         with pool.connection() as persist_conn:
             rows = _requirement_repo.create_many(
@@ -303,8 +485,64 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                 requirements=payload,
             )
         persisted.extend(rows)
+        persist_elapsed_ms = int((asyncio.get_running_loop().time() - persist_started) * 1000)
+        batch.setdefault("_persist_latency_ms", 0)
+        batch["_persist_latency_ms"] = max(batch["_persist_latency_ms"], persist_elapsed_ms)
 
     try:
+        if _batch_quality_policy(batch) == "fast_prefilter":
+            candidate_chunks, prefilter_stats = run_stage1_prefilter(
+                chunks,
+                quality_policy="flash_extract",
+            )
+            with pool.connection() as conn:
+                followup_payload = _build_followup_batch_from_prefilter(
+                    batch=batch,
+                    candidate_chunks=candidate_chunks,
+                    prefilter_stats=prefilter_stats,
+                )
+                followup_batch = None
+                if followup_payload is not None:
+                    created = _ai_repo.create_retry_batches(
+                        conn,
+                        source_batch=batch,
+                        retry_batches=[followup_payload],
+                    )
+                    followup_batch = created[0] if created else None
+                _ai_repo.mark_batch_succeeded(
+                    conn,
+                    batch_id=batch_uuid,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=0,
+                    extracted_requirements=0,
+                    dropped_invalid=0,
+                    metadata_json={
+                        **_batch_metadata(batch),
+                        "task_type": str(_batch_metadata(batch).get("task_type") or "extract_tender_requirements"),
+                        "strategy_version": _batch_metadata(batch).get("strategy_version"),
+                        "quality_policy": _batch_quality_policy(batch),
+                        "thinking_enabled": _batch_metadata(batch).get("thinking_enabled"),
+                        "queue_to_start_ms": queue_to_start_ms,
+                        "provider_latency_ms": 0,
+                        "persist_latency_ms": 0,
+                        "prompt_cache_hit_ratio": 0.0,
+                        "original_chunk_count": prefilter_stats.get("original_chunk_count", 0),
+                        "candidate_chunk_count": prefilter_stats.get("candidate_chunk_count", 0),
+                        "prefilter_dropped_chunks": prefilter_stats.get("prefilter_dropped_chunks", 0),
+                        "prefilter_batch_completed": True,
+                        "followup_batch_id": str(followup_batch["id"]) if followup_batch else None,
+                    },
+                )
+                run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
+                conn.commit()
+            if followup_batch is not None:
+                run_tender_ai_extraction_batch.apply_async(
+                    kwargs={"batch_id": str(followup_batch["id"])},
+                    countdown=1,
+                )
+            return {"batch_id": batch_id, "run_status": run.get("status") if run else None}
+
         summary = _run_async(
             extract_requirements_for_batch(
                 chunks,
@@ -313,18 +551,20 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                 fallback_override=fallback_override,
                 response_format=batch.get("response_format") or "json_object",
                 stream=True,
+                quality_policy=_batch_quality_policy(batch),
                 on_batch_persisted=_persist,
             )
         )
         with pool.connection() as conn:
             usage = summary.batches[0] if summary.batches else None
             if usage is not None and usage.failed:
-                _ai_repo.mark_batch_failed(
-                    conn,
-                    batch_id=batch_uuid,
+                return _handle_batch_failure(
+                    conn=conn,
+                    batch=batch,
+                    batch_uuid=batch_uuid,
+                    batch_id=batch_id,
                     error_type=usage.error_type or "AiExtractionError",
-                    error_message=usage.error_type or "AI extraction batch failed",
-                    retryable=int(batch.get("retry_count") or 0) + 1 < int(batch.get("max_retries") or 0),
+                    error_message=usage.error_message or usage.error_type or "AI extraction batch failed",
                 )
             elif _needs_review_for_empty_output(batch=batch, chunks=chunks, usage=usage):
                 if _review_batch_already_created(batch):
@@ -353,6 +593,7 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                         extracted_requirements=0,
                         dropped_invalid=usage.dropped_invalid if usage else 0,
                         metadata_json={
+                            **_batch_metadata(batch),
                             "planned_model": batch.get("model"),
                             "planned_reasoning_effort": batch.get("reasoning_effort"),
                             "actual_model": usage.resolved_model if usage else None,
@@ -363,6 +604,18 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                             "prompt_cache_miss_tokens": usage.prompt_cache_miss_tokens if usage else 0,
                             "reasoning_tokens": usage.reasoning_tokens if usage else 0,
                             "batch_quality": usage.batch_quality if usage else {},
+                            "strategy_version": _batch_metadata(batch).get("strategy_version"),
+                            "quality_policy": _batch_quality_policy(batch),
+                            "thinking_enabled": _batch_metadata(batch).get("thinking_enabled"),
+                            "queue_to_start_ms": queue_to_start_ms,
+                            "provider_latency_ms": usage.latency_ms if usage else 0,
+                            "persist_latency_ms": int(batch.get("_persist_latency_ms") or 0),
+                            "prompt_cache_hit_ratio": usage.prompt_cache_hit_ratio if usage else 0.0,
+                            "original_chunk_count": usage.original_chunk_count if usage else 0,
+                            "candidate_chunk_count": usage.candidate_chunk_count if usage else 0,
+                            "prefilter_dropped_chunks": usage.prefilter_dropped_chunks if usage else 0,
+                            "max_tokens_hint": usage.max_tokens_hint if usage else 0,
+                            "output_tokens_to_max_ratio": _output_tokens_to_max_ratio(usage=usage, batch=batch),
                             "review_batch_id": str(review_batch["id"]) if review_batch else None,
                             "review_reason": "empty_high_value_output",
                         },
@@ -379,12 +632,13 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                     input_tokens=summary.total_input_tokens,
                     output_tokens=summary.total_output_tokens,
                     latency_ms=usage.latency_ms if usage else 0,
-                    extracted_requirements=len(persisted),
-                    dropped_invalid=usage.dropped_invalid if usage else 0,
-                    metadata_json={
-                        "planned_model": batch.get("model"),
-                        "planned_reasoning_effort": batch.get("reasoning_effort"),
-                        "actual_model": usage.resolved_model if usage else None,
+                        extracted_requirements=len(persisted),
+                        dropped_invalid=usage.dropped_invalid if usage else 0,
+                        metadata_json={
+                            **_batch_metadata(batch),
+                            "planned_model": batch.get("model"),
+                            "planned_reasoning_effort": batch.get("reasoning_effort"),
+                            "actual_model": usage.resolved_model if usage else None,
                         "actual_reasoning_effort": batch.get("reasoning_effort"),
                         "used_fallback": usage.used_fallback if usage else False,
                         "finish_reason": usage.finish_reason if usage else None,
@@ -392,6 +646,18 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                         "prompt_cache_miss_tokens": usage.prompt_cache_miss_tokens if usage else 0,
                         "reasoning_tokens": usage.reasoning_tokens if usage else 0,
                         "batch_quality": usage.batch_quality if usage else {},
+                        "strategy_version": _batch_metadata(batch).get("strategy_version"),
+                        "quality_policy": _batch_quality_policy(batch),
+                        "thinking_enabled": _batch_metadata(batch).get("thinking_enabled"),
+                        "queue_to_start_ms": queue_to_start_ms,
+                        "provider_latency_ms": usage.latency_ms if usage else 0,
+                        "persist_latency_ms": int(batch.get("_persist_latency_ms") or 0),
+                        "prompt_cache_hit_ratio": usage.prompt_cache_hit_ratio if usage else 0.0,
+                        "original_chunk_count": usage.original_chunk_count if usage else 0,
+                        "candidate_chunk_count": usage.candidate_chunk_count if usage else 0,
+                        "prefilter_dropped_chunks": usage.prefilter_dropped_chunks if usage else 0,
+                        "max_tokens_hint": usage.max_tokens_hint if usage else 0,
+                        "output_tokens_to_max_ratio": _output_tokens_to_max_ratio(usage=usage, batch=batch),
                     },
                 )
             run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
@@ -399,69 +665,14 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
     except Exception as exc:
         with pool.connection() as conn:
             logger.exception("tender_ai_extraction_batch_failed", batch_id=batch_id)
-            retry_count = int(batch.get("retry_count") or 0)
-            retryable = retry_count + 1 < int(batch.get("max_retries") or 0)
-            error_type = type(exc).__name__
-            error_message = str(exc)
-            if should_create_retry_batches(
-                retry_count=retry_count,
-                metadata=_batch_metadata(batch),
-                error_type=error_type,
-                error_message=error_message,
-            ):
-                retry_batches = _build_retry_batches(
-                    batch,
-                    error_type=error_type,
-                    error_message=error_message,
-                )
-                created_retry_batches = _ai_repo.create_retry_batches(
-                    conn,
-                    source_batch=batch,
-                    retry_batches=retry_batches,
-                )
-                _ai_repo.mark_batch_superseded(
-                    conn,
-                    batch_id=batch_uuid,
-                    metadata_json={
-                        "planned_model": batch.get("model"),
-                        "planned_reasoning_effort": batch.get("reasoning_effort"),
-                        "retry_batch_ids": [str(item["id"]) for item in created_retry_batches],
-                        "retry_reason": error_type,
-                        "retry_strategy": "split_batch_and_degrade_effort",
-                    },
-                )
-                for retry_batch in created_retry_batches:
-                    run_tender_ai_extraction_batch.apply_async(
-                        kwargs={"batch_id": str(retry_batch["id"])},
-                        countdown=backoff_countdown_seconds(
-                            retry_count=retry_count,
-                            error_type=error_type,
-                            error_message=error_message,
-                        ),
-                    )
-                run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
-                conn.commit()
-                return {"batch_id": batch_id, "run_status": run.get("status") if run else None}
-            _ai_repo.mark_batch_failed(
-                conn,
-                batch_id=batch_uuid,
-                error_type=error_type,
-                error_message=error_message,
-                retryable=retryable,
+            return _handle_batch_failure(
+                conn=conn,
+                batch=batch,
+                batch_uuid=batch_uuid,
+                batch_id=batch_id,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
             )
-            if retryable:
-                countdown = backoff_countdown_seconds(
-                    retry_count=retry_count,
-                    error_type=error_type,
-                    error_message=error_message,
-                )
-                if countdown:
-                    run_tender_ai_extraction_batch.apply_async(
-                        kwargs={"batch_id": batch_id},
-                        countdown=countdown,
-                    )
-            run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
-            conn.commit()
     return {"batch_id": batch_id, "run_status": run.get("status") if run else None}
 
 

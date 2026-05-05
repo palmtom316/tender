@@ -16,6 +16,8 @@ from tender_backend.services.deepseek_api import (
 class ProviderLimit:
     model: str
     reasoning_effort: str | None
+    thinking_enabled: bool | None
+    quality_policy: str | None
     max_running: int
 
 
@@ -24,16 +26,29 @@ RETRY_BATCH_INDEX_OFFSET = 20_000
 MAX_RETRY_SPLIT_PARTS = 4
 
 
-def provider_limit_for(*, model: str | None, reasoning_effort: str | None) -> ProviderLimit:
+def provider_limit_for(
+    *,
+    model: str | None,
+    reasoning_effort: str | None,
+    thinking_enabled: bool | None = None,
+    quality_policy: str | None = None,
+) -> ProviderLimit:
     normalized_model = (model or DEEPSEEK_V4_FLASH_MODEL).strip()
     normalized_effort = (reasoning_effort or "").strip() or None
+    normalized_quality_policy = (quality_policy or "").strip() or None
     if normalized_model == DEEPSEEK_V4_PRO_MODEL and normalized_effort == DEEPSEEK_V4_MAX_REASONING_EFFORT:
-        return ProviderLimit(normalized_model, normalized_effort, 1)
+        return ProviderLimit(normalized_model, normalized_effort, thinking_enabled, normalized_quality_policy, 1)
     if normalized_model == DEEPSEEK_V4_PRO_MODEL:
-        return ProviderLimit(normalized_model, normalized_effort, 2)
+        return ProviderLimit(normalized_model, normalized_effort, thinking_enabled, normalized_quality_policy, 2)
     if normalized_model == DEEPSEEK_V4_FLASH_MODEL:
-        return ProviderLimit(normalized_model, normalized_effort, 4)
-    return ProviderLimit(normalized_model, normalized_effort, 2)
+        if normalized_quality_policy == "fast_prefilter":
+            return ProviderLimit(normalized_model, normalized_effort, thinking_enabled, normalized_quality_policy, 6)
+        if normalized_quality_policy == "table_or_critical_extract":
+            return ProviderLimit(normalized_model, normalized_effort, thinking_enabled, normalized_quality_policy, 3)
+        if thinking_enabled is True:
+            return ProviderLimit(normalized_model, normalized_effort, thinking_enabled, normalized_quality_policy, 4)
+        return ProviderLimit(normalized_model, normalized_effort, thinking_enabled, normalized_quality_policy, 4)
+    return ProviderLimit(normalized_model, normalized_effort, thinking_enabled, normalized_quality_policy, 2)
 
 
 def is_rate_or_transport_error(error_type: str | None, error_message: str | None = None) -> bool:

@@ -8,8 +8,13 @@ from uuid import UUID
 
 
 DEFAULT_MODEL_POLICY = "v4_flash_then_pro"
+STRATEGY_VERSION = "tender_extract_v2"
 FLASH_MODEL = "deepseek-v4-flash"
 PRO_MODEL = "deepseek-v4-pro"
+QUALITY_POLICY_FAST_PREFILTER = "fast_prefilter"
+QUALITY_POLICY_FLASH_EXTRACT = "flash_extract"
+QUALITY_POLICY_TABLE_OR_CRITICAL = "table_or_critical_extract"
+QUALITY_POLICY_PRO_REVIEW = "pro_review"
 HIGH_VALUE_CLASSIFICATIONS = {
     "tender_document",
     "tender_notice",
@@ -54,6 +59,13 @@ MAX_CHUNKS_PER_BATCH = 350
 FLASH_MAX_CHUNKS_PER_BATCH = 120
 DIRECT_PRO_MAX_CHUNKS = 24
 DIRECT_PRO_MAX_TOKENS = 12_000
+FAST_PREFILTER_TARGET_TOKENS = 24_000
+FLASH_EXTRACT_TARGET_TOKENS = 28_000
+TABLE_OR_CRITICAL_TARGET_TOKENS = 16_000
+FAST_PREFILTER_MAX_CHUNKS = 50
+FLASH_EXTRACT_MAX_CHUNKS = 40
+TABLE_OR_CRITICAL_MAX_CHUNKS = 24
+TASK_TYPE = "extract_tender_requirements"
 
 
 @dataclass(frozen=True)
@@ -68,6 +80,7 @@ class ExtractionBatchPlan:
     estimated_input_tokens: int
     model: str
     reasoning_effort: str | None
+    quality_policy: str
     response_format: str = "json_object"
     max_retries: int = 2
     skip_reason: str | None = None
@@ -85,6 +98,7 @@ class ExtractionBatchPlan:
             "estimated_input_tokens": self.estimated_input_tokens,
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
+            "quality_policy": self.quality_policy,
             "response_format": self.response_format,
             "max_retries": self.max_retries,
             "skip_reason": self.skip_reason,
@@ -157,7 +171,7 @@ def _use_direct_pro(
     return (
         chunk_count <= DIRECT_PRO_MAX_CHUNKS
         and estimated_tokens <= DIRECT_PRO_MAX_TOKENS
-        and any(keyword in source_file for keyword in ("评分细则", "资格要求", "否决", "废标", "递交要求"))
+        and any(keyword in source_file for keyword in ("评分细则", "资格要求", "报价方式", "保证金", "最高限价"))
     )
 
 
@@ -172,14 +186,32 @@ def _skip_reason(source_file: str, chunks: list[dict[str, Any]], classification:
     return None
 
 
-def _model_for(*, direct_pro: bool, model_policy: str) -> tuple[str, str | None]:
+def _policy_for(
+    *,
+    classification: str,
+    direct_pro: bool,
+    high_value: bool,
+    model_policy: str,
+) -> tuple[str, str | None, str, bool]:
     if model_policy == "v4_pro_only":
-        return PRO_MODEL, "max"
+        return PRO_MODEL, "max", QUALITY_POLICY_PRO_REVIEW, True
     if model_policy == "v4_flash_only":
-        return FLASH_MODEL, None
+        return FLASH_MODEL, None, QUALITY_POLICY_FLASH_EXTRACT, False
     if direct_pro:
-        return PRO_MODEL, "high"
-    return FLASH_MODEL, None
+        return PRO_MODEL, "high", QUALITY_POLICY_PRO_REVIEW, True
+    if classification in DIRECT_PRO_CLASSIFICATIONS or high_value:
+        return FLASH_MODEL, None, QUALITY_POLICY_TABLE_OR_CRITICAL, False
+    return FLASH_MODEL, None, QUALITY_POLICY_FAST_PREFILTER, False
+
+
+def _budget_for_policy(*, quality_policy: str, high_value: bool) -> tuple[int, int]:
+    if quality_policy == QUALITY_POLICY_PRO_REVIEW:
+        return DIRECT_PRO_MAX_TOKENS, DIRECT_PRO_MAX_CHUNKS
+    if quality_policy == QUALITY_POLICY_TABLE_OR_CRITICAL:
+        return TABLE_OR_CRITICAL_TARGET_TOKENS, TABLE_OR_CRITICAL_MAX_CHUNKS
+    if high_value:
+        return FLASH_EXTRACT_TARGET_TOKENS, FLASH_EXTRACT_MAX_CHUNKS
+    return FAST_PREFILTER_TARGET_TOKENS, FAST_PREFILTER_MAX_CHUNKS
 
 
 def build_extraction_batch_plan(
@@ -208,15 +240,22 @@ def build_extraction_batch_plan(
                     estimated_input_tokens=0,
                     model=FLASH_MODEL,
                     reasoning_effort=None,
+                    quality_policy=QUALITY_POLICY_FAST_PREFILTER,
                     skip_reason=skip_reason,
-                    metadata_json={"classification": classification},
+                    metadata_json={
+                        "task_type": TASK_TYPE,
+                        "classification": classification,
+                        "strategy_version": STRATEGY_VERSION,
+                        "quality_policy": QUALITY_POLICY_FAST_PREFILTER,
+                        "thinking_enabled": False,
+                        "stage": "primary",
+                    },
                 )
             )
             continue
 
         usable = [chunk for chunk in file_chunks if _has_extractable_content(chunk)]
         high_value = _is_high_value(source_file, classification)
-        target_tokens = TARGET_TOKENS_HIGH_VALUE if high_value else TARGET_TOKENS_NORMAL
         estimated_tokens = sum(estimate_tokens(_chunk_text_for_budget(chunk)) for chunk in usable)
         direct_pro = _use_direct_pro(
             source_file=source_file,
@@ -224,7 +263,16 @@ def build_extraction_batch_plan(
             estimated_tokens=estimated_tokens,
             chunk_count=len(usable),
         )
-        model, reasoning_effort = _model_for(direct_pro=direct_pro, model_policy=model_policy)
+        model, reasoning_effort, quality_policy, thinking_enabled = _policy_for(
+            classification=classification,
+            direct_pro=direct_pro,
+            high_value=high_value,
+            model_policy=model_policy,
+        )
+        target_tokens, max_chunks_per_batch = _budget_for_policy(
+            quality_policy=quality_policy,
+            high_value=high_value,
+        )
 
         current: list[dict[str, Any]] = []
         current_chars = 0
@@ -247,11 +295,25 @@ def build_extraction_batch_plan(
                     estimated_input_tokens=current_tokens,
                     model=model,
                     reasoning_effort=reasoning_effort,
+                    quality_policy=quality_policy,
                     metadata_json={
+                        "task_type": TASK_TYPE,
                         "classification": classification,
                         "high_value": high_value,
                         "direct_pro": direct_pro,
                         "model_policy": model_policy,
+                        "strategy_version": STRATEGY_VERSION,
+                        "quality_policy": quality_policy,
+                        "thinking_enabled": thinking_enabled,
+                        "stage": "primary",
+                        "planned_thinking": "enabled" if thinking_enabled else "disabled",
+                        "next_quality_policy": (
+                            QUALITY_POLICY_FLASH_EXTRACT
+                            if quality_policy == QUALITY_POLICY_FAST_PREFILTER
+                            else None
+                        ),
+                        "next_model": FLASH_MODEL if quality_policy == QUALITY_POLICY_FAST_PREFILTER else None,
+                        "next_reasoning_effort": None,
                     },
                 )
             )
@@ -264,7 +326,6 @@ def build_extraction_batch_plan(
             text = _chunk_text_for_budget(chunk)
             token_count = estimate_tokens(text)
             would_exceed_tokens = current and current_tokens + token_count > target_tokens
-            max_chunks_per_batch = DIRECT_PRO_MAX_CHUNKS if direct_pro else FLASH_MAX_CHUNKS_PER_BATCH
             would_exceed_count = current and len(current) >= max_chunks_per_batch
             if would_exceed_tokens or would_exceed_count:
                 flush()
@@ -279,6 +340,8 @@ def build_extraction_batch_plan(
 __all__ = [
     "DEFAULT_MODEL_POLICY",
     "ExtractionBatchPlan",
+    "TASK_TYPE",
+    "STRATEGY_VERSION",
     "build_extraction_batch_plan",
     "estimate_tokens",
 ]
