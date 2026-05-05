@@ -18,6 +18,7 @@ from tender_backend.db.repositories.skill_definition_repo import (
 from tender_backend.services.deepseek_api import (
     DEEPSEEK_BASE_URL,
     DEEPSEEK_V4_FLASH_MODEL,
+    DEEPSEEK_V4_MAX_REASONING_EFFORT,
     apply_deepseek_v4_thinking_options,
 )
 from tender_backend.services.skill_catalog import default_skill_specs
@@ -214,7 +215,11 @@ async def test_agent_connection(
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 5,
             }
-            apply_deepseek_v4_thinking_options(payload, model=payload["model"])
+            apply_deepseek_v4_thinking_options(
+                payload,
+                model=payload["model"],
+                reasoning_effort=DEEPSEEK_V4_MAX_REASONING_EFFORT,
+            )
             url = config.base_url.rstrip("/")
             if url == "https://api.deepseek.com/v1":
                 url = DEEPSEEK_BASE_URL

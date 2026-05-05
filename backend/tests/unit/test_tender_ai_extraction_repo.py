@@ -48,9 +48,24 @@ class _Cursor:
                 "status": params[6],
                 "chunk_count": params[8],
             }
+        elif "UPDATE tender_ai_extraction_batch" in query and "error_type = %s" in query:
+            self._row = {
+                "id": params[-1],
+                "status": "pending",
+                "error_type": params[0],
+                "error_message": params[1],
+            }
+        elif "UPDATE tender_ai_extraction_batch" in query and "chunk_count = 0" in query:
+            self._row = {
+                "id": params[-1],
+                "status": "succeeded",
+                "chunk_count": 0,
+            }
         elif "UPDATE tender_ai_extraction_batch" in query and "status = 'pending'" in query:
             self.rowcount = 2
             self._row = None
+        elif "SELECT count(*)::int" in query:
+            self._row = (3,)
         else:
             self._row = None
         return self
@@ -104,3 +119,48 @@ def test_reset_failed_batches_returns_rowcount() -> None:
     conn = _Conn()
 
     assert repo.reset_failed_batches(conn, run_id=uuid4()) == 2
+
+
+def test_count_running_batches_for_provider_returns_count() -> None:
+    repo = TenderAiExtractionRepository()
+    conn = _Conn()
+
+    assert repo.count_running_batches_for_provider(
+        conn,
+        model="deepseek-v4-pro",
+        reasoning_effort="max",
+    ) == 3
+
+
+def test_defer_batch_marks_pending_without_incrementing_retry() -> None:
+    repo = TenderAiExtractionRepository()
+    conn = _Conn()
+    batch_id = uuid4()
+
+    row = repo.defer_batch(
+        conn,
+        batch_id=batch_id,
+        error_type="ProviderConcurrencyLimit",
+        error_message="requeued",
+    )
+
+    assert row["id"] == batch_id
+    assert row["status"] == "pending"
+    assert any("SET status = 'pending'" in query for query, _ in conn.queries)
+
+
+def test_mark_batch_superseded_zeroes_chunk_count() -> None:
+    repo = TenderAiExtractionRepository()
+    conn = _Conn()
+    batch_id = uuid4()
+
+    row = repo.mark_batch_superseded(
+        conn,
+        batch_id=batch_id,
+        metadata_json={"retry_strategy": "split"},
+    )
+
+    assert row["id"] == batch_id
+    assert row["status"] == "succeeded"
+    assert row["chunk_count"] == 0
+    assert any("chunk_count = 0" in query for query, _ in conn.queries)

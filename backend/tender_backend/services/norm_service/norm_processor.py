@@ -26,7 +26,10 @@ from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.skill_definition_repo import SkillDefinitionRepository
 from tender_backend.db.repositories.standard_repo import StandardRepository
-from tender_backend.services.deepseek_api import apply_deepseek_v4_thinking_options
+from tender_backend.services.deepseek_api import (
+    DEEPSEEK_V4_MAX_REASONING_EFFORT,
+    apply_deepseek_v4_thinking_options,
+)
 from tender_backend.services.norm_service.block_segments import BlockSegment, build_single_standard_blocks
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.outline_rebuilder import collect_outline_clause_nos_from_pages
@@ -2538,14 +2541,22 @@ def _call_ai_gateway(
             "api_key": config.api_key,
             "model": config.primary_model or "deepseek-v4-flash",
         }
-        apply_deepseek_v4_thinking_options(payload["primary_override"], model=payload["primary_override"]["model"])
+        apply_deepseek_v4_thinking_options(
+            payload["primary_override"],
+            model=payload["primary_override"]["model"],
+            reasoning_effort=DEEPSEEK_V4_MAX_REASONING_EFFORT,
+        )
     if config.fallback_base_url and config.fallback_api_key:
         payload["fallback_override"] = {
             "base_url": config.fallback_base_url,
             "api_key": config.fallback_api_key,
             "model": config.fallback_model or "qwen-plus",
         }
-        apply_deepseek_v4_thinking_options(payload["fallback_override"], model=payload["fallback_override"]["model"])
+        apply_deepseek_v4_thinking_options(
+            payload["fallback_override"],
+            model=payload["fallback_override"]["model"],
+            reasoning_effort=DEEPSEEK_V4_MAX_REASONING_EFFORT,
+        )
 
     url = _ai_gateway_chat_url(AI_GATEWAY_URL)
     timeout = _ai_gateway_timeout_seconds(config.primary_model)

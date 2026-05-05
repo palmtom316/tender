@@ -27,6 +27,7 @@ from tender_backend.services.deepseek_api import (
     DEEPSEEK_V4_MAX_REASONING_EFFORT,
     DEEPSEEK_V4_PRO_MODEL,
     is_deepseek_v4_model,
+    normalize_deepseek_v4_reasoning_effort,
 )
 from tender_backend.services.extract_service.requirements_extractor import (
     HARD_CONSTRAINT_CATEGORIES,
@@ -47,7 +48,7 @@ _VALID_CATEGORIES = set(REQUIREMENT_CATEGORIES)
 _SYSTEM_PROMPT = (
     "你是招标文件解析专家。从给定的招标文件 source chunks 中识别"
     "对投标人有约束力的条款，按结构化 schema 输出 JSON。\n"
-    "只输出 JSON 数组，不要任何解释、Markdown 围栏或前后缀。"
+    "只输出 JSON 对象，不要任何解释、Markdown 围栏或前后缀。"
 )
 
 _INSTRUCTION = """\
@@ -64,16 +65,25 @@ _INSTRUCTION = """\
 - 输出条款的 source_chunk_id 必须是输入数组里出现过的 id；不准虚构。
 - 一个 chunk 可对应 0~N 条 requirement；同一条款不要重复输出。
 
-输出 JSON 数组，每条字段：
+输出 JSON 对象，格式固定如下：
 {{
-  "source_chunk_id": "<输入数组里的 id 字符串>",
-  "category": "<上述 12 个 category 之一>",
-  "title": "<≤80 字的简短标题，应概括该条款的核心要求>",
-  "requirement_text": "<≤500 字的精炼条款，可对原文进行概括但不要丢失关键数字/资质名/期限>",
-  "is_veto": <bool>,
-  "is_hard_constraint": <bool>,
-  "ignored_for_pricing": <bool>,
-  "confidence": <0~1 的浮点数>
+  "requirements": [
+    {{
+      "source_chunk_id": "<输入数组里的 id 字符串>",
+      "category": "<上述 12 个 category 之一>",
+      "title": "<≤80 字的简短标题，应概括该条款的核心要求>",
+      "requirement_text": "<≤500 字的精炼条款，可对原文进行概括但不要丢失关键数字/资质名/期限>",
+      "is_veto": <bool>,
+      "is_hard_constraint": <bool>,
+      "ignored_for_pricing": <bool>,
+      "confidence": <0~1 的浮点数>
+    }}
+  ],
+  "batch_quality": {{
+    "has_requirements": <bool>,
+    "coverage_note": "<若无要求，说明原因；若有缺口风险，说明风险>",
+    "suspected_missing": <bool>
+  }}
 }}
 
 source_chunks (JSON)：
@@ -181,32 +191,60 @@ def _ai_gateway_chat_url() -> str:
     return f"{AI_GATEWAY_URL.rstrip('/')}/api/ai/chat"
 
 
-def _build_overrides(conn: Connection) -> tuple[dict | None, dict | None]:
+def _provider_override(
+    *,
+    base_url: str | None,
+    api_key: str | None,
+    model: str | None,
+    reasoning_effort: str | None = None,
+) -> dict | None:
+    if not base_url or not api_key:
+        return None
+    override = {
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": model or DEEPSEEK_V4_PRO_MODEL,
+    }
+    normalized_effort = normalize_deepseek_v4_reasoning_effort(reasoning_effort)
+    if normalized_effort and is_deepseek_v4_model(override["model"]):
+        override["extra_body"] = {"reasoning_effort": normalized_effort}
+    return override
+
+
+def _build_overrides(
+    conn: Connection,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    fallback_model: str | None = None,
+    fallback_reasoning_effort: str | None = None,
+    force_legacy_max_reasoning: bool = False,
+) -> tuple[dict | None, dict | None]:
     config = AgentConfigRepository().get_by_key(conn, "extract")
     if not config or not config.enabled:
         return None, None
 
-    primary = None
-    if config.base_url and config.api_key:
-        primary_model = config.primary_model or DEEPSEEK_V4_PRO_MODEL
-        primary = {
-            "base_url": config.base_url,
-            "api_key": config.api_key,
-            "model": primary_model,
-        }
-        if is_deepseek_v4_model(primary_model):
-            primary["extra_body"] = {"reasoning_effort": DEEPSEEK_V4_MAX_REASONING_EFFORT}
+    primary_model = model or config.primary_model or DEEPSEEK_V4_PRO_MODEL
+    primary_effort = reasoning_effort
+    if force_legacy_max_reasoning and primary_effort is None:
+        primary_effort = DEEPSEEK_V4_MAX_REASONING_EFFORT
+    primary = _provider_override(
+        base_url=config.base_url,
+        api_key=config.api_key,
+        model=primary_model,
+        reasoning_effort=primary_effort,
+    )
 
-    fallback = None
-    if config.fallback_base_url and config.fallback_api_key:
-        fallback_model = config.fallback_model or "deepseek-v4-flash"
-        fallback = {
-            "base_url": config.fallback_base_url,
-            "api_key": config.fallback_api_key,
-            "model": fallback_model,
-        }
-        if is_deepseek_v4_model(fallback_model):
-            fallback["extra_body"] = {"reasoning_effort": DEEPSEEK_V4_MAX_REASONING_EFFORT}
+    resolved_fallback_model = fallback_model or config.fallback_model or "deepseek-v4-flash"
+    fallback_effort = fallback_reasoning_effort
+    if force_legacy_max_reasoning and fallback_effort is None:
+        fallback_effort = DEEPSEEK_V4_MAX_REASONING_EFFORT
+    fallback = _provider_override(
+        base_url=config.fallback_base_url,
+        api_key=config.fallback_api_key,
+        model=resolved_fallback_model,
+        reasoning_effort=fallback_effort,
+    )
 
     return primary, fallback
 
@@ -218,6 +256,7 @@ async def _call_ai_gateway(
     primary_override: dict | None,
     fallback_override: dict | None,
     response_format: str | None = None,
+    stream: bool = False,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "task_type": "extract_tender_requirements",
@@ -233,6 +272,8 @@ async def _call_ai_gateway(
         payload["fallback_override"] = fallback_override
     if response_format == "json_object":
         payload["response_format"] = {"type": "json_object"}
+    if stream:
+        payload["stream"] = True
 
     resp = await client.post(
         _ai_gateway_chat_url(),
@@ -243,33 +284,48 @@ async def _call_ai_gateway(
     return resp.json()
 
 
-def _parse_llm_json_array(raw: str) -> list[dict[str, Any]]:
+def _parse_llm_json_value(raw: str) -> Any:
     text = (raw or "").strip()
     if not text:
-        return []
+        return None
     if text.startswith("```"):
         lines = [line for line in text.split("\n") if not line.strip().startswith("```")]
         text = "\n".join(lines).strip()
     try:
-        result = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError:
         decoder = json.JSONDecoder()
         for index, char in enumerate(text):
-            if char != "[":
+            if char not in "[{":
                 continue
             try:
                 result, _end = decoder.raw_decode(text[index:])
-                break
+                return result
             except json.JSONDecodeError:
                 continue
-        else:
-            logger.warning("ai_extract_json_unparseable", raw_length=len(text))
-            return []
+        logger.warning("ai_extract_json_unparseable", raw_length=len(text))
+        return None
+
+
+def _parse_llm_json_payload(raw: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    result = _parse_llm_json_value(raw)
     if isinstance(result, dict):
-        return [result]
+        requirements = result.get("requirements")
+        batch_quality = result.get("batch_quality")
+        if isinstance(requirements, list):
+            return (
+                [item for item in requirements if isinstance(item, dict)],
+                batch_quality if isinstance(batch_quality, dict) else {},
+            )
+        return [result], batch_quality if isinstance(batch_quality, dict) else {}
     if isinstance(result, list):
-        return [item for item in result if isinstance(item, dict)]
-    return []
+        return [item for item in result if isinstance(item, dict)], {}
+    return [], {}
+
+
+def _parse_llm_json_array(raw: str) -> list[dict[str, Any]]:
+    items, _batch_quality = _parse_llm_json_payload(raw)
+    return items
 
 
 def _normalize_requirement(
@@ -351,6 +407,11 @@ class BatchUsage:
     latency_ms: int
     failed: bool = False
     error_type: str | None = None
+    finish_reason: str | None = None
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
+    reasoning_tokens: int = 0
+    batch_quality: dict[str, Any] | None = None
 
 
 @dataclass
@@ -382,6 +443,7 @@ async def _process_batch(
     primary_override: dict | None,
     fallback_override: dict | None,
     response_format: str | None,
+    stream: bool,
     seen_keys: set[tuple[str, str]],
     seen_lock: asyncio.Lock,
     on_batch_persisted: Callable[[list["AiExtractedRequirement"]], Awaitable[None]] | None,
@@ -391,6 +453,7 @@ async def _process_batch(
         response = await _call_ai_gateway(
             client, prompt=prompt, primary_override=primary_override,
             fallback_override=fallback_override, response_format=response_format,
+            stream=stream,
         )
     except Exception as exc:
         logger.exception(
@@ -408,7 +471,7 @@ async def _process_batch(
         )
 
     content = response.get("content") or ""
-    parsed_items = _parse_llm_json_array(content)
+    parsed_items, batch_quality = _parse_llm_json_payload(content)
     requirements: list[AiExtractedRequirement] = []
     dropped_in_batch = 0
 
@@ -436,6 +499,11 @@ async def _process_batch(
         used_fallback=bool(response.get("used_fallback", False)),
         resolved_model=str(response.get("resolved_model") or ""),
         latency_ms=int(response.get("latency_ms") or 0),
+        finish_reason=response.get("finish_reason"),
+        prompt_cache_hit_tokens=int(response.get("prompt_cache_hit_tokens") or 0),
+        prompt_cache_miss_tokens=int(response.get("prompt_cache_miss_tokens") or 0),
+        reasoning_tokens=int(response.get("reasoning_tokens") or 0),
+        batch_quality=batch_quality,
     )
     logger.info(
         "ai_extract_batch_done",
@@ -459,11 +527,15 @@ async def extract_requirements_with_ai(
     conn: Connection,
     concurrency: int = _DEFAULT_CONCURRENCY,
     response_format: str | None = "json_object",
+    stream: bool = False,
     on_batch_persisted: Callable[[list[AiExtractedRequirement]], Awaitable[None]] | None = None,
 ) -> AiExtractionRunSummary:
     """Run AI extraction — one batch per source_file, concurrent, with checkpoints."""
     chunk_index = {str(c["id"]): c for c in chunks if c.get("id") is not None}
-    primary_override, fallback_override = _build_overrides(conn)
+    primary_override, fallback_override = _build_overrides(
+        conn,
+        force_legacy_max_reasoning=True,
+    )
 
     plan: list[tuple[str, list[dict[str, Any]]]] = []
     for source_file, file_chunks in _group_chunks_by_file(chunks):
@@ -492,6 +564,7 @@ async def extract_requirements_with_ai(
                     primary_override=primary_override,
                     fallback_override=fallback_override,
                     response_format=response_format,
+                    stream=stream,
                     seen_keys=seen_keys, seen_lock=seen_lock,
                     on_batch_persisted=on_batch_persisted,
                 )
@@ -518,7 +591,12 @@ async def extract_requirements_for_batch(
     *,
     conn: Connection,
     source_file: str,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    fallback_model: str | None = None,
+    fallback_reasoning_effort: str | None = None,
     response_format: str | None = "json_object",
+    stream: bool = False,
     on_batch_persisted: Callable[[list[AiExtractedRequirement]], Awaitable[None]] | None = None,
 ) -> AiExtractionRunSummary:
     """Run AI extraction for a preplanned batch.
@@ -527,7 +605,13 @@ async def extract_requirements_for_batch(
     model call and normalization logic shared with the legacy full-run helper.
     """
     chunk_index = {str(c["id"]): c for c in chunks if c.get("id") is not None}
-    primary_override, fallback_override = _build_overrides(conn)
+    primary_override, fallback_override = _build_overrides(
+        conn,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        fallback_model=fallback_model,
+        fallback_reasoning_effort=fallback_reasoning_effort,
+    )
     seen_keys: set[tuple[str, str]] = set()
     seen_lock = asyncio.Lock()
     async with httpx.AsyncClient() as client:
@@ -539,6 +623,7 @@ async def extract_requirements_for_batch(
             primary_override=primary_override,
             fallback_override=fallback_override,
             response_format=response_format,
+            stream=stream,
             seen_keys=seen_keys,
             seen_lock=seen_lock,
             on_batch_persisted=on_batch_persisted,

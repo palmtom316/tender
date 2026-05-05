@@ -42,6 +42,10 @@ class ChatResponse(BaseModel):
     estimated_cost: float = 0.0
     latency_ms: int = 0
     used_fallback: bool = False
+    finish_reason: str | None = None
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -96,4 +100,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
         estimated_cost=result.estimated_cost,
         latency_ms=result.latency_ms,
         used_fallback=result.used_fallback,
+        finish_reason=result.finish_reason,
+        prompt_cache_hit_tokens=result.prompt_cache_hit_tokens,
+        prompt_cache_miss_tokens=result.prompt_cache_miss_tokens,
+        reasoning_tokens=result.reasoning_tokens,
     )

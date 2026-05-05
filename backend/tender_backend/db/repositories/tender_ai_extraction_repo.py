@@ -212,6 +212,76 @@ class TenderAiExtractionRepository:
             ).fetchone()
         return dict(row) if row else None
 
+    def count_running_batches_for_provider(
+        self,
+        conn: Connection,
+        *,
+        model: str,
+        reasoning_effort: str | None = None,
+    ) -> int:
+        with conn.cursor() as cur:
+            row = cur.execute(
+                """
+                SELECT count(*)::int
+                FROM tender_ai_extraction_batch
+                WHERE status = 'running'
+                  AND model = %s
+                  AND reasoning_effort IS NOT DISTINCT FROM %s
+                """,
+                (model, reasoning_effort),
+            ).fetchone()
+        if row is None:
+            return 0
+        return int(row[0])
+
+    def create_review_batch(
+        self,
+        conn: Connection,
+        *,
+        source_batch: dict[str, Any],
+        batch_index: int,
+        model: str,
+        reasoning_effort: str | None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        rows = self.create_batches(
+            conn,
+            run_id=source_batch["run_id"],
+            tender_document_id=source_batch["tender_document_id"],
+            batches=[
+                {
+                    "tender_document_file_id": source_batch.get("tender_document_file_id"),
+                    "source_file": source_batch["source_file"],
+                    "batch_index": batch_index,
+                    "chunk_ids": source_batch.get("chunk_ids_json") or [],
+                    "status": "pending",
+                    "chunk_count": 0,
+                    "input_char_count": source_batch.get("input_char_count", 0),
+                    "estimated_input_tokens": source_batch.get("estimated_input_tokens", 0),
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
+                    "response_format": source_batch.get("response_format", "json_object"),
+                    "max_retries": 1,
+                    "metadata_json": metadata_json or {},
+                }
+            ],
+        )
+        return rows[0] if rows else None
+
+    def create_retry_batches(
+        self,
+        conn: Connection,
+        *,
+        source_batch: dict[str, Any],
+        retry_batches: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return self.create_batches(
+            conn,
+            run_id=source_batch["run_id"],
+            tender_document_id=source_batch["tender_document_id"],
+            batches=retry_batches,
+        )
+
     def mark_batch_succeeded(
         self,
         conn: Connection,
@@ -245,6 +315,61 @@ class TenderAiExtractionRepository:
                     Jsonb(metadata_json) if metadata_json is not None else None,
                     batch_id,
                 ),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def defer_batch(
+        self,
+        conn: Connection,
+        *,
+        batch_id: UUID,
+        error_type: str,
+        error_message: str,
+    ) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                UPDATE tender_ai_extraction_batch
+                SET status = 'pending',
+                    error_type = %s,
+                    error_message = %s,
+                    started_at = NULL,
+                    finished_at = NULL,
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (error_type, error_message[:2000], batch_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def mark_batch_superseded(
+        self,
+        conn: Connection,
+        *,
+        batch_id: UUID,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                UPDATE tender_ai_extraction_batch
+                SET status = 'succeeded',
+                    chunk_count = 0,
+                    input_tokens = 0,
+                    output_tokens = 0,
+                    latency_ms = 0,
+                    extracted_requirements = 0,
+                    dropped_invalid = 0,
+                    error_type = NULL,
+                    error_message = NULL,
+                    metadata_json = COALESCE(%s, metadata_json),
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (Jsonb(metadata_json) if metadata_json is not None else None, batch_id),
             ).fetchone()
         return dict(row) if row else None
 

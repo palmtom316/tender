@@ -1081,8 +1081,7 @@ async def extract_tender_document_requirements(
         source_metadata = item.get("source_metadata") if isinstance(item.get("source_metadata"), dict) else {}
         source_metadata["ai_parse_default_model"] = model
         source_metadata["ai_parse_model_source"] = model_source
-        source_metadata["ai_parse_thinking"] = thinking_options["thinking"]
-        source_metadata["ai_parse_reasoning_effort"] = thinking_options["reasoning_effort"]
+        source_metadata["ai_parse_reasoning_effort"] = thinking_options.get("reasoning_effort")
         item["source_metadata"] = source_metadata
     persisted = _requirement_repo.create_many(
         conn,

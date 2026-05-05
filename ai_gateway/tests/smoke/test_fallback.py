@@ -129,9 +129,15 @@ def test_call_with_fallback_allows_v4_pro_for_tender_extraction(monkeypatch) -> 
             captured["model"] = kwargs["model"]
             captured["max_tokens"] = kwargs["max_tokens"]
             captured["extra_body"] = kwargs.get("extra_body")
-            usage = SimpleNamespace(prompt_tokens=10, completion_tokens=20)
+            usage = SimpleNamespace(
+                prompt_tokens=10,
+                completion_tokens=20,
+                prompt_cache_hit_tokens=4,
+                prompt_cache_miss_tokens=6,
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=3),
+            )
             message = SimpleNamespace(content="[]")
-            choice = SimpleNamespace(message=message)
+            choice = SimpleNamespace(message=message, finish_reason="stop")
             return SimpleNamespace(choices=[choice], usage=usage)
 
     monkeypatch.setattr(fallback, "OpenAI", _FakeOpenAI)
@@ -165,6 +171,10 @@ def test_call_with_fallback_allows_v4_pro_for_tender_extraction(monkeypatch) -> 
     assert captured["model"] == "deepseek-v4-pro"
     assert captured["max_tokens"] == 65536
     assert captured["extra_body"] == {"reasoning_effort": "max"}
+    assert result.finish_reason == "stop"
+    assert result.prompt_cache_hit_tokens == 4
+    assert result.prompt_cache_miss_tokens == 6
+    assert result.reasoning_tokens == 3
 
 
 def test_call_with_fallback_forwards_request_extra_body(monkeypatch) -> None:
@@ -210,7 +220,7 @@ def test_call_with_fallback_forwards_response_format_and_stream(monkeypatch) -> 
     captured: dict[str, object] = {}
 
     class _FakeChunk:
-        choices = [SimpleNamespace(delta=SimpleNamespace(content="[]"))]
+        choices = [SimpleNamespace(delta=SimpleNamespace(content="[]"), finish_reason="stop")]
 
     class _FakeOpenAI:
         def __init__(self, *, api_key, base_url, timeout, max_retries) -> None:
@@ -245,5 +255,6 @@ def test_call_with_fallback_forwards_response_format_and_stream(monkeypatch) -> 
     )
 
     assert result.content == "[]"
+    assert result.finish_reason == "stop"
     assert captured["response_format"] == {"type": "json_object"}
     assert captured["stream"] is True

@@ -25,6 +25,10 @@ class CompletionResult:
     estimated_cost: float = 0.0
     latency_ms: int = 0
     used_fallback: bool = False
+    finish_reason: str | None = None
+    prompt_cache_hit_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 @dataclass
@@ -179,21 +183,32 @@ def call_with_fallback(
 
             if stream:
                 content_parts: list[str] = []
+                finish_reason: str | None = None
                 for event in resp:
                     delta = event.choices[0].delta if event.choices else None
                     if delta and delta.content:
                         content_parts.append(delta.content)
+                    if event.choices:
+                        finish_reason = getattr(event.choices[0], "finish_reason", finish_reason)
                 return CompletionResult(
                     content="".join(content_parts),
                     model=provider.model,
                     provider=provider.name,
                     latency_ms=latency_ms,
                     used_fallback=attempt > 0,
+                    finish_reason=finish_reason,
                 )
 
             usage = resp.usage
             input_tokens = usage.prompt_tokens if usage else 0
             output_tokens = usage.completion_tokens if usage else 0
+            prompt_cache_hit_tokens = int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0)
+            prompt_cache_miss_tokens = int(getattr(usage, "prompt_cache_miss_tokens", 0) or 0)
+            completion_tokens_details = getattr(usage, "completion_tokens_details", None)
+            reasoning_tokens = int(
+                getattr(completion_tokens_details, "reasoning_tokens", 0) or 0
+            )
+            finish_reason = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
 
             return CompletionResult(
                 content=resp.choices[0].message.content or "",
@@ -203,6 +218,10 @@ def call_with_fallback(
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 used_fallback=attempt > 0,
+                finish_reason=finish_reason,
+                prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+                prompt_cache_miss_tokens=prompt_cache_miss_tokens,
+                reasoning_tokens=reasoning_tokens,
             )
         except Exception as exc:
             logger.exception(

@@ -61,15 +61,21 @@ def fake_conn():
     return SimpleNamespace()
 
 
-def _patch_agent_config(monkeypatch, *, enabled: bool = True) -> None:
+def _patch_agent_config(
+    monkeypatch,
+    *,
+    enabled: bool = True,
+    primary_model: str = "deepseek-v4-pro",
+    fallback_model: str = "deepseek-v4-flash",
+) -> None:
     config = SimpleNamespace(
         enabled=enabled,
         base_url="https://api.deepseek.com/v1",
         api_key="sk-test",
-        primary_model="deepseek-v4-pro",
+        primary_model=primary_model,
         fallback_base_url="https://api.deepseek.com/v1",
         fallback_api_key="sk-test",
-        fallback_model="deepseek-v4-flash",
+        fallback_model=fallback_model,
     )
     monkeypatch.setattr(
         mod.AgentConfigRepository,
@@ -85,13 +91,22 @@ def _patch_call_ai(monkeypatch, handler) -> dict[str, list]:
     """
     captured: dict[str, list] = {"calls": []}
 
-    async def _fake(client, *, prompt, primary_override, fallback_override, response_format=None):
+    async def _fake(
+        client,
+        *,
+        prompt,
+        primary_override,
+        fallback_override,
+        response_format=None,
+        stream=False,
+    ):
         captured["calls"].append(
             {
                 "prompt": prompt,
                 "primary_override": primary_override,
                 "fallback_override": fallback_override,
                 "response_format": response_format,
+                "stream": stream,
             }
         )
         return await handler(prompt, primary_override, fallback_override)
@@ -312,6 +327,43 @@ def test_strips_markdown_fences_around_json(monkeypatch, fake_conn) -> None:
     assert len(summary.requirements) == 1
 
 
+def test_parses_json_object_schema_with_batch_quality(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    chunk = _chunk(text="投标人须满足技术要求。")
+    content = __import__("json").dumps(
+        {
+            "requirements": [
+                {
+                    "source_chunk_id": str(chunk["id"]),
+                    "category": "technical",
+                    "title": "技术要求",
+                    "requirement_text": "投标人须满足技术要求。",
+                    "confidence": 0.9,
+                }
+            ],
+            "batch_quality": {
+                "has_requirements": True,
+                "coverage_note": "已覆盖",
+                "suspected_missing": False,
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response([], content=content)
+
+    _patch_call_ai(monkeypatch, _handler)
+    summary = asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
+
+    assert len(summary.requirements) == 1
+    assert summary.batches[0].batch_quality == {
+        "has_requirements": True,
+        "coverage_note": "已覆盖",
+        "suspected_missing": False,
+    }
+
+
 def test_passes_v4_pro_with_reasoning_effort(monkeypatch, fake_conn) -> None:
     _patch_agent_config(monkeypatch)
     chunk = _chunk(text="测试")
@@ -336,6 +388,74 @@ def test_passes_v4_pro_with_reasoning_effort(monkeypatch, fake_conn) -> None:
     primary = call["primary_override"]
     assert primary["model"] == "deepseek-v4-pro"
     assert primary["extra_body"] == {"reasoning_effort": "max"}
+
+
+def test_preplanned_batch_uses_batch_model_without_implicit_max(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch, primary_model="deepseek-v4-pro")
+    chunk = _chunk(text="普通附件说明")
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response(
+            [
+                {
+                    "source_chunk_id": str(chunk["id"]),
+                    "category": "technical",
+                    "title": "普通要求",
+                    "requirement_text": "普通附件说明",
+                    "confidence": 0.9,
+                }
+            ],
+            resolved_model="deepseek-v4-flash",
+            finish_reason="stop",
+            prompt_cache_hit_tokens=12,
+            prompt_cache_miss_tokens=88,
+            reasoning_tokens=7,
+        )
+
+    captured = _patch_call_ai(monkeypatch, _handler)
+    summary = asyncio.run(
+        mod.extract_requirements_for_batch(
+            [chunk],
+            conn=fake_conn,
+            source_file="普通附件.docx",
+            model="deepseek-v4-flash",
+            reasoning_effort=None,
+        )
+    )
+
+    call = captured["calls"][0]
+    assert call["primary_override"]["model"] == "deepseek-v4-flash"
+    assert "extra_body" not in call["primary_override"]
+    assert summary.batches[0].finish_reason == "stop"
+    assert summary.batches[0].prompt_cache_hit_tokens == 12
+    assert summary.batches[0].prompt_cache_miss_tokens == 88
+    assert summary.batches[0].reasoning_tokens == 7
+
+
+def test_preplanned_batch_uses_explicit_reasoning_effort(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    chunk = _chunk(text="否决条款")
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response([])
+
+    captured = _patch_call_ai(monkeypatch, _handler)
+    asyncio.run(
+        mod.extract_requirements_for_batch(
+            [chunk],
+            conn=fake_conn,
+            source_file="招标文件.docx",
+            model="deepseek-v4-pro",
+            reasoning_effort="max",
+        )
+    )
+
+    assert captured["calls"][0]["primary_override"] == {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "sk-test",
+        "model": "deepseek-v4-pro",
+        "extra_body": {"reasoning_effort": "max"},
+    }
 
 
 def test_passes_json_response_format_to_ai_gateway(monkeypatch, fake_conn) -> None:
@@ -383,6 +503,26 @@ def test_passes_json_response_format_to_ai_gateway(monkeypatch, fake_conn) -> No
     asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
 
     assert captured_payloads[0]["response_format"] == {"type": "json_object"}
+
+
+def test_passes_stream_flag_to_ai_gateway(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    chunk = _chunk(text="测试")
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response([])
+
+    captured = _patch_call_ai(monkeypatch, _handler)
+    asyncio.run(
+        mod.extract_requirements_for_batch(
+            [chunk],
+            conn=fake_conn,
+            source_file="招标文件.docx",
+            stream=True,
+        )
+    )
+
+    assert captured["calls"][0]["stream"] is True
 
 
 def test_invokes_on_batch_persisted_per_batch(monkeypatch, fake_conn) -> None:
