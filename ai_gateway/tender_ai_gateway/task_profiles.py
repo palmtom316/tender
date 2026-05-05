@@ -23,7 +23,7 @@ TASK_PROFILES = {
         "primary_model": "deepseek-v4-flash",
         "fallback_model": "deepseek-v4-pro",
         "timeout": 2400,
-        "max_tokens": 65536,
+        "max_tokens": 16384,
         "max_retries": 0,
     },
     "extract_tender_facts": {

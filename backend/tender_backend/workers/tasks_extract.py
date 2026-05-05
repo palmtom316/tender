@@ -14,7 +14,10 @@ from tender_backend.db.repositories.requirement_repo import RequirementRepositor
 from tender_backend.db.repositories.tender_ai_extraction_repo import TenderAiExtractionRepository
 from tender_backend.db.repositories.tender_document_repository import TenderDocumentRepository
 from tender_backend.services.deepseek_api import DEEPSEEK_V4_MAX_REASONING_EFFORT, DEEPSEEK_V4_PRO_MODEL
-from tender_backend.services.extract_service.ai_requirements_extractor import extract_requirements_for_batch
+from tender_backend.services.extract_service.ai_requirements_extractor import (
+    build_batch_overrides,
+    extract_requirements_for_batch,
+)
 from tender_backend.services.extract_service.retry_policy import (
     backoff_countdown_seconds,
     degraded_reasoning_effort,
@@ -214,6 +217,18 @@ def _provider_limit_countdown(conn, batch: dict[str, Any]) -> int:
     return 15
 
 
+def _resolve_batch_overrides(
+    conn,
+    *,
+    batch: dict[str, Any],
+) -> tuple[dict | None, dict | None]:
+    return build_batch_overrides(
+        conn,
+        model=batch.get("model"),
+        reasoning_effort=batch.get("reasoning_effort"),
+    )
+
+
 @app.task(name="tender_backend.workers.tasks_extract.run_tender_ai_extraction", bind=True)
 def run_tender_ai_extraction(self, *, run_id: str) -> dict:
     """Dispatch all pending batches for an extraction run."""
@@ -264,8 +279,6 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
         run = _ai_repo.get_run(conn, run_id=batch["run_id"])
         if run is None:
             raise ValueError(f"tender ai extraction run not found: {batch['run_id']}")
-        conn.commit()
-
         chunk_ids = {str(value) for value in (batch.get("chunk_ids_json") or [])}
         chunks = [
             chunk for chunk in _doc_repo.list_source_chunks(
@@ -274,32 +287,36 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
             if str(chunk.get("id")) in chunk_ids
         ]
         chunks.sort(key=lambda c: (c.get("sort_order") or 0, str(c.get("id") or "")))
+        primary_override, fallback_override = _resolve_batch_overrides(conn, batch=batch)
+        conn.commit()
 
-        persisted: list[dict] = []
+    persisted: list[dict] = []
 
-        async def _persist(batch_requirements):
-            if not batch_requirements:
-                return
-            payload = [item.to_repository_dict() for item in batch_requirements]
+    async def _persist(batch_requirements):
+        if not batch_requirements:
+            return
+        payload = [item.to_repository_dict() for item in batch_requirements]
+        with pool.connection() as persist_conn:
             rows = _requirement_repo.create_many(
-                conn,
+                persist_conn,
                 project_id=run["project_id"],
                 requirements=payload,
             )
-            persisted.extend(rows)
+        persisted.extend(rows)
 
-        try:
-            summary = _run_async(
-                extract_requirements_for_batch(
-                    chunks,
-                    conn=conn,
-                    source_file=batch["source_file"],
-                    model=batch.get("model"),
-                    reasoning_effort=batch.get("reasoning_effort"),
-                    response_format=batch.get("response_format") or "json_object",
-                    on_batch_persisted=_persist,
-                )
+    try:
+        summary = _run_async(
+            extract_requirements_for_batch(
+                chunks,
+                source_file=batch["source_file"],
+                primary_override=primary_override,
+                fallback_override=fallback_override,
+                response_format=batch.get("response_format") or "json_object",
+                stream=True,
+                on_batch_persisted=_persist,
             )
+        )
+        with pool.connection() as conn:
             usage = summary.batches[0] if summary.batches else None
             if usage is not None and usage.failed:
                 _ai_repo.mark_batch_failed(
@@ -377,7 +394,10 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                         "batch_quality": usage.batch_quality if usage else {},
                     },
                 )
-        except Exception as exc:
+            run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
+            conn.commit()
+    except Exception as exc:
+        with pool.connection() as conn:
             logger.exception("tender_ai_extraction_batch_failed", batch_id=batch_id)
             retry_count = int(batch.get("retry_count") or 0)
             retryable = retry_count + 1 < int(batch.get("max_retries") or 0)
@@ -440,8 +460,8 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                         kwargs={"batch_id": batch_id},
                         countdown=countdown,
                     )
-        run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
-        conn.commit()
+            run = _ai_repo.refresh_run_progress(conn, run_id=batch["run_id"])
+            conn.commit()
     return {"batch_id": batch_id, "run_status": run.get("status") if run else None}
 
 

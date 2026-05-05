@@ -589,12 +589,14 @@ async def extract_requirements_with_ai(
 async def extract_requirements_for_batch(
     chunks: list[dict[str, Any]],
     *,
-    conn: Connection,
+    conn: Connection | None = None,
     source_file: str,
     model: str | None = None,
     reasoning_effort: str | None = None,
     fallback_model: str | None = None,
     fallback_reasoning_effort: str | None = None,
+    primary_override: dict | None = None,
+    fallback_override: dict | None = None,
     response_format: str | None = "json_object",
     stream: bool = False,
     on_batch_persisted: Callable[[list[AiExtractedRequirement]], Awaitable[None]] | None = None,
@@ -605,13 +607,16 @@ async def extract_requirements_for_batch(
     model call and normalization logic shared with the legacy full-run helper.
     """
     chunk_index = {str(c["id"]): c for c in chunks if c.get("id") is not None}
-    primary_override, fallback_override = _build_overrides(
-        conn,
-        model=model,
-        reasoning_effort=reasoning_effort,
-        fallback_model=fallback_model,
-        fallback_reasoning_effort=fallback_reasoning_effort,
-    )
+    if primary_override is None and fallback_override is None:
+        if conn is None:
+            raise ValueError("conn is required when provider overrides are not supplied")
+        primary_override, fallback_override = _build_overrides(
+            conn,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            fallback_model=fallback_model,
+            fallback_reasoning_effort=fallback_reasoning_effort,
+        )
     seen_keys: set[tuple[str, str]] = set()
     seen_lock = asyncio.Lock()
     async with httpx.AsyncClient() as client:
@@ -631,8 +636,26 @@ async def extract_requirements_for_batch(
     return AiExtractionRunSummary(requirements=result.requirements, batches=[result.usage])
 
 
+def build_batch_overrides(
+    conn: Connection,
+    *,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    fallback_model: str | None = None,
+    fallback_reasoning_effort: str | None = None,
+) -> tuple[dict | None, dict | None]:
+    return _build_overrides(
+        conn,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        fallback_model=fallback_model,
+        fallback_reasoning_effort=fallback_reasoning_effort,
+    )
+
+
 __all__ = [
     "AiExtractedRequirement", "AiExtractionError",
     "AiExtractionRunSummary", "BatchUsage",
+    "build_batch_overrides",
     "extract_requirements_for_batch", "extract_requirements_with_ai",
 ]

@@ -27,10 +27,11 @@ def test_planner_assigns_every_extractable_chunk_to_pending_batch() -> None:
     assert len(plans) == 1
     plan = plans[0]
     assert plan.status == "pending"
-    assert plan.model == "deepseek-v4-pro"
-    assert plan.reasoning_effort == "max"
+    assert plan.model == "deepseek-v4-flash"
+    assert plan.reasoning_effort is None
     assert set(plan.chunk_ids) == {str(chunk["id"]) for chunk in chunks}
     assert plan.metadata_json["high_value"] is True
+    assert plan.metadata_json["direct_pro"] is False
 
 
 def test_planner_skips_known_blank_contract_template_with_reason() -> None:
@@ -52,3 +53,57 @@ def test_planner_uses_flash_for_low_value_files() -> None:
     assert plans[0].status == "pending"
     assert plans[0].model == "deepseek-v4-flash"
     assert plans[0].reasoning_effort is None
+
+
+def test_planner_uses_pro_high_for_small_scoring_file() -> None:
+    chunks = [
+        _chunk(source_file="附件6：商务评分细则.xlsx", text="评分项 满分 投标报价", document_type="scoring_sheet", sort_order=0),
+        _chunk(source_file="附件6：商务评分细则.xlsx", text="业绩 资质 人员", document_type="spreadsheet", sort_order=1),
+    ]
+
+    plans = build_extraction_batch_plan(chunks)
+
+    assert len(plans) == 1
+    assert plans[0].status == "pending"
+    assert plans[0].model == "deepseek-v4-pro"
+    assert plans[0].reasoning_effort == "high"
+    assert plans[0].metadata_json["high_value"] is True
+    assert plans[0].metadata_json["direct_pro"] is True
+
+
+def test_planner_keeps_large_tender_document_on_flash() -> None:
+    chunks = [
+        _chunk(
+            source_file="国网重庆采购文件（施工）.docx",
+            text="技术要求和投标文件组成 " * 200,
+            document_type="tender_document",
+            sort_order=index,
+        )
+        for index in range(30)
+    ]
+
+    plans = build_extraction_batch_plan(chunks)
+
+    assert plans
+    assert all(plan.model == "deepseek-v4-flash" for plan in plans)
+    assert all(plan.reasoning_effort is None for plan in plans)
+    assert all(plan.metadata_json["high_value"] is True for plan in plans)
+    assert all(plan.metadata_json["direct_pro"] is False for plan in plans)
+
+
+def test_planner_splits_large_flash_file_by_flash_chunk_cap() -> None:
+    chunks = [
+        _chunk(
+            source_file="大型采购文件.docx",
+            text="通用条款 " * 10,
+            document_type="tender_document",
+            sort_order=index,
+        )
+        for index in range(250)
+    ]
+
+    plans = build_extraction_batch_plan(chunks)
+
+    assert len(plans) == 3
+    assert [plan.chunk_count for plan in plans] == [120, 120, 10]
+    assert all(plan.model == "deepseek-v4-flash" for plan in plans)

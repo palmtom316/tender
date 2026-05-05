@@ -33,6 +33,7 @@ def test_tender_requirement_profile_uses_flash_first_for_throughput() -> None:
 
     assert profile["primary_model"] == "deepseek-v4-flash"
     assert profile["fallback_model"] == "deepseek-v4-pro"
+    assert profile["max_tokens"] == 16384
     assert profile["max_retries"] == 0
 
 

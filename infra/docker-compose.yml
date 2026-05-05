@@ -104,6 +104,8 @@ services:
       APP_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       OPENSEARCH_URL: http://opensearch:9200
       AI_GATEWAY_URL: http://ai-gateway:8100

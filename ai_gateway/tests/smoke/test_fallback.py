@@ -169,7 +169,7 @@ def test_call_with_fallback_allows_v4_pro_for_tender_extraction(monkeypatch) -> 
 
     assert result.content == "[]"
     assert captured["model"] == "deepseek-v4-pro"
-    assert captured["max_tokens"] == 65536
+    assert captured["max_tokens"] == 16384
     assert captured["extra_body"] == {"reasoning_effort": "max"}
     assert result.finish_reason == "stop"
     assert result.prompt_cache_hit_tokens == 4

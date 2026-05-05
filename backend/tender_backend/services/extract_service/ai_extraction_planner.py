@@ -20,11 +20,40 @@ HIGH_VALUE_CLASSIFICATIONS = {
     "scoring",
     "bid_submission_requirement",
 }
+DIRECT_PRO_CLASSIFICATIONS = {
+    "qualification_requirement",
+    "qualification_sheet",
+    "technical_scoring",
+    "business_scoring",
+    "scoring",
+    "scoring_sheet",
+    "pricing_reference",
+}
+CLASSIFICATION_PRIORITY = (
+    "qualification_requirement",
+    "qualification_sheet",
+    "technical_scoring",
+    "business_scoring",
+    "scoring",
+    "scoring_sheet",
+    "bid_submission_requirement",
+    "tender_notice",
+    "technical_specification",
+    "tender_document",
+    "pricing_reference",
+    "demand_schedule",
+    "contract",
+    "spreadsheet",
+    "unclassified",
+)
 SKIPPABLE_CLASSIFICATIONS = {"signature"}
 SKIPPABLE_EMPTY_FILENAMES = {"合同条款（空白）.doc", "合同条款（空白）.docx"}
 TARGET_TOKENS_NORMAL = 50_000
 TARGET_TOKENS_HIGH_VALUE = 120_000
 MAX_CHUNKS_PER_BATCH = 350
+FLASH_MAX_CHUNKS_PER_BATCH = 120
+DIRECT_PRO_MAX_CHUNKS = 24
+DIRECT_PRO_MAX_TOKENS = 12_000
 
 
 @dataclass(frozen=True)
@@ -95,6 +124,14 @@ def _group_chunks(chunks: list[dict[str, Any]]) -> list[tuple[str, list[dict[str
 
 
 def _file_classification(chunks: list[dict[str, Any]]) -> str:
+    values = {
+        str(chunk.get("document_type") or "").strip()
+        for chunk in chunks
+        if str(chunk.get("document_type") or "").strip()
+    }
+    for candidate in CLASSIFICATION_PRIORITY:
+        if candidate in values:
+            return candidate
     for chunk in chunks:
         value = chunk.get("document_type")
         if value:
@@ -108,6 +145,22 @@ def _is_high_value(source_file: str, classification: str) -> bool:
     return any(keyword in source_file for keyword in ("采购文件", "招标文件", "评分", "资格", "递交要求", "技术规范"))
 
 
+def _use_direct_pro(
+    *,
+    source_file: str,
+    classification: str,
+    estimated_tokens: int,
+    chunk_count: int,
+) -> bool:
+    if classification in DIRECT_PRO_CLASSIFICATIONS:
+        return chunk_count <= DIRECT_PRO_MAX_CHUNKS and estimated_tokens <= DIRECT_PRO_MAX_TOKENS
+    return (
+        chunk_count <= DIRECT_PRO_MAX_CHUNKS
+        and estimated_tokens <= DIRECT_PRO_MAX_TOKENS
+        and any(keyword in source_file for keyword in ("评分细则", "资格要求", "否决", "废标", "递交要求"))
+    )
+
+
 def _skip_reason(source_file: str, chunks: list[dict[str, Any]], classification: str) -> str | None:
     filename = source_file.rsplit("/", 1)[-1]
     if classification in SKIPPABLE_CLASSIFICATIONS:
@@ -119,13 +172,13 @@ def _skip_reason(source_file: str, chunks: list[dict[str, Any]], classification:
     return None
 
 
-def _model_for(*, high_value: bool, model_policy: str) -> tuple[str, str | None]:
+def _model_for(*, direct_pro: bool, model_policy: str) -> tuple[str, str | None]:
     if model_policy == "v4_pro_only":
         return PRO_MODEL, "max"
     if model_policy == "v4_flash_only":
         return FLASH_MODEL, None
-    if high_value:
-        return PRO_MODEL, "max"
+    if direct_pro:
+        return PRO_MODEL, "high"
     return FLASH_MODEL, None
 
 
@@ -164,7 +217,14 @@ def build_extraction_batch_plan(
         usable = [chunk for chunk in file_chunks if _has_extractable_content(chunk)]
         high_value = _is_high_value(source_file, classification)
         target_tokens = TARGET_TOKENS_HIGH_VALUE if high_value else TARGET_TOKENS_NORMAL
-        model, reasoning_effort = _model_for(high_value=high_value, model_policy=model_policy)
+        estimated_tokens = sum(estimate_tokens(_chunk_text_for_budget(chunk)) for chunk in usable)
+        direct_pro = _use_direct_pro(
+            source_file=source_file,
+            classification=classification,
+            estimated_tokens=estimated_tokens,
+            chunk_count=len(usable),
+        )
+        model, reasoning_effort = _model_for(direct_pro=direct_pro, model_policy=model_policy)
 
         current: list[dict[str, Any]] = []
         current_chars = 0
@@ -190,6 +250,7 @@ def build_extraction_batch_plan(
                     metadata_json={
                         "classification": classification,
                         "high_value": high_value,
+                        "direct_pro": direct_pro,
                         "model_policy": model_policy,
                     },
                 )
@@ -203,7 +264,8 @@ def build_extraction_batch_plan(
             text = _chunk_text_for_budget(chunk)
             token_count = estimate_tokens(text)
             would_exceed_tokens = current and current_tokens + token_count > target_tokens
-            would_exceed_count = current and len(current) >= MAX_CHUNKS_PER_BATCH
+            max_chunks_per_batch = DIRECT_PRO_MAX_CHUNKS if direct_pro else FLASH_MAX_CHUNKS_PER_BATCH
+            would_exceed_count = current and len(current) >= max_chunks_per_batch
             if would_exceed_tokens or would_exceed_count:
                 flush()
             current.append(chunk)
