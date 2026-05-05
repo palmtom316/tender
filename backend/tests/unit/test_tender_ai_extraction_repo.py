@@ -66,6 +66,42 @@ class _Cursor:
             self._row = None
         elif "SELECT count(*)::int" in query:
             self._row = (3,)
+        elif "FROM tender_ai_extraction_run" in query and "status IN ('pending', 'running', 'partial')" in query:
+            self._row = {
+                "id": uuid4(),
+                "tender_document_id": params[0],
+                "project_id": uuid4(),
+                "status": "running",
+                "mode": "requirements",
+                "model_policy": "v4_flash_then_pro",
+                "metadata_json": {},
+            }
+        elif "GROUP BY source_file" in query and "FROM tender_ai_extraction_batch" in query:
+            self._row = None
+            self._rows = [
+                (
+                    "招标文件.docx",
+                    2,
+                    1,
+                    1,
+                    0,
+                    0,
+                    100,
+                    25,
+                    None,
+                )
+            ]
+            self.description = [
+                type("Col", (), {"name": "source_file"})(),
+                type("Col", (), {"name": "batches"})(),
+                type("Col", (), {"name": "succeeded"})(),
+                type("Col", (), {"name": "failed"})(),
+                type("Col", (), {"name": "needs_review"})(),
+                type("Col", (), {"name": "skipped"})(),
+                type("Col", (), {"name": "chunks"})(),
+                type("Col", (), {"name": "extracted_requirements"})(),
+                type("Col", (), {"name": "skip_reason"})(),
+            ]
         else:
             self._row = None
         return self
@@ -74,7 +110,7 @@ class _Cursor:
         return self._row
 
     def fetchall(self):
-        return []
+        return getattr(self, "_rows", [])
 
 
 class _Conn:
@@ -147,6 +183,38 @@ def test_count_running_batches_for_provider_with_optional_filters_emits_explicit
     ) == 3
     _, params = conn.queries[-1]
     assert params == ("deepseek-v4-flash", None, True, "false", True, "fast_prefilter")
+
+
+def test_get_latest_active_run_for_document_returns_row() -> None:
+    repo = TenderAiExtractionRepository()
+    conn = _Conn()
+    tender_document_id = uuid4()
+
+    row = repo.get_latest_active_run_for_document(conn, tender_document_id=tender_document_id)
+
+    assert row is not None
+    assert row["tender_document_id"] == tender_document_id
+
+
+def test_aggregate_file_coverage_returns_grouped_rows() -> None:
+    repo = TenderAiExtractionRepository()
+    conn = _Conn()
+
+    rows = repo.aggregate_file_coverage(conn, run_id=uuid4())
+
+    assert rows == [
+        {
+            "source_file": "招标文件.docx",
+            "batches": 2,
+            "succeeded": 1,
+            "failed": 1,
+            "needs_review": 0,
+            "skipped": 0,
+            "chunks": 100,
+            "extracted_requirements": 25,
+            "skip_reason": None,
+        }
+    ]
 
 
 def test_defer_batch_marks_pending_without_incrementing_retry() -> None:

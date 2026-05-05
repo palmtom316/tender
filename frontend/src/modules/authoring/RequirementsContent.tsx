@@ -1,10 +1,16 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchRequirements, confirmRequirement, fetchTenderSummary } from "../../lib/api";
+import {
+  fetchRequirements,
+  confirmRequirement,
+  fetchTenderSummary,
+  startTenderAiExtractionRun,
+} from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
+import { AiExtractionRunPanel } from "./AiExtractionRunPanel";
 import { SourceChunkViewer } from "./SourceChunkViewer";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -18,10 +24,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function RequirementsContent() {
-  const { projectId } = useNavigation();
+  const { projectId, documentId } = useNavigation();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>("");
   const [sourceChunkId, setSourceChunkId] = useState<string | null>(null);
+  const [latestRunId, setLatestRunId] = useState<string | null>(null);
 
   const { data: requirements = [], isLoading } = useQuery({
     queryKey: ["requirements", projectId, filter],
@@ -46,6 +53,16 @@ export function RequirementsContent() {
     mutationFn: confirmRequirement,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["requirements", projectId] });
+    },
+  });
+
+  const startAiExtraction = useMutation({
+    mutationFn: async () => {
+      if (!documentId) throw new Error("No document selected");
+      return startTenderAiExtractionRun(documentId);
+    },
+    onSuccess: (result) => {
+      setLatestRunId(result.run_id);
     },
   });
 
@@ -95,6 +112,23 @@ export function RequirementsContent() {
           </div>
         </section>
       )}
+
+      <div className="requirement-toolbar">
+        <div>
+          <span className="tender-summary-card__eyebrow">AI Extraction</span>
+          <p className="requirement-toolbar__hint">
+            对当前招标文件启动异步 AI 抽取，并查看批次级进度与失败详情。
+          </p>
+        </div>
+        <ClayButton
+          onClick={() => startAiExtraction.mutate()}
+          disabled={!documentId || startAiExtraction.isPending}
+        >
+          {startAiExtraction.isPending ? "抽取提交中..." : "开始 AI 抽取"}
+        </ClayButton>
+      </div>
+
+      {latestRunId && <AiExtractionRunPanel runId={latestRunId} />}
 
       {vetoUnconfirmed > 0 && (
         <div className="warning-banner">

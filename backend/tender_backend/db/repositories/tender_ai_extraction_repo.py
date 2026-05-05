@@ -54,6 +54,26 @@ class TenderAiExtractionRepository:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_latest_active_run_for_document(
+        self,
+        conn: Connection,
+        *,
+        tender_document_id: UUID,
+    ) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                SELECT *
+                FROM tender_ai_extraction_run
+                WHERE tender_document_id = %s
+                  AND status IN ('pending', 'running', 'partial')
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (tender_document_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def create_batches(
         self,
         conn: Connection,
@@ -189,6 +209,30 @@ class TenderAiExtractionRepository:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def aggregate_file_coverage(self, conn: Connection, *, run_id: UUID) -> list[dict[str, Any]]:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    source_file,
+                    COUNT(*) AS batches,
+                    COUNT(*) FILTER (WHERE status = 'succeeded') AS succeeded,
+                    COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                    COUNT(*) FILTER (WHERE status = 'needs_review') AS needs_review,
+                    COUNT(*) FILTER (WHERE status = 'skipped') AS skipped,
+                    COALESCE(SUM(chunk_count), 0) AS chunks,
+                    COALESCE(SUM(extracted_requirements), 0) AS extracted_requirements,
+                    MAX(skip_reason) FILTER (WHERE status = 'skipped') AS skip_reason
+                FROM tender_ai_extraction_batch
+                WHERE run_id = %s
+                GROUP BY source_file
+                ORDER BY source_file
+                """,
+                (run_id,),
+            )
+            columns = [column.name for column in cur.description]
+            return [dict(zip(columns, row)) for row in cur.fetchall()]
 
     def get_batch(self, conn: Connection, *, batch_id: UUID) -> dict[str, Any] | None:
         with conn.cursor(row_factory=dict_row) as cur:

@@ -217,6 +217,7 @@ class TenderAiExtractionRunOut(BaseModel):
     total_output_tokens: int
     error: str | None = None
     metadata_json: dict
+    file_coverage: list[dict] = []
 
 
 class TenderAiExtractionBatchOut(BaseModel):
@@ -377,6 +378,7 @@ def _ai_run_out(row: dict) -> TenderAiExtractionRunOut:
         total_output_tokens=row["total_output_tokens"],
         error=row.get("error"),
         metadata_json=row.get("metadata_json") or {},
+        file_coverage=row.get("file_coverage") or [],
     )
 
 
@@ -930,6 +932,17 @@ async def create_tender_ai_extraction_run(
     if document is None:
         raise HTTPException(status_code=404, detail="tender document not found")
     body = payload or TenderAiExtractionRunCreateBody()
+    if not body.force_replan:
+        active_run = _ai_extraction_repo.get_latest_active_run_for_document(
+            conn,
+            tender_document_id=tender_document_id,
+        )
+        if active_run is not None:
+            active_run["file_coverage"] = _ai_extraction_repo.aggregate_file_coverage(
+                conn,
+                run_id=active_run["id"],
+            )
+            return _ai_run_out(active_run)
     run = _create_ai_extraction_run(
         conn,
         document=document,
@@ -957,6 +970,10 @@ async def get_tender_ai_extraction_run(
         user=user,
     )
     refreshed = _ai_extraction_repo.refresh_run_progress(conn, run_id=run_id) or run
+    refreshed = {
+        **refreshed,
+        "file_coverage": _ai_extraction_repo.aggregate_file_coverage(conn, run_id=run_id),
+    }
     conn.commit()
     return _ai_run_out(refreshed)
 

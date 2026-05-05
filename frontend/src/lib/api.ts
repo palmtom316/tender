@@ -264,6 +264,117 @@ export function fetchTenderSummary(projectId: string, options?: { signal?: Abort
   return request<TenderSummary>(`/projects/${projectId}/tender-summary`, { signal: options?.signal });
 }
 
+export type AiExtractionRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "cancelled";
+
+export type AiExtractionFileCoverage = {
+  source_file: string;
+  batches: number;
+  succeeded: number;
+  failed: number;
+  needs_review: number;
+  skipped: number;
+  chunks: number;
+  extracted_requirements: number;
+  skip_reason: string | null;
+};
+
+export type AiExtractionRun = {
+  id: string;
+  tender_document_id?: string;
+  project_id?: string;
+  status: AiExtractionRunStatus;
+  total_batches: number;
+  succeeded_batches: number;
+  failed_batches: number;
+  skipped_batches: number;
+  total_chunks: number;
+  covered_chunks: number;
+  extracted_requirements: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  file_coverage: AiExtractionFileCoverage[];
+};
+
+export type AiExtractionBatchStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped"
+  | "needs_review";
+
+export type AiExtractionBatch = {
+  id: string;
+  source_file: string;
+  batch_index: number;
+  status: AiExtractionBatchStatus;
+  chunk_count: number;
+  model: string;
+  reasoning_effort: string | null;
+  retry_count: number;
+  max_retries: number;
+  extracted_requirements: number;
+  dropped_invalid: number;
+  error_type: string | null;
+  error_message: string | null;
+  skip_reason: string | null;
+};
+
+export type TenderAiExtractionAccepted = {
+  run_id: string;
+  status: string;
+  total_batches: number;
+  skipped_batches: number;
+  message: string;
+};
+
+export function fetchAiExtractionRun(
+  runId: string,
+  options?: { signal?: AbortSignal },
+): Promise<AiExtractionRun> {
+  return request<AiExtractionRun>(`/tender-ai-extraction-runs/${runId}`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchAiExtractionBatches(
+  runId: string,
+  status?: AiExtractionBatchStatus,
+  options?: { signal?: AbortSignal },
+): Promise<AiExtractionBatch[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request<AiExtractionBatch[]>(
+    `/tender-ai-extraction-runs/${runId}/batches${suffix}`,
+    { signal: options?.signal },
+  );
+}
+
+export function retryFailedAiExtractionBatches(runId: string): Promise<AiExtractionRun> {
+  return request<AiExtractionRun>(`/tender-ai-extraction-runs/${runId}/retry-failed`, {
+    method: "POST",
+  });
+}
+
+export function startTenderAiExtractionRun(
+  tenderDocumentId: string,
+  body: { mode?: string; model_policy?: string; force_replan?: boolean } = {},
+): Promise<TenderAiExtractionAccepted> {
+  return request<TenderAiExtractionAccepted>(
+    `/tender-documents/${tenderDocumentId}/ai-extraction-runs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 // ── Drafts ──
 
 export interface Draft {
