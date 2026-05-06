@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     evidence_upload_max_bytes: int = 50 * 1024 * 1024
     tender_document_storage_root: Path = Path(__file__).resolve().parents[2] / "data" / "tender_documents"
     tender_document_upload_max_bytes: int = 200 * 1024 * 1024
+    tender_zip_max_depth: int = 5
+    tender_zip_max_files: int = 2000
+    tender_zip_max_uncompressed_bytes: int = 1024 * 1024 * 1024
+    tender_zip_max_compression_ratio: float = 100.0
     template_render_root: Path = Path("/tmp/tender_template_renders")
     template_bundle_root: Path = Path("/tmp/tender_template_bundles")
     standard_ocr_worker_count: int = 1

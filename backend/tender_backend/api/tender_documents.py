@@ -433,7 +433,14 @@ def _summary_out(row: dict) -> TenderSummaryOut:
 
 
 def _service(settings: Settings) -> TenderDocumentIngestionService:
-    return TenderDocumentIngestionService(storage_root=settings.tender_document_storage_root, repository=_repo)
+    return TenderDocumentIngestionService(
+        storage_root=settings.tender_document_storage_root,
+        repository=_repo,
+        zip_max_depth=settings.tender_zip_max_depth,
+        zip_max_files=settings.tender_zip_max_files,
+        zip_max_uncompressed_bytes=settings.tender_zip_max_uncompressed_bytes,
+        zip_max_compression_ratio=settings.tender_zip_max_compression_ratio,
+    )
 
 
 def _parse_status_out(document: dict, files: list[dict], chunk_count: int) -> TenderDocumentParseStatusOut:

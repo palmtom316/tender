@@ -398,7 +398,7 @@ cd backend && ../.venv/bin/pytest tests/unit/test_ai_requirements_extractor.py t
 
 If any listed backend test file does not exist or has a different name, run the closest existing tests covering that caller.
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 ```bash
 git add ai_gateway/tender_ai_gateway backend/tender_backend ai_gateway/tests backend/tests
@@ -415,7 +415,7 @@ git commit -m "fix: authenticate and constrain ai gateway"
 - Test: `backend/tests/unit/test_tender_document_ingestion.py`
 - Test: `backend/tests/integration/test_tender_document_upload.py`
 
-- [ ] **Step 1: Add failing unit tests for ZIP limits**
+- [x] **Step 1: Add failing unit tests for ZIP limits**
 
 Add tests for:
 
@@ -426,7 +426,7 @@ Add tests for:
 
 Use small test values by constructing `TenderDocumentIngestionService` with explicit limits or by monkeypatching module constants.
 
-- [ ] **Step 2: Add configurable limits**
+- [x] **Step 2: Add configurable limits**
 
 Add settings:
 
@@ -439,7 +439,7 @@ tender_zip_max_compression_ratio: float = 100.0
 
 Wire these into `TenderDocumentIngestionService`.
 
-- [ ] **Step 3: Enforce limits during ZIP traversal and copy**
+- [x] **Step 3: Enforce limits during ZIP traversal and copy**
 
 Update `_extract_zip`:
 
@@ -449,11 +449,11 @@ Update `_extract_zip`:
 - Reject entries where `member.file_size / max(member.compress_size, 1)` exceeds configured ratio.
 - Preserve existing path safety behavior.
 
-- [ ] **Step 4: Ensure failed ingest cleans up partial extracted files**
+- [x] **Step 4: Ensure failed ingest cleans up partial extracted files**
 
 Keep the existing `created_document_root` cleanup behavior. Add/extend tests to assert partial roots are removed after a limit error for newly created document roots.
 
-- [ ] **Step 5: Run ingestion tests**
+- [x] **Step 5: Run ingestion tests**
 
 Run:
 
