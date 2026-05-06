@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg import Connection
 from psycopg.rows import dict_row
 
+from tender_backend.core.project_access import require_resource_project_access
+from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.parse_job_repository import ACTIVE_STATUSES, ParseJobRepository
 
@@ -14,9 +16,36 @@ router = APIRouter(tags=["parse"])
 
 _jobs = ParseJobRepository()
 
+_DOCUMENT_PROJECT_QUERY = """
+SELECT pf.project_id
+FROM document d
+JOIN project_file pf ON pf.id = d.project_file_id
+WHERE d.id = %s
+"""
+
+_PARSE_JOB_PROJECT_QUERY = """
+SELECT pf.project_id
+FROM parse_job pj
+JOIN document d ON d.id = pj.document_id
+JOIN project_file pf ON pf.id = d.project_file_id
+WHERE pj.id = %s
+"""
+
 
 @router.post("/documents/{document_id}/parse-jobs")
-async def create_parse_job(document_id: UUID, payload: dict, conn: Connection = Depends(get_db_conn)) -> dict:
+async def create_parse_job(
+    document_id: UUID,
+    payload: dict,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="document not found",
+        user=user,
+    )
     force_reparse = bool(payload.get("force_reparse", False))
     if not force_reparse:
         active = _jobs.find_active_for_document(conn, document_id=document_id)
@@ -28,7 +57,18 @@ async def create_parse_job(document_id: UUID, payload: dict, conn: Connection = 
 
 
 @router.get("/parse-jobs/{parse_job_id}")
-async def get_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
+async def get_parse_job(
+    parse_job_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=parse_job_id,
+        query=_PARSE_JOB_PROJECT_QUERY,
+        not_found_detail="parse job not found",
+        user=user,
+    )
     job = _jobs.get(conn, parse_job_id=parse_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="parse job not found")
@@ -43,7 +83,18 @@ async def get_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_co
 
 
 @router.get("/documents/{document_id}/parse-result")
-async def get_parse_result_summary(document_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
+async def get_parse_result_summary(
+    document_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=document_id,
+        query=_DOCUMENT_PROJECT_QUERY,
+        not_found_detail="document not found",
+        user=user,
+    )
     latest = _jobs.latest_for_document(conn, document_id=document_id)
     with conn.cursor(row_factory=dict_row) as cur:
         section_count = cur.execute(
@@ -65,7 +116,18 @@ async def get_parse_result_summary(document_id: UUID, conn: Connection = Depends
 
 
 @router.post("/parse-jobs/{parse_job_id}/retry")
-async def retry_parse_job(parse_job_id: UUID, conn: Connection = Depends(get_db_conn)) -> dict:
+async def retry_parse_job(
+    parse_job_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=parse_job_id,
+        query=_PARSE_JOB_PROJECT_QUERY,
+        not_found_detail="parse job not found",
+        user=user,
+    )
     job = _jobs.get(conn, parse_job_id=parse_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="parse job not found")

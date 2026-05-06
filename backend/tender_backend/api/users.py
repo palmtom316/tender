@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
+from tender_backend.core.security import Role, get_current_user, require_role
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.user_repository import UserRepository
 
-router = APIRouter(tags=["users"])
+router = APIRouter(tags=["users"], dependencies=[Depends(get_current_user)])
 
 _repo = UserRepository()
 
@@ -51,13 +52,20 @@ def _to_out(user) -> UserOut:
 
 
 @router.get("/users", response_model=list[UserOut])
-async def list_users(conn: Connection = Depends(get_db_conn)) -> list[UserOut]:
+async def list_users(
+    conn: Connection = Depends(get_db_conn),
+    _admin=Depends(require_role(Role.ADMIN)),
+) -> list[UserOut]:
     users = _repo.list_all(conn)
     return [_to_out(u) for u in users]
 
 
 @router.post("/users", response_model=UserOut, status_code=201)
-async def create_user(payload: UserCreate, conn: Connection = Depends(get_db_conn)) -> UserOut:
+async def create_user(
+    payload: UserCreate,
+    conn: Connection = Depends(get_db_conn),
+    _admin=Depends(require_role(Role.ADMIN)),
+) -> UserOut:
     valid_roles = {"editor", "reviewer", "admin"}
     if payload.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {valid_roles}")
@@ -82,6 +90,7 @@ async def update_user(
     user_id: str,
     payload: UserUpdate,
     conn: Connection = Depends(get_db_conn),
+    _admin=Depends(require_role(Role.ADMIN)),
 ) -> UserOut:
     uid = UUID(user_id)
     existing = _repo.get_by_id(conn, uid)
@@ -95,7 +104,11 @@ async def update_user(
 
 
 @router.delete("/users/{user_id}")
-async def delete_user(user_id: str, conn: Connection = Depends(get_db_conn)) -> dict[str, str]:
+async def delete_user(
+    user_id: str,
+    conn: Connection = Depends(get_db_conn),
+    _admin=Depends(require_role(Role.ADMIN)),
+) -> dict[str, str]:
     uid = UUID(user_id)
     deleted = _repo.delete(conn, uid)
     if not deleted:
