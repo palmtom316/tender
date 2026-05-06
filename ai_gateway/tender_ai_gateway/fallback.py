@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import ipaddress
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 from openai import OpenAI
 
@@ -73,6 +75,44 @@ def _override_extra_body(override: Any | None) -> dict[str, Any] | None:
     return dict(extra)
 
 
+def _allowed_override_hosts(raw: str) -> set[str]:
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _is_public_host(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host.lower() != "localhost"
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_unspecified
+        or ip.is_reserved
+    )
+
+
+def _validate_provider_override(override: Any | None, *, settings: Any, label: str) -> None:
+    if override is None:
+        return
+    if not getattr(settings, "allow_provider_overrides", True):
+        raise ValueError("provider overrides are disabled")
+    base_url = str(getattr(override, "base_url", "") or "")
+    if not base_url:
+        return
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError(f"{label} base_url is not allowed")
+    host = parsed.hostname.lower()
+    if not _is_public_host(host):
+        raise ValueError(f"{label} base_url host is not allowed")
+    allowed_hosts = _allowed_override_hosts(getattr(settings, "provider_override_allowed_hosts", ""))
+    if allowed_hosts and host not in allowed_hosts:
+        raise ValueError(f"{label} base_url host is not in allowlist")
+
+
 def _thinking_enabled(extra_body: dict[str, Any] | None) -> bool:
     if not isinstance(extra_body, dict):
         return False
@@ -103,6 +143,8 @@ def _get_providers(
     """
     settings = get_settings()
     profile = TASK_PROFILES.get(task_type, {})
+    _validate_provider_override(primary_override, settings=settings, label="primary_override")
+    _validate_provider_override(fallback_override, settings=settings, label="fallback_override")
     primary_model = profile.get("primary_model", settings.default_primary_model)
     fallback_model = profile.get("fallback_model", settings.default_fallback_model)
 

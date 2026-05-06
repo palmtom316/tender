@@ -30,6 +30,7 @@ from tender_backend.services.deepseek_api import (
     DEEPSEEK_V4_MAX_REASONING_EFFORT,
     apply_deepseek_v4_thinking_options,
 )
+from tender_backend.services.ai_gateway_client import ai_gateway_headers
 from tender_backend.services.norm_service.block_segments import BlockSegment, build_single_standard_blocks
 from tender_backend.services.norm_service.document_assets import build_document_asset
 from tender_backend.services.norm_service.outline_rebuilder import collect_outline_clause_nos_from_pages
@@ -2560,7 +2561,7 @@ def _call_ai_gateway(
 
     url = _ai_gateway_chat_url(AI_GATEWAY_URL)
     timeout = _ai_gateway_timeout_seconds(config.primary_model)
-    resp = httpx.post(url, json=payload, timeout=timeout)
+    resp = httpx.post(url, json=payload, headers=ai_gateway_headers(), timeout=timeout)
     resp.raise_for_status()
 
     data = resp.json()

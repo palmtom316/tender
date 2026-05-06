@@ -299,7 +299,7 @@ cd backend && ../.venv/bin/alembic -c tender_backend/db/alembic.ini upgrade head
 
 Expected: tests pass; migration applies cleanly.
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 ```bash
 git add backend/tender_backend/core/security.py backend/tender_backend/core/project_access.py backend/tender_backend/db/repositories/project_repository.py backend/tender_backend/api/projects.py backend/tender_backend/db/alembic/versions/0036_project_membership.py backend/tests/unit/test_project_access.py backend/tests/integration/test_authz_routes.py
@@ -319,7 +319,7 @@ git commit -m "feat: add project membership access control"
 - Test: `ai_gateway/tests/smoke/test_gateway.py`
 - Test: relevant backend unit tests for gateway payload helpers if present
 
-- [ ] **Step 1: Add failing AI gateway auth tests**
+- [x] **Step 1: Add failing AI gateway auth tests**
 
 Add tests:
 
@@ -329,7 +329,7 @@ Add tests:
 
 Run: `cd ai_gateway && ../.venv/bin/pytest tests/smoke/test_gateway.py -q`
 
-- [ ] **Step 2: Add AI Gateway shared secret settings**
+- [x] **Step 2: Add AI Gateway shared secret settings**
 
 Add to `ai_gateway/tender_ai_gateway/core/config.py`:
 
@@ -344,7 +344,7 @@ Production behavior:
 - If `app_env` is not development/test and `ai_gateway_shared_secret` is empty, reject chat requests with 503 configuration error.
 - If secret is configured, require `Authorization: Bearer <secret>`.
 
-- [ ] **Step 3: Enforce shared secret in chat route**
+- [x] **Step 3: Enforce shared secret in chat route**
 
 Update `ai_gateway/tender_ai_gateway/api/chat.py`:
 
@@ -357,7 +357,7 @@ def _require_gateway_auth(authorization: str | None, settings: Settings) -> None
 
 Apply this at the start of `chat`.
 
-- [ ] **Step 4: Restrict provider overrides**
+- [x] **Step 4: Restrict provider overrides**
 
 Update `ai_gateway/tender_ai_gateway/fallback.py`:
 
@@ -369,7 +369,7 @@ Update `ai_gateway/tender_ai_gateway/fallback.py`:
 
 Return a client-safe `ValueError` message that `chat.py` maps to 400, not 502.
 
-- [ ] **Step 5: Add backend AI gateway shared secret setting**
+- [x] **Step 5: Add backend AI gateway shared secret setting**
 
 Add to `backend/tender_backend/core/config.py`:
 
@@ -387,7 +387,7 @@ def _ai_gateway_headers() -> dict[str, str]:
 
 Use it in all backend `httpx.post(... /api/ai/chat ...)` calls.
 
-- [ ] **Step 6: Run AI gateway and affected backend tests**
+- [x] **Step 6: Run AI gateway and affected backend tests**
 
 Run:
 

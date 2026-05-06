@@ -13,6 +13,7 @@ from psycopg import Connection
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
+from tender_backend.services.ai_gateway_client import ai_gateway_headers
 from tender_backend.services.deepseek_api import (
     DEEPSEEK_V4_MAX_REASONING_EFFORT,
     apply_deepseek_v4_thinking_options,
@@ -126,6 +127,7 @@ def _call_repair_model(conn: Connection, task: RepairTask, document_id: str) -> 
     response = httpx.post(
         _ai_gateway_chat_url(AI_GATEWAY_URL),
         json=payload,
+        headers=ai_gateway_headers(),
         timeout=settings.vl_repair_ai_gateway_timeout_seconds,
     )
     response.raise_for_status()

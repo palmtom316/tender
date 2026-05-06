@@ -1,8 +1,9 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from tender_ai_gateway.core.config import Settings
 from tender_ai_gateway.core.config import get_settings
 from tender_ai_gateway.fallback import call_with_fallback
 from tender_ai_gateway.token_tracker import tracker
@@ -48,9 +49,25 @@ class ChatResponse(BaseModel):
     reasoning_tokens: int = 0
 
 
+def _require_gateway_auth(authorization: str | None, settings: Settings) -> None:
+    secret = settings.ai_gateway_shared_secret
+    env = settings.app_env.lower()
+    if not secret:
+        if env not in {"development", "dev", "test", "testing"}:
+            raise HTTPException(status_code=503, detail="AI gateway shared secret is not configured")
+        return
+    expected = f"Bearer {secret}"
+    if authorization != expected:
+        raise HTTPException(status_code=401, detail="Invalid AI gateway authorization")
+
+
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    authorization: str | None = Header(default=None),
+) -> ChatResponse:
     settings = get_settings()
+    _require_gateway_auth(authorization, settings)
     has_override_keys = (
         (request.primary_override and request.primary_override.api_key)
         or (request.fallback_override and request.fallback_override.api_key)
@@ -78,6 +95,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
             response_format=request.response_format,
             stream=request.stream,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"All providers failed: {exc}")
 

@@ -29,6 +29,7 @@ from tender_backend.services.deepseek_api import (
     deepseek_v4_thinking_options,
     is_deepseek_v4_model,
 )
+from tender_backend.services.ai_gateway_client import ai_gateway_headers
 from tender_backend.services.extract_service.requirements_extractor import (
     HARD_CONSTRAINT_CATEGORIES,
     HUMAN_CONFIRM_CATEGORIES,
@@ -566,6 +567,7 @@ async def _call_ai_gateway(
     resp = await client.post(
         _ai_gateway_chat_url(),
         json=payload,
+        headers=ai_gateway_headers(),
         timeout=_REQUEST_TIMEOUT_SECONDS,
     )
     resp.raise_for_status()

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+from tender_backend.core.config import get_settings
 from tender_backend.services.extract_service import ai_requirements_extractor as mod
 
 
@@ -551,7 +552,7 @@ def test_passes_json_response_format_to_ai_gateway(monkeypatch, fake_conn) -> No
 
     captured_payloads: list[dict] = []
 
-    async def _fake_post(self, url, json, timeout):
+    async def _fake_post(self, url, json, headers=None, timeout=None):
         captured_payloads.append(json)
 
         class _Resp:
@@ -577,6 +578,35 @@ def test_passes_json_response_format_to_ai_gateway(monkeypatch, fake_conn) -> No
     asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
 
     assert captured_payloads[0]["response_format"] == {"type": "json_object"}
+
+
+def test_passes_shared_secret_header_to_ai_gateway(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    monkeypatch.setenv("AI_GATEWAY_SHARED_SECRET", "gateway-secret")
+    get_settings.cache_clear()
+    chunk = _chunk(text="测试")
+    captured_headers: list[dict | None] = []
+
+    async def _fake_post(self, url, json, headers=None, timeout=None):
+        captured_headers.append(headers)
+
+        class _Resp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return _ai_response([])
+
+        return _Resp()
+
+    monkeypatch.setattr(mod.httpx.AsyncClient, "post", _fake_post)
+
+    try:
+        asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
+    finally:
+        get_settings.cache_clear()
+
+    assert captured_headers[0] == {"Authorization": "Bearer gateway-secret"}
 
 
 def test_passes_stream_flag_to_ai_gateway(monkeypatch, fake_conn) -> None:

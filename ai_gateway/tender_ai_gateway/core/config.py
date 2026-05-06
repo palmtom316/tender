@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     default_timeout: int = 60
     default_retry_count: int = 2
+    ai_gateway_shared_secret: str = ""
+    provider_override_allowed_hosts: str = ""
+    allow_provider_overrides: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

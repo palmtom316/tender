@@ -23,7 +23,7 @@ class _FakeResponse:
 def test_run_repair_tasks_uses_local_repair_task_type(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_post(url, json, timeout):
+    def fake_post(url, json, headers=None, timeout=None):
         captured["payload"] = json
         return _FakeResponse()
 

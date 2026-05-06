@@ -12,6 +12,7 @@ import structlog
 from psycopg import Connection
 
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
+from tender_backend.services.ai_gateway_client import ai_gateway_headers
 from tender_backend.services.deepseek_api import DEEPSEEK_V4_MAX_REASONING_EFFORT, DEEPSEEK_V4_PRO_MODEL
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -199,6 +200,7 @@ async def extract_tender_summary_with_ai(
             response = await client.post(
                 f"{AI_GATEWAY_URL.rstrip('/')}/api/ai/chat",
                 json=payload,
+                headers=ai_gateway_headers(),
                 timeout=600.0,
             )
             response.raise_for_status()

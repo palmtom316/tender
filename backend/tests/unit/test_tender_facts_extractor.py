@@ -47,7 +47,7 @@ def test_ai_json_output_merges_with_rule_fallback(monkeypatch) -> None:
     chunks = [_chunk("项目名称：居民供电设施改造项目 招标人：REDACTED")]
     captured: list[dict] = []
 
-    async def _fake_post(self, url, json, timeout):
+    async def _fake_post(self, url, json, headers=None, timeout=None):
         captured.append(json)
 
         class _Resp:
