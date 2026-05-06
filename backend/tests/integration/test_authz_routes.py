@@ -64,11 +64,20 @@ class _FakeUsers:
 
 
 class _FakeProjects:
+    created_for_user_id: UUID | None = None
+
     def create(self, _conn, *, name: str):
+        return _ProjectRow(id=uuid4(), name=name)
+
+    def create_for_user(self, _conn, *, name: str, user_id: UUID | None):
+        self.created_for_user_id = user_id
         return _ProjectRow(id=uuid4(), name=name)
 
     def list(self, _conn):
         return []
+
+    def list_for_user(self, _conn, *, user):
+        return self.list(_conn)
 
     def delete(self, _conn, *, project_id: UUID):
         return True
@@ -86,6 +95,21 @@ class _FakeParseJobs:
 
     def latest_for_document(self, _conn, *, document_id: UUID):
         return _ParseJobRow(id=uuid4(), document_id=document_id)
+
+
+class _FakeSessions:
+    def __init__(self, user_id: UUID) -> None:
+        self.user_id = user_id
+
+    def get_user_by_token(self, _conn, token: str):
+        if token != "session-token":
+            return None
+        return _UserRow(
+            id=self.user_id,
+            username="session-user",
+            display_name="Session User",
+            role="editor",
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -152,6 +176,18 @@ def test_project_routes_require_authentication_and_write_roles() -> None:
     admin = _client("admin-token")
     assert admin.post("/api/projects", json={"name": "demo"}).status_code == 200
     assert admin.delete(f"/api/projects/{uuid4()}").status_code == 200
+
+
+def test_project_create_receives_session_user_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    user_id = uuid4()
+    repo = _FakeProjects()
+    monkeypatch.setattr(security, "_sessions", _FakeSessions(user_id))
+    monkeypatch.setattr(projects_api, "_repo", repo)
+
+    response = _client("session-token").post("/api/projects", json={"name": "demo"})
+
+    assert response.status_code == 200
+    assert repo.created_for_user_id == user_id
 
 
 def test_legacy_parse_routes_require_authentication() -> None:

@@ -187,7 +187,7 @@ cd backend && ../.venv/bin/pytest tests/unit/test_security.py tests/unit/test_pr
 
 Expected: all pass.
 
-- [ ] **Step 8: Commit Task 1**
+- [x] **Step 8: Commit Task 1**
 
 ```bash
 git add backend/tender_backend/api/users.py backend/tender_backend/api/projects.py backend/tender_backend/api/parse.py backend/tests/unit/test_security.py backend/tests/integration/test_authz_routes.py
@@ -207,7 +207,7 @@ git commit -m "fix: protect management and parse routes"
 - Test: `backend/tests/unit/test_project_access.py`
 - Test: `backend/tests/integration/test_authz_routes.py`
 
-- [ ] **Step 1: Add failing unit tests for membership-backed access**
+- [x] **Step 1: Add failing unit tests for membership-backed access**
 
 Extend `backend/tests/unit/test_project_access.py` with fake connection rows covering:
 
@@ -217,7 +217,7 @@ Extend `backend/tests/unit/test_project_access.py` with fake connection rows cov
 
 Expected policy for this implementation: return 403 when project exists but user lacks membership.
 
-- [ ] **Step 2: Extend `CurrentUser` with optional `user_id`**
+- [x] **Step 2: Extend `CurrentUser` with optional `user_id`**
 
 Update `backend/tender_backend/core/security.py`:
 
@@ -232,7 +232,7 @@ class CurrentUser:
 
 When resolving DB sessions, set `user_id=session_user.id`. Static `dev-token` remains `None` and is admin-only in development/test.
 
-- [ ] **Step 3: Create project membership migration**
+- [x] **Step 3: Create project membership migration**
 
 Create `backend/tender_backend/db/alembic/versions/0036_project_membership.py`:
 
@@ -250,7 +250,7 @@ CREATE INDEX IF NOT EXISTS idx_project_member_user ON project_member (user_id, p
 
 Do not backfill all users to all projects. Existing development usage remains covered by admin `dev-token`; real session users only see projects they own or are assigned to.
 
-- [ ] **Step 4: Update project repository for membership-aware create/list/delete**
+- [x] **Step 4: Update project repository for membership-aware create/list/delete**
 
 Add methods:
 
@@ -269,7 +269,7 @@ Policy:
 - Project creation by a DB user inserts `project_member(project_id, user_id, role='owner')` in the same transaction.
 - Static development admin creates projects without membership.
 
-- [ ] **Step 5: Update `require_project_access` for membership**
+- [x] **Step 5: Update `require_project_access` for membership**
 
 Update `backend/tender_backend/core/project_access.py`:
 
@@ -279,11 +279,11 @@ Update `backend/tender_backend/core/project_access.py`:
 - Non-admin with a `project_member` row passes.
 - Non-admin without membership fails 403.
 
-- [ ] **Step 6: Update projects API to use membership-aware methods**
+- [x] **Step 6: Update projects API to use membership-aware methods**
 
 Update `list_projects` to pass `user`. Update `create_project` to call `create_for_user`.
 
-- [ ] **Step 7: Run migration and project access tests**
+- [x] **Step 7: Run migration and project access tests**
 
 Run:
 

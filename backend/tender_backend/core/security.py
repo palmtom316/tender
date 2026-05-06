@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 from psycopg import Connection
@@ -31,6 +32,7 @@ class CurrentUser:
     token: str
     role: Role
     display_name: str
+    user_id: UUID | None = None
 
 
 # Phase 1: fixed tokens from env. Format: "token:role:name,token:role:name,..."
@@ -93,7 +95,12 @@ def get_current_user(
             role = Role(session_user.role)
         except ValueError as exc:
             raise HTTPException(status_code=401, detail="Invalid user role") from exc
-        return CurrentUser(token=token, role=role, display_name=session_user.display_name)
+        return CurrentUser(
+            token=token,
+            role=role,
+            display_name=session_user.display_name,
+            user_id=session_user.id,
+        )
 
     raise HTTPException(status_code=401, detail="Invalid token")
 

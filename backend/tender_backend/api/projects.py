@@ -30,18 +30,18 @@ class ProjectOut(BaseModel):
 async def create_project(
     payload: ProjectCreate,
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
+    user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
 ) -> ProjectOut:
-    project = _repo.create(conn, name=payload.name.strip())
+    project = _repo.create_for_user(conn, name=payload.name.strip(), user_id=user.user_id)
     return ProjectOut(id=project.id, name=project.name)
 
 
 @router.get("/projects", response_model=list[ProjectOut])
 async def list_projects(
     conn: Connection = Depends(get_db_conn),
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[ProjectOut]:
-    projects = _repo.list(conn)
+    projects = _repo.list_for_user(conn, user=user)
     return [ProjectOut(id=p.id, name=p.name) for p in projects]
 
 

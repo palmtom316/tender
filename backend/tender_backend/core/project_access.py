@@ -12,15 +12,23 @@ from tender_backend.core.security import CurrentUser, Role
 def require_project_access(conn: Connection, *, project_id: UUID, user: CurrentUser) -> None:
     """Central project access gate.
 
-    The current schema has no project membership table, so every authenticated
-    role may access existing projects. Keeping the check centralized gives the
-    future member/owner policy one place to land.
+    Admins may access every existing project. Other roles require an explicit
+    project_member row tied to the authenticated DB user.
     """
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute("SELECT id FROM project WHERE id = %s", (project_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="project not found")
-    if user.role not in {Role.ADMIN, Role.EDITOR, Role.REVIEWER}:
+    if user.role == Role.ADMIN:
+        return
+    if user.role not in {Role.EDITOR, Role.REVIEWER} or user.user_id is None:
+        raise HTTPException(status_code=403, detail="project access denied")
+    with conn.cursor(row_factory=dict_row) as cur:
+        membership = cur.execute(
+            "SELECT project_id FROM project_member WHERE project_id = %s AND user_id = %s",
+            (project_id, user.user_id),
+        ).fetchone()
+    if membership is None:
         raise HTTPException(status_code=403, detail="project access denied")
 
 
