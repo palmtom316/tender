@@ -575,7 +575,7 @@ npm run verify:compose
 
 Expected: compose config resolves successfully.
 
-- [ ] **Step 4: Commit Task 6**
+- [x] **Step 4: Commit Task 6**
 
 ```bash
 git add backend/Dockerfile ai_gateway/Dockerfile infra/docker-compose.yml infra/.env.example package.json
@@ -589,7 +589,7 @@ git commit -m "chore: separate dev and production runtime defaults"
 **Files:**
 - Modify: `docs/reviews/2026-05-06-remediation-verification.md`
 
-- [ ] **Step 1: Run focused backend tests**
+- [x] **Step 1: Run focused backend tests**
 
 Run:
 
@@ -599,7 +599,7 @@ npm run test:backend
 
 Expected: pass, or record failing tests with root cause if environment dependencies are missing.
 
-- [ ] **Step 2: Run AI gateway tests**
+- [x] **Step 2: Run AI gateway tests**
 
 Run:
 
@@ -609,7 +609,7 @@ npm run test:ai-gateway
 
 Expected: pass.
 
-- [ ] **Step 3: Run frontend tests and build**
+- [x] **Step 3: Run frontend tests and build**
 
 Run:
 
@@ -620,7 +620,7 @@ cd .. && npm run build:frontend
 
 Expected: pass.
 
-- [ ] **Step 4: Run compose verification**
+- [x] **Step 4: Run compose verification**
 
 Run:
 
@@ -630,7 +630,7 @@ npm run verify:compose
 
 Expected: pass.
 
-- [ ] **Step 5: Write verification report**
+- [x] **Step 5: Write verification report**
 
 Create `docs/reviews/2026-05-06-remediation-verification.md` with:
 
