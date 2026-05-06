@@ -543,18 +543,34 @@ def run_tender_ai_extraction_batch(self, *, batch_id: str) -> dict:
                 )
             return {"batch_id": batch_id, "run_status": run.get("status") if run else None}
 
-        summary = _run_async(
-            extract_requirements_for_batch(
-                chunks,
-                source_file=batch["source_file"],
-                primary_override=primary_override,
-                fallback_override=fallback_override,
-                response_format=batch.get("response_format") or "json_object",
-                stream=True,
-                quality_policy=_batch_quality_policy(batch),
-                on_batch_persisted=_persist,
+        if primary_override is None and fallback_override is None:
+            with pool.connection() as extract_conn:
+                summary = _run_async(
+                    extract_requirements_for_batch(
+                        chunks,
+                        conn=extract_conn,
+                        source_file=batch["source_file"],
+                        primary_override=primary_override,
+                        fallback_override=fallback_override,
+                        response_format=batch.get("response_format") or "json_object",
+                        stream=True,
+                        quality_policy=_batch_quality_policy(batch),
+                        on_batch_persisted=_persist,
+                    )
+                )
+        else:
+            summary = _run_async(
+                extract_requirements_for_batch(
+                    chunks,
+                    source_file=batch["source_file"],
+                    primary_override=primary_override,
+                    fallback_override=fallback_override,
+                    response_format=batch.get("response_format") or "json_object",
+                    stream=True,
+                    quality_policy=_batch_quality_policy(batch),
+                    on_batch_persisted=_persist,
+                )
             )
-        )
         with pool.connection() as conn:
             usage = summary.batches[0] if summary.batches else None
             if usage is not None and usage.failed:

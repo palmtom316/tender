@@ -1,6 +1,6 @@
 from tender_backend.workers.celery_app import app
 from tender_backend.workers import tasks_extract
-from tender_backend.services.extract_service.ai_requirements_extractor import BatchUsage
+from tender_backend.services.extract_service.ai_requirements_extractor import AiExtractionRunSummary, BatchUsage
 from tender_backend.services.extract_service.retry_policy import (
     backoff_countdown_seconds,
     degraded_reasoning_effort,
@@ -399,3 +399,120 @@ def test_handle_batch_failure_creates_retry_batches_for_transport_errors(monkeyp
         {"kwargs": {"batch_id": "retry-1"}, "countdown": 15},
         {"kwargs": {"batch_id": "retry-2"}, "countdown": 15},
     ]
+
+
+def test_run_batch_passes_conn_when_no_overrides_resolved(monkeypatch) -> None:
+    batch_uuid = "11111111-1111-1111-1111-111111111111"
+    run_uuid = "22222222-2222-2222-2222-222222222222"
+    document_uuid = "33333333-3333-3333-3333-333333333333"
+    chunk_uuid = "44444444-4444-4444-4444-444444444444"
+
+    class _Conn:
+        def commit(self) -> None:
+            return None
+
+    class _Pool:
+        def __init__(self) -> None:
+            self.conn = _Conn()
+
+        class _Manager:
+            def __init__(self, conn) -> None:
+                self._conn = conn
+
+            def __enter__(self):
+                return self._conn
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+        def connection(self):
+            return self._Manager(self.conn)
+
+    class _AiRepo:
+        def mark_batch_running(self, conn, *, batch_id):
+            return {
+                "id": batch_uuid,
+                "run_id": run_uuid,
+                "tender_document_id": document_uuid,
+                "chunk_ids_json": [chunk_uuid],
+                "source_file": "招标文件.docx",
+                "response_format": "json_object",
+                "metadata_json": {},
+                "batch_index": 1,
+                "model": "deepseek-v4-flash",
+                "reasoning_effort": None,
+                "created_at": None,
+                "started_at": None,
+            }
+
+        def get_run(self, conn, *, run_id):
+            return {"id": run_uuid, "project_id": "proj-1", "status": "running"}
+
+        def mark_batch_succeeded(self, conn, **kwargs):
+            return None
+
+        def refresh_run_progress(self, conn, *, run_id):
+            return {"status": "running"}
+
+        def mark_batch_failed(self, conn, **kwargs):
+            raise AssertionError("worker should not enter failure path")
+
+        def create_retry_batches(self, conn, *, source_batch, retry_batches):
+            raise AssertionError("worker should not create retry batches")
+
+        def mark_batch_superseded(self, conn, **kwargs):
+            raise AssertionError("worker should not supersede batch")
+
+    captured: dict[str, object] = {}
+
+    async def _fake_extract_requirements_for_batch(chunks, **kwargs):
+        captured["conn"] = kwargs.get("conn")
+        captured["primary_override"] = kwargs.get("primary_override")
+        captured["fallback_override"] = kwargs.get("fallback_override")
+        return AiExtractionRunSummary(
+            requirements=[],
+            batches=[
+                BatchUsage(
+                    source_file="招标文件.docx",
+                    chunks_in_batch=len(chunks),
+                    extracted=0,
+                    dropped_invalid=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    used_fallback=False,
+                    resolved_model="stub",
+                    latency_ms=1,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(tasks_extract, "get_settings", lambda: type("S", (), {"database_url": "postgresql://test"})())
+    monkeypatch.setattr(tasks_extract, "get_pool", lambda database_url: _Pool())
+    monkeypatch.setattr(tasks_extract, "_ai_repo", _AiRepo())
+    monkeypatch.setattr(
+        tasks_extract,
+        "_doc_repo",
+        type(
+            "DocRepo",
+            (),
+            {
+                "list_source_chunks": staticmethod(
+                    lambda conn, tender_document_id: [
+                        {"id": chunk_uuid, "sort_order": 1, "source_file": "招标文件.docx", "text": "测试条款"}
+                    ]
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(tasks_extract, "_requirement_repo", type("ReqRepo", (), {"create_many": staticmethod(lambda *a, **k: [])})())
+    monkeypatch.setattr(tasks_extract, "_provider_limit_countdown", lambda conn, batch: 0)
+    monkeypatch.setattr(tasks_extract, "_resolve_batch_overrides", lambda conn, *, batch: (None, None))
+    monkeypatch.setattr(tasks_extract, "_run_async", lambda coro: __import__("asyncio").run(coro))
+    monkeypatch.setattr(tasks_extract, "extract_requirements_for_batch", _fake_extract_requirements_for_batch)
+
+    result = tasks_extract.run_tender_ai_extraction_batch.run(batch_id=batch_uuid)
+
+    assert result == {"batch_id": batch_uuid, "run_status": "running"}
+    assert captured["conn"] is not None
+    assert captured["primary_override"] is None
+    assert captured["fallback_override"] is None

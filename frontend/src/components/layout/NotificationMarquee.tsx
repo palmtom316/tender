@@ -13,7 +13,7 @@ export function NotificationMarquee() {
   useEffect(() => {
     setItems([
       { id: "1", text: "系统已就绪，欢迎使用 Tender AI 智能投标平台" },
-      { id: "2", text: "提示：上传招标文件后，AI 将自动解析关键条款" },
+      { id: "2", text: "提示：上传 ZIP 文件包或 PDF 后，系统会先解析文档结构；AI 抽取需手动启动" },
     ]);
   }, []);
 
