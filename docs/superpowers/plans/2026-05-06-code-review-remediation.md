@@ -639,7 +639,7 @@ Create `docs/reviews/2026-05-06-remediation-verification.md` with:
 - Any skipped tests and why.
 - Residual risks, especially remaining transaction-boundary refactors not completed in this pass.
 
-- [ ] **Step 6: Commit verification report**
+- [x] **Step 6: Commit verification report**
 
 ```bash
 git add docs/reviews/2026-05-06-remediation-verification.md
