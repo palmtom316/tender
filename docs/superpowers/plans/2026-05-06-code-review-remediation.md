@@ -463,7 +463,7 @@ cd backend && ../.venv/bin/pytest tests/unit/test_tender_document_ingestion.py t
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add backend/tender_backend/core/config.py backend/tender_backend/services/tender_document_ingestion.py backend/tests/unit/test_tender_document_ingestion.py backend/tests/integration/test_tender_document_upload.py
@@ -479,7 +479,7 @@ git commit -m "fix: limit tender zip extraction resources"
 - Modify or create: `frontend/src/lib/api.test.ts`
 - Modify: auth-related components if 401 routing requires UI integration
 
-- [ ] **Step 1: Add failing frontend API tests**
+- [x] **Step 1: Add failing frontend API tests**
 
 Add tests for:
 
@@ -490,7 +490,7 @@ Add tests for:
 
 Run: `cd frontend && npm run test -- api`
 
-- [ ] **Step 2: Update dev auth behavior**
+- [x] **Step 2: Update dev auth behavior**
 
 Change `getToken()`:
 
@@ -504,7 +504,7 @@ if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEV_AUTH === "true") {
 
 Production must never auto-create a token.
 
-- [ ] **Step 3: Harden request error handling**
+- [x] **Step 3: Harden request error handling**
 
 Update `request<T>`:
 
@@ -513,7 +513,7 @@ Update `request<T>`:
 - On `401`, remove `tender_token` and throw an error with a stable message such as `登录已失效，请重新登录`.
 - Handle `204 No Content` by returning `undefined as T`.
 
-- [ ] **Step 4: Run frontend tests and build**
+- [x] **Step 4: Run frontend tests and build**
 
 Run:
 

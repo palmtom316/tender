@@ -9,11 +9,24 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 function getToken(): string | null {
   const stored = localStorage.getItem("tender_token");
   if (stored) return stored;
-  if (import.meta.env.DEV) {
-    localStorage.setItem("tender_token", "dev-token");
-    return "dev-token";
+  if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEV_AUTH === "true") {
+    const devToken = import.meta.env.VITE_DEV_AUTH_TOKEN ?? "dev-token";
+    localStorage.setItem("tender_token", devToken);
+    return devToken;
   }
   return null;
+}
+
+async function readErrorMessage(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (!text) return `HTTP ${res.status}`;
+  try {
+    const body = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    const detail = body.detail ?? body.message;
+    return typeof detail === "string" ? detail : text;
+  } catch {
+    return text;
+  }
 }
 
 function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
@@ -57,8 +70,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     const res = await fetch(url, { ...init, headers, signal: init?.signal ?? controller?.signal });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail ?? `HTTP ${res.status}`);
+      if (res.status === 401) {
+        localStorage.removeItem("tender_token");
+        throw new Error("登录已失效，请重新登录");
+      }
+      throw new Error(await readErrorMessage(res));
+    }
+    if (res.status === 204) {
+      return undefined as T;
     }
     return res.json();
   } catch (error) {
