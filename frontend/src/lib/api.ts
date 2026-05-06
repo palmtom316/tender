@@ -7,7 +7,13 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 
 function getToken(): string | null {
-  return localStorage.getItem("tender_token");
+  const stored = localStorage.getItem("tender_token");
+  if (stored) return stored;
+  if (import.meta.env.DEV) {
+    localStorage.setItem("tender_token", "dev-token");
+    return "dev-token";
+  }
+  return null;
 }
 
 function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
@@ -96,6 +102,12 @@ export function createProject(data: {
   });
 }
 
+export function deleteProject(projectId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/projects/${projectId}`, {
+    method: "DELETE",
+  });
+}
+
 // ── Files ──
 
 export interface ProjectFile {
@@ -153,6 +165,64 @@ export interface ParseTable {
   raw_json: unknown;
 }
 
+export interface TenderDocumentFile {
+  id: string;
+  tender_document_id: string;
+  parent_file_id: string | null;
+  filename: string;
+  relative_path: string;
+  storage_key: string;
+  content_type: string;
+  size_bytes: number;
+  file_type: string;
+  classification: string;
+  depth: number;
+  is_archive: boolean;
+  is_parsable: boolean;
+  parse_status: string;
+  error: string | null;
+}
+
+export interface TenderDocument {
+  id: string;
+  project_id: string;
+  original_filename: string;
+  upload_type: string;
+  status: string;
+  content_type: string;
+  size_bytes: number;
+  storage_key: string;
+  file_sha256: string;
+  error: string | null;
+  file_count: number | null;
+}
+
+export interface TenderDocumentDetail extends TenderDocument {
+  files: TenderDocumentFile[];
+}
+
+export interface TenderDocumentParseStatus {
+  tender_document_id: string;
+  document_status: string;
+  total_file_count: number;
+  pending_file_count: number;
+  parsing_file_count: number;
+  completed_file_count: number;
+  failed_file_count: number;
+  skipped_file_count: number;
+  chunk_count: number;
+  files: TenderDocumentFile[];
+}
+
+export interface TenderDocumentParseResult {
+  tender_document_id: string;
+  parsed_file_count: number;
+  failed_file_count: number;
+  skipped_file_count: number;
+  chunk_count: number;
+  files: TenderDocumentFile[];
+}
+
 export function fetchParseSummary(
   documentId: string,
   options?: { signal?: AbortSignal },
@@ -176,6 +246,53 @@ export function fetchTables(
   options?: { signal?: AbortSignal },
 ): Promise<ParseTable[]> {
   return request<ParseTable[]>(`/documents/${documentId}/tables`, {
+    signal: options?.signal,
+  });
+}
+
+export function listTenderDocuments(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TenderDocument[]> {
+  return request<TenderDocument[]>(`/projects/${projectId}/tender-documents`, {
+    signal: options?.signal,
+  });
+}
+
+export function uploadTenderDocument(
+  projectId: string,
+  file: File,
+): Promise<TenderDocumentDetail> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<TenderDocumentDetail>(`/projects/${projectId}/tender-documents`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function parseTenderDocument(
+  tenderDocumentId: string,
+): Promise<TenderDocumentParseResult> {
+  return request<TenderDocumentParseResult>(`/tender-documents/${tenderDocumentId}/parse`, {
+    method: "POST",
+  });
+}
+
+export function fetchTenderDocumentParseStatus(
+  tenderDocumentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TenderDocumentParseStatus> {
+  return request<TenderDocumentParseStatus>(`/tender-documents/${tenderDocumentId}/parse-status`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchTenderSourceChunks(
+  tenderDocumentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<SourceChunk[]> {
+  return request<SourceChunk[]>(`/tender-documents/${tenderDocumentId}/source-chunks`, {
     signal: options?.signal,
   });
 }
@@ -326,14 +443,6 @@ export type AiExtractionBatch = {
   skip_reason: string | null;
 };
 
-export type TenderAiExtractionAccepted = {
-  run_id: string;
-  status: string;
-  total_batches: number;
-  skipped_batches: number;
-  message: string;
-};
-
 export function fetchAiExtractionRun(
   runId: string,
   options?: { signal?: AbortSignal },
@@ -364,8 +473,8 @@ export function retryFailedAiExtractionBatches(runId: string): Promise<AiExtract
 export function startTenderAiExtractionRun(
   tenderDocumentId: string,
   body: { mode?: string; model_policy?: string; force_replan?: boolean } = {},
-): Promise<TenderAiExtractionAccepted> {
-  return request<TenderAiExtractionAccepted>(
+): Promise<AiExtractionRun> {
+  return request<AiExtractionRun>(
     `/tender-documents/${tenderDocumentId}/ai-extraction-runs`,
     {
       method: "POST",

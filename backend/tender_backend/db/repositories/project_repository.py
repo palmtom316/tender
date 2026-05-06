@@ -30,3 +30,11 @@ class ProjectRepository:
             rows = cur.execute("SELECT id, name FROM project ORDER BY created_at DESC").fetchall()
         return [Project(id=r["id"], name=r["name"]) for r in rows]
 
+    def delete(self, conn: Connection, *, project_id: UUID) -> bool:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                "DELETE FROM project WHERE id = %s RETURNING id",
+                (project_id,),
+            ).fetchone()
+        conn.commit()
+        return row is not None

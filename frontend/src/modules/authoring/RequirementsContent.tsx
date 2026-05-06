@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchRequirements,
@@ -23,12 +23,25 @@ const CATEGORY_LABELS: Record<string, string> = {
   format: "格式要求",
 };
 
+function getLatestRunStorageKey(documentId: string) {
+  return `tender:ai-extraction-run:${documentId}`;
+}
+
+function readStoredLatestRunId(documentId: string | null) {
+  if (!documentId || typeof window === "undefined") return null;
+  return window.localStorage.getItem(getLatestRunStorageKey(documentId));
+}
+
 export function RequirementsContent() {
   const { projectId, documentId } = useNavigation();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>("");
   const [sourceChunkId, setSourceChunkId] = useState<string | null>(null);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLatestRunId(readStoredLatestRunId(documentId));
+  }, [documentId]);
 
   const { data: requirements = [], isLoading } = useQuery({
     queryKey: ["requirements", projectId, filter],
@@ -62,7 +75,10 @@ export function RequirementsContent() {
       return startTenderAiExtractionRun(documentId);
     },
     onSuccess: (result) => {
-      setLatestRunId(result.run_id);
+      setLatestRunId(result.id);
+      if (documentId && typeof window !== "undefined") {
+        window.localStorage.setItem(getLatestRunStorageKey(documentId), result.id);
+      }
     },
   });
 
@@ -115,16 +131,26 @@ export function RequirementsContent() {
 
       <div className="requirement-toolbar">
         <div>
-          <span className="tender-summary-card__eyebrow">AI Extraction</span>
+          <span className="tender-summary-card__eyebrow">AI 抽取</span>
           <p className="requirement-toolbar__hint">
-            对当前招标文件启动异步 AI 抽取，并查看批次级进度与失败详情。
+            对当前招标文档手动提交 AI 抽取任务，并查看批次级进度与失败详情。
           </p>
+          {latestRunId && !startAiExtraction.isPending && (
+            <p className="requirement-toolbar__status">
+              当前文档已有抽取任务在跟踪中，可直接查看下方进度面板。
+            </p>
+          )}
+          {startAiExtraction.isError && (
+            <p className="text-error">
+              提交失败：{startAiExtraction.error instanceof Error ? startAiExtraction.error.message : "请稍后重试"}
+            </p>
+          )}
         </div>
         <ClayButton
           onClick={() => startAiExtraction.mutate()}
           disabled={!documentId || startAiExtraction.isPending}
         >
-          {startAiExtraction.isPending ? "抽取提交中..." : "开始 AI 抽取"}
+          {startAiExtraction.isPending ? "任务提交中..." : "提交 AI 抽取任务"}
         </ClayButton>
       </div>
 

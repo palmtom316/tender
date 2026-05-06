@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listProjects, createProject, type Project } from "../../lib/api";
+import { listProjects, createProject, deleteProject, type Project } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 
 export function ProjectsModule() {
-  const { tab, setProjectId, navigate } = useNavigation();
+  const { tab, projectId, setProjectId, setDocumentId, navigate } = useNavigation();
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
+  const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null);
 
   const { data: projects = [], isLoading, error } = useQuery({
     queryKey: ["projects"],
@@ -26,6 +28,19 @@ export function ProjectsModule() {
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: deleteProject,
+    onSuccess: (_result, deletedProjectId) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      if (projectId === deletedProjectId) {
+        setProjectId(null);
+        setDocumentId(null);
+        navigate("projects", "all", null);
+      }
+      setProjectPendingDelete(null);
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim()) {
@@ -36,6 +51,11 @@ export function ProjectsModule() {
   const handleProjectClick = (project: Project) => {
     setProjectId(project.id);
     navigate("authoring", "upload", project.id);
+  };
+
+  const handleProjectDelete = (event: React.MouseEvent, project: Project) => {
+    event.stopPropagation();
+    setProjectPendingDelete(project);
   };
 
   // Filter by tab
@@ -87,11 +107,24 @@ export function ProjectsModule() {
             key={p.id}
             clickable
             onClick={() => handleProjectClick(p)}
+            className="project-card"
             style={{ cursor: "pointer" }}
           >
-            <h2 style={{ fontSize: "var(--text-lg)", marginBottom: "var(--space-3)" }}>
-              {p.name}
-            </h2>
+            <div className="project-card__header">
+              <h2 style={{ fontSize: "var(--text-lg)", marginBottom: 0 }}>
+                {p.name}
+              </h2>
+              <ClayButton
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="project-card__delete"
+                onClick={(event) => handleProjectDelete(event, p)}
+                aria-label={`删除项目 ${p.name}`}
+              >
+                删除
+              </ClayButton>
+            </div>
             <div className="flex items-center justify-between">
               <Badge variant={p.status === "completed" ? "success" : "primary"}>
                 {p.status ?? "draft"}
@@ -106,6 +139,24 @@ export function ProjectsModule() {
           <p className="empty-state">暂无项目，请点击"新建项目"开始</p>
         )}
       </div>
+
+      <ConfirmDialog
+        open={projectPendingDelete !== null}
+        title="删除项目"
+        description={
+          projectPendingDelete
+            ? `将删除项目“${projectPendingDelete.name}”及其关联招标文件、解析结果和抽取数据，此操作不可撤销。`
+            : ""
+        }
+        confirmLabel="确认删除"
+        busy={deleteMutation.isPending}
+        onCancel={() => {
+          if (!deleteMutation.isPending) setProjectPendingDelete(null);
+        }}
+        onConfirm={() => {
+          if (projectPendingDelete) deleteMutation.mutate(projectPendingDelete.id);
+        }}
+      />
     </div>
   );
 }

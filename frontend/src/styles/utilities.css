@@ -259,6 +259,22 @@
   font-weight: 600;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.is-selected-row {
+  background: var(--color-primary-tint);
+}
+
 .parse-summary__value {
   color: var(--color-primary);
   font-size: var(--text-2xl);
@@ -358,33 +374,86 @@
   margin-bottom: var(--space-4);
 }
 
-/* Section tree (parse results) */
-.section-tree {
+.project-card {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.project-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.project-card__delete {
+  color: var(--color-text-muted);
+}
+
+.project-card__delete:hover {
+  color: var(--color-danger);
+}
+
+.readable-structure {
+  display: grid;
+  gap: var(--space-4);
   margin-bottom: var(--space-6);
 }
 
-.section-node {
+.readable-section {
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-light);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 242, 0.95), rgba(255, 255, 255, 0.98)),
+    var(--color-surface);
+}
+
+.readable-section__header {
   display: flex;
-  gap: var(--space-2);
-  padding: var(--space-1) 0;
-  padding-left: var(--section-depth-indent, 0);
-  font-size: var(--text-base);
-  border-bottom: 1px solid var(--color-border-light);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 
-.section-code {
-  color: var(--color-primary);
-  font-weight: 600;
-  min-width: 60px;
-}
-
-.section-title {
-  flex: 1;
-}
-
-.section-page {
-  color: var(--color-text-muted);
+.readable-section__eyebrow {
+  color: #b06f2f;
   font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.readable-section__meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.readable-section__title {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text);
+  font-size: clamp(1.1rem, 1.8vw, 1.45rem);
+  line-height: 1.35;
+}
+
+.readable-section__body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.readable-section__paragraph {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-base);
+  line-height: 1.85;
+  white-space: pre-wrap;
+}
+
+.readable-section__placeholder {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
 /* Editor layout */
@@ -2079,6 +2148,13 @@
   margin: var(--space-1) 0 0;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+}
+
+.requirement-toolbar__status {
+  margin: var(--space-2) 0 0;
+  color: var(--color-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .ai-extraction-panel__header,
