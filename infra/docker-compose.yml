@@ -100,6 +100,7 @@ services:
     container_name: tender-backend
     profiles: ["app"]
     working_dir: /workspace/backend
+    command: ["uvicorn", "tender_backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:
       APP_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
@@ -109,6 +110,7 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       OPENSEARCH_URL: http://opensearch:9200
       AI_GATEWAY_URL: http://ai-gateway:8100
+      AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     volumes:
@@ -132,8 +134,10 @@ services:
     container_name: tender-ai-gateway
     profiles: ["app"]
     working_dir: /workspace/ai_gateway
+    command: ["uvicorn", "tender_ai_gateway.main:app", "--host", "0.0.0.0", "--port", "8100", "--reload"]
     environment:
       APP_ENV: development
+      AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     volumes:
@@ -151,6 +155,7 @@ services:
       APP_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
       CELERY_BROKER_URL: redis://redis:6379/0
+      AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     volumes:
       - ../backend:/workspace/backend
@@ -174,6 +179,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
       CELERY_BROKER_URL: redis://redis:6379/0
       AI_GATEWAY_URL: http://ai-gateway:8100
+      AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     volumes:
@@ -202,6 +208,8 @@ services:
       ]
     environment:
       API_PROXY_TARGET: http://backend:8000
+      VITE_ENABLE_DEV_AUTH: ${VITE_ENABLE_DEV_AUTH:-false}
+      VITE_DEV_AUTH_TOKEN: ${VITE_DEV_AUTH_TOKEN:-dev-token}
     volumes:
       - ../frontend:/workspace/frontend
       - frontend_node_modules:/workspace/frontend/node_modules

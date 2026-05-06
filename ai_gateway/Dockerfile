@@ -14,4 +14,4 @@ RUN pip install --upgrade pip && pip install -e ".[dev]"
 
 EXPOSE 8100
 
-CMD ["uvicorn", "tender_ai_gateway.main:app", "--host", "0.0.0.0", "--port", "8100", "--reload"]
+CMD ["uvicorn", "tender_ai_gateway.main:app", "--host", "0.0.0.0", "--port", "8100"]

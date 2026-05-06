@@ -524,7 +524,7 @@ npm run build:frontend
 
 Expected: tests and build pass.
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```bash
 git add frontend/src/lib/api.ts frontend/src/lib/api.test.ts frontend/src
@@ -542,7 +542,7 @@ git commit -m "fix: make frontend auth explicit"
 - Modify: `infra/.env.example`
 - Test: root `package.json` scripts if compose verification changes
 
-- [ ] **Step 1: Update Dockerfiles to production-safe defaults**
+- [x] **Step 1: Update Dockerfiles to production-safe defaults**
 
 Change default commands to no reload:
 
@@ -556,7 +556,7 @@ CMD ["uvicorn", "tender_ai_gateway.main:app", "--host", "0.0.0.0", "--port", "81
 
 Keep development reload in `infra/docker-compose.yml` service `command`.
 
-- [ ] **Step 2: Add required environment examples**
+- [x] **Step 2: Add required environment examples**
 
 Update `infra/.env.example`:
 
@@ -565,7 +565,7 @@ Update `infra/.env.example`:
 - Add `VITE_ENABLE_DEV_AUTH=false` guidance if frontend env examples exist.
 - Warn that default seeded passwords must be changed outside local development.
 
-- [ ] **Step 3: Validate compose config**
+- [x] **Step 3: Validate compose config**
 
 Run:
 
