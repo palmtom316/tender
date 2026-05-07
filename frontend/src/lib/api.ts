@@ -99,6 +99,30 @@ export interface Project {
   tender_deadline?: string;
   priority?: string;
   created_at: string;
+  tender_no?: string | null;
+  project_type?: string | null;
+  industry?: string | null;
+  business_line?: string | null;
+  sub_type?: string | null;
+  employer_name?: string | null;
+  employer_type?: string | null;
+  evaluation_method?: string | null;
+  qualification_review_type?: string | null;
+  submission_deadline?: string | null;
+  bid_opening_time?: string | null;
+  bid_validity_period?: number | null;
+  bid_bond_amount?: string | null;
+  bid_bond_form?: string | null;
+  bid_bond_deadline?: string | null;
+  voltage_level?: string[];
+  project_scope?: string[];
+  tender_platform?: string | null;
+  submission_target?: string | null;
+  procurement_type?: string | null;
+  section_name?: string | null;
+  lot_name?: string | null;
+  selected_template_package_id?: string | null;
+  workflow_status?: string | null;
 }
 
 export function listProjects(options?: {
@@ -113,6 +137,26 @@ export function createProject(data: {
   project_type?: string;
   tender_deadline?: string;
   priority?: string;
+  industry?: string;
+  business_line?: string;
+  sub_type?: string;
+  employer_name?: string;
+  employer_type?: string;
+  evaluation_method?: string;
+  qualification_review_type?: string;
+  submission_deadline?: string;
+  bid_opening_time?: string;
+  bid_validity_period?: number;
+  bid_bond_amount?: string;
+  bid_bond_form?: string;
+  bid_bond_deadline?: string;
+  voltage_level?: string[];
+  project_scope?: string[];
+  tender_platform?: string;
+  submission_target?: string;
+  procurement_type?: string;
+  section_name?: string;
+  lot_name?: string;
 }): Promise<Project> {
   return request<Project>("/projects", {
     method: "POST",
@@ -125,6 +169,32 @@ export function deleteProject(projectId: string): Promise<{ deleted: boolean }> 
   return request<{ deleted: boolean }>(`/projects/${projectId}`, {
     method: "DELETE",
   });
+}
+
+export interface WorkflowEvent {
+  id: string;
+  project_id: string;
+  previous_status: string | null;
+  next_status: string;
+  actor: string | null;
+  reason: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+}
+
+export function transitionProjectWorkflow(
+  projectId: string,
+  data: { next_status: string; reason?: string; metadata?: Record<string, unknown> },
+): Promise<Project> {
+  return request<Project>(`/projects/${projectId}/workflow-transition`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function listProjectWorkflowEvents(projectId: string, options?: { signal?: AbortSignal }): Promise<WorkflowEvent[]> {
+  return request<WorkflowEvent[]>(`/projects/${projectId}/workflow-events`, { signal: options?.signal });
 }
 
 // ── Files ──
@@ -332,6 +402,58 @@ export interface Requirement {
   confirmed_by: string | null;
 }
 
+export interface RequirementPackageSource {
+  requirement_id: string;
+  title: string | null;
+  source_file: string | null;
+  source_locator: string | null;
+  source_chunk_id: string | null;
+  text: string;
+  human_confirmed: boolean;
+}
+
+export interface RequirementPackage {
+  id: string;
+  category: string;
+  topic: string | null;
+  lane: string;
+  confirmation_level: "critical" | "review" | "auto_accept" | "ignored";
+  title: string;
+  system_conclusion: string;
+  source_count: number;
+  confirmed_count: number;
+  all_confirmed: boolean;
+  blocking: boolean;
+  has_conflict: boolean;
+  conflict_fields: string[];
+  key_fields: Record<string, string[]>;
+  confidence: number | null;
+  requirements: string[];
+  sources: RequirementPackageSource[];
+}
+
+export interface RequirementWorkbenchLane {
+  id: string;
+  label: string;
+  packages: RequirementPackage[];
+}
+
+export interface RequirementWorkbench {
+  project_id: string;
+  stats: {
+    total_requirements: number;
+    package_count: number;
+    critical_count: number;
+    blocking_count: number;
+    conflict_count: number;
+    auto_accept_count: number;
+    review_count: number;
+    ignored_count: number;
+  };
+  lanes: RequirementWorkbenchLane[];
+  packages: RequirementPackage[];
+}
+
 export interface SourceChunk {
   id: string;
   tender_document_id: string;
@@ -384,11 +506,28 @@ export function fetchRequirements(
   );
 }
 
+export function fetchRequirementWorkbench(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<RequirementWorkbench> {
+  return request<RequirementWorkbench>(`/projects/${projectId}/requirements/workbench`, {
+    signal: options?.signal,
+  });
+}
+
 export function confirmRequirement(id: string): Promise<Requirement> {
   return request<Requirement>(`/requirements/${id}/confirm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function bulkConfirmRequirements(projectId: string, requirementIds: string[]): Promise<{ confirmed_count: number }> {
+  return request<{ confirmed_count: number }>(`/projects/${projectId}/requirements/bulk-confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requirement_ids: requirementIds }),
   });
 }
 
@@ -398,6 +537,22 @@ export function fetchSourceChunk(id: string, options?: { signal?: AbortSignal })
 
 export function fetchTenderSummary(projectId: string, options?: { signal?: AbortSignal }): Promise<TenderSummary> {
   return request<TenderSummary>(`/projects/${projectId}/tender-summary`, { signal: options?.signal });
+}
+
+export function buildConstraintSet(projectId: string): Promise<{ id: string; items: unknown[] }> {
+  return request<{ id: string; items: unknown[] }>(`/projects/${projectId}/constraint-set`, { method: "POST" });
+}
+
+export function fetchConstraintSet(projectId: string, options?: { signal?: AbortSignal }): Promise<{ items: unknown[] }> {
+  return request<{ items: unknown[] }>(`/projects/${projectId}/constraint-set`, { signal: options?.signal });
+}
+
+export function runComplianceCheck(projectId: string): Promise<{ id: string; findings: unknown[] }> {
+  return request<{ id: string; findings: unknown[] }>(`/projects/${projectId}/compliance-check`, { method: "POST" });
+}
+
+export function fetchSubmissionChecklist(projectId: string, options?: { signal?: AbortSignal }): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/projects/${projectId}/submission-checklist`, { signal: options?.signal });
 }
 
 export type AiExtractionRunStatus =
@@ -546,6 +701,54 @@ export interface BidOutline {
   chapters: BidChapter[];
 }
 
+export interface OutlineDiff {
+  chapter_id: string;
+  chapter_code: string;
+  chapter_title: string;
+  volume_type: string;
+  operation: "add" | "remove" | "rename" | "move" | "keep" | "mark_manual_required" | "mark_external_attached";
+  requirement_count: number;
+  reason: string;
+}
+
+export interface BidOutlineReconciliation {
+  project_id: string;
+  outline: BidOutline;
+  diffs: OutlineDiff[];
+  unresolved_critical_count: number;
+  can_confirm: boolean;
+  blocking_requirements: Array<Record<string, unknown>>;
+}
+
+export interface BusinessBidAssembly {
+  project_id: string;
+  run: Record<string, unknown>;
+  chapters: BidChapter[];
+  response_matrix: Array<Record<string, unknown>>;
+  missing_materials: Array<Record<string, unknown>>;
+  boundary: string;
+}
+
+export interface TechnicalWritingPlan {
+  project_id: string;
+  outline_id: string;
+  chapter_count: number;
+  chapters: Array<BidChapter & { writing_strategy: string; required_context: string[] }>;
+}
+
+export interface ChartAsset {
+  id: string;
+  project_id: string;
+  outline_node_id: string | null;
+  chart_type: string;
+  title: string;
+  spec_json: Record<string, unknown>;
+  rendered_svg?: string | null;
+  status: string;
+  metadata_json?: Record<string, unknown>;
+  created_at: string;
+}
+
 export function generateBidOutline(projectId: string): Promise<BidOutline> {
   return request<BidOutline>(`/projects/${projectId}/bid-outline`, {
     method: "POST",
@@ -561,11 +764,64 @@ export function fetchBidOutline(
   });
 }
 
+export function previewBidOutlineReconciliation(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<BidOutlineReconciliation> {
+  return request<BidOutlineReconciliation>(`/projects/${projectId}/bid-outline/reconciliation`, {
+    signal: options?.signal,
+  });
+}
+
+export function confirmBidOutline(projectId: string): Promise<BidOutline> {
+  return request<BidOutline>(`/projects/${projectId}/bid-outline/confirm`, {
+    method: "POST",
+  });
+}
+
 export function generateBidChapter(projectId: string, chapterId: string): Promise<Draft> {
   return request<Draft>(`/projects/${projectId}/bid-chapters/${chapterId}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
+  });
+}
+
+export function assembleBusinessBid(projectId: string): Promise<BusinessBidAssembly> {
+  return request<BusinessBidAssembly>(`/projects/${projectId}/business-bid/assemble`, {
+    method: "POST",
+  });
+}
+
+export function fetchTechnicalWritingPlan(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<TechnicalWritingPlan> {
+  return request<TechnicalWritingPlan>(`/projects/${projectId}/technical-bid/writing-plan`, {
+    signal: options?.signal,
+  });
+}
+
+export function generateTechnicalChapter(projectId: string, chapterId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/projects/${projectId}/technical-bid/chapters/${chapterId}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
+export function listChartAssets(projectId: string, options?: { signal?: AbortSignal }): Promise<ChartAsset[]> {
+  return request<ChartAsset[]>(`/projects/${projectId}/chart-assets`, { signal: options?.signal });
+}
+
+export function createChartAsset(
+  projectId: string,
+  data: { chart_type: string; title: string; spec_json: Record<string, unknown>; outline_node_id?: string | null },
+): Promise<ChartAsset> {
+  return request<ChartAsset>(`/projects/${projectId}/chart-assets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
   });
 }
 
@@ -922,6 +1178,35 @@ export function fetchTemplatePackageDetail(
 ): Promise<TemplatePackageDetail> {
   return request<TemplatePackageDetail>(`/template-packages/${packageId}`, {
     signal: options?.signal,
+  });
+}
+
+export interface TemplateSelectionCandidate {
+  package_id: string;
+  package_key: string;
+  display_name: string;
+  package_type: string;
+  category_code: string | null;
+  score: number;
+  reasons: string[];
+  warnings: string[];
+}
+
+export interface TemplateSelectionPreview {
+  project_id: string;
+  recommended: TemplateSelectionCandidate | null;
+  candidates: TemplateSelectionCandidate[];
+}
+
+export function previewTemplateSelection(projectId: string, options?: { signal?: AbortSignal }): Promise<TemplateSelectionPreview> {
+  return request<TemplateSelectionPreview>(`/projects/${projectId}/template-selection`, { signal: options?.signal });
+}
+
+export function confirmTemplateSelection(projectId: string, packageId: string): Promise<{ selected_template_package_id: string }> {
+  return request<{ selected_template_package_id: string }>(`/projects/${projectId}/template-selection`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ package_id: packageId }),
   });
 }
 

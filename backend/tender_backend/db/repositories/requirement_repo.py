@@ -315,6 +315,28 @@ class RequirementRepository:
         conn.commit()
         return dict(row) if row else None
 
+    def confirm_if_in_project(
+        self,
+        conn: Connection,
+        *,
+        project_id: UUID,
+        requirement_id: UUID,
+        confirmed_by: str,
+    ) -> dict | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                UPDATE project_requirement
+                SET human_confirmed = TRUE, confirmed_by = %s, confirmed_at = now(), updated_at = now()
+                WHERE id = %s
+                  AND project_id = %s
+                RETURNING *
+                """,
+                (confirmed_by, requirement_id, project_id),
+            ).fetchone()
+        conn.commit()
+        return dict(row) if row else None
+
     def reject(
         self,
         conn: Connection,

@@ -81,14 +81,22 @@ def persist_review_issues(
     """Write review issues to the database."""
     count = 0
     with conn.cursor() as cur:
-        cur.execute("DELETE FROM review_issue WHERE project_id = %s AND resolved = FALSE", (project_id,))
+        cur.execute(
+            """
+            DELETE FROM review_issue
+            WHERE project_id = %s
+              AND resolved = FALSE
+              AND COALESCE(lifecycle_status, 'open') NOT IN ('waived_by_user', 'closed')
+            """,
+            (project_id,),
+        )
         for issue in issues:
             cur.execute(
                 """
                 INSERT INTO review_issue (
-                  id, project_id, requirement_id, chapter_code, severity, title, detail, metadata_json
+                  id, project_id, requirement_id, chapter_code, severity, title, detail, lifecycle_status, metadata_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'open', %s)
                 """,
                 (
                     uuid4(),
@@ -244,7 +252,10 @@ def get_blocking_issues(conn: Connection, *, project_id: UUID) -> list[dict]:
         rows = cur.execute(
             """
             SELECT * FROM review_issue
-            WHERE project_id = %s AND severity IN ('P0', 'P1') AND resolved = FALSE
+            WHERE project_id = %s
+              AND severity IN ('P0', 'P1')
+              AND resolved = FALSE
+              AND COALESCE(lifecycle_status, 'open') NOT IN ('waived_by_user', 'closed')
             ORDER BY severity, created_at
             """,
             (project_id,),

@@ -14,8 +14,10 @@ from psycopg.types.json import Jsonb
 
 from tender_backend.services.export_service.doc_converter import convert_docx_to_doc
 from tender_backend.services.export_service.docx_exporter import EXPORT_ROOT, render_docx, render_volume_docx
+from tender_backend.services.compliance_check_service import ComplianceCheckService
 from tender_backend.services.review_service.compliance_matrix import build_compliance_matrix
 from tender_backend.services.review_service.review_engine import build_project_review
+from tender_backend.services.submission_checklist_service import SubmissionChecklistService
 
 __all__ = [
     "build_delivery_package",
@@ -94,6 +96,10 @@ def _load_missing_items(conn: Connection, project_id: UUID) -> list[dict]:
 
 
 def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: str | None = None) -> dict[str, Any]:
+    blocking_compliance = ComplianceCheckService().blocking_findings(conn, project_id=project_id)
+    if blocking_compliance:
+        raise ValueError(f"unresolved P0 compliance findings block delivery package: {len(blocking_compliance)}")
+
     version = _next_version(conn, project_id)
     project_name = _project_name(conn, project_id)
     root = EXPORT_ROOT / str(project_id) / f"delivery-v{version}"
@@ -118,11 +124,15 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
     missing_items_path = _write_json(root / "资料缺失清单.json", {"items": _load_missing_items(conn, project_id)})
     traceability_path = _write_json(root / "来源追溯清单.json", {"items": _load_traceability(conn, project_id)})
     confirmation_record_path = _write_json(root / "人工确认记录.json", {"items": _load_confirmation_records(conn, project_id)})
+    submission_checklist_path = _write_json(
+        root / "递交准备清单.json",
+        SubmissionChecklistService().build(conn, project_id=project_id),
+    )
 
     package_name = f"{project_name}-投标交付包-v{version}.zip"
     package_path = root.parent / package_name
     with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in [docx_path, *([doc_path] if doc_path else []), *volume_paths, review_report_path, response_matrix_path, missing_items_path, traceability_path, confirmation_record_path]:
+        for path in [docx_path, *([doc_path] if doc_path else []), *volume_paths, review_report_path, response_matrix_path, missing_items_path, traceability_path, confirmation_record_path, submission_checklist_path]:
             archive.write(path, path.name)
 
     with conn.cursor(row_factory=dict_row) as cur:
@@ -150,7 +160,7 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
                 str(missing_items_path),
                 str(traceability_path),
                 str(confirmation_record_path),
-                Jsonb({"volume_paths": [str(path) for path in volume_paths], "warnings": warnings}),
+                Jsonb({"volume_paths": [str(path) for path in volume_paths], "warnings": warnings, "submission_checklist_path": str(submission_checklist_path)}),
                 created_by,
             ),
         ).fetchone()

@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg import Connection
 from psycopg.rows import dict_row
+from pydantic import BaseModel
 
 from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
@@ -15,6 +16,11 @@ from tender_backend.services.review_service.review_engine import build_project_r
 
 router = APIRouter(tags=["review"])
 _REVIEW_ISSUE_PROJECT_QUERY = "SELECT project_id FROM review_issue WHERE id = %s"
+
+
+class ReviewIssueDecisionBody(BaseModel):
+    lifecycle_status: str
+    user_decision: str | None = None
 
 
 @router.get("/projects/{project_id}/review-issues")
@@ -56,6 +62,49 @@ async def resolve_issue(
         row = cur.execute(
             "UPDATE review_issue SET resolved = TRUE WHERE id = %s RETURNING *",
             (issue_id,),
+        ).fetchone()
+    conn.commit()
+    if row is None:
+        raise HTTPException(status_code=404, detail="issue not found")
+    return row
+
+
+@router.post("/review-issues/{issue_id}/decision")
+async def update_review_issue_decision(
+    issue_id: UUID,
+    payload: ReviewIssueDecisionBody,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_resource_project_access(
+        conn,
+        resource_id=issue_id,
+        query=_REVIEW_ISSUE_PROJECT_QUERY,
+        not_found_detail="issue not found",
+        user=user,
+    )
+    allowed = {"accepted_for_fix", "fixed", "waived_by_user", "verified", "closed"}
+    if payload.lifecycle_status not in allowed:
+        raise HTTPException(status_code=400, detail="unsupported review issue lifecycle status")
+    resolved = payload.lifecycle_status in {"waived_by_user", "verified", "closed"}
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            UPDATE review_issue
+            SET lifecycle_status = %s,
+                user_decision = %s,
+                resolved = %s,
+                closed_at = CASE WHEN %s THEN now() ELSE closed_at END
+            WHERE id = %s
+            RETURNING *
+            """,
+            (
+                payload.lifecycle_status,
+                payload.user_decision or payload.lifecycle_status,
+                resolved,
+                resolved,
+                issue_id,
+            ),
         ).fetchone()
     conn.commit()
     if row is None:

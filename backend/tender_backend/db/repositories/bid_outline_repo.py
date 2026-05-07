@@ -30,15 +30,45 @@ class BidOutlineRepository:
             if outline_row is None:
                 raise RuntimeError("failed to create bid outline")
 
+            volume_titles = {
+                "qualification": "资格审查册",
+                "business": "资格商务分册",
+                "technical": "技术分册",
+                "pricing": "报价分册（外部挂载）",
+                "attachments": "附件分册",
+            }
+            volume_rows: dict[str, dict[str, Any]] = {}
+            for sort_order, volume_type in enumerate(volume_titles, start=1):
+                volume_row = cur.execute(
+                    """
+                    INSERT INTO bid_volume (id, project_id, bid_outline_id, volume_type, title, strategy, sort_order)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (bid_outline_id, volume_type)
+                    DO UPDATE SET title = EXCLUDED.title, sort_order = EXCLUDED.sort_order, updated_at = now()
+                    RETURNING *
+                    """,
+                    (
+                        uuid4(),
+                        project_id,
+                        outline_row["id"],
+                        volume_type,
+                        volume_titles[volume_type],
+                        "external_attached" if volume_type == "pricing" else "generated",
+                        sort_order,
+                    ),
+                ).fetchone()
+                if volume_row:
+                    volume_rows[volume_type] = dict(volume_row)
+
             chapters: list[dict[str, Any]] = []
             for chapter in outline.get("chapters") or []:
                 chapter_row = cur.execute(
                     """
                     INSERT INTO bid_chapter (
                       id, bid_outline_id, project_id, parent_id, chapter_code,
-                      chapter_title, volume_type, sort_order, outline_md, metadata_json
+                      chapter_title, volume_type, volume_id, sort_order, outline_md, metadata_json
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
                     (
@@ -49,6 +79,7 @@ class BidOutlineRepository:
                         chapter["chapter_code"],
                         chapter["chapter_title"],
                         chapter["volume_type"],
+                        volume_rows.get(chapter["volume_type"], {}).get("id"),
                         chapter.get("sort_order", 0),
                         chapter.get("outline_md") or "",
                         Jsonb(chapter.get("metadata_json") or {}),
@@ -86,6 +117,7 @@ class BidOutlineRepository:
                 chapters.append(chapter_dict)
         conn.commit()
         result = dict(outline_row)
+        result["volumes"] = list(volume_rows.values())
         result["chapters"] = chapters
         return result
 
@@ -112,6 +144,15 @@ class BidOutlineRepository:
                 """,
                 (outline["id"],),
             ).fetchall()
+            volumes = cur.execute(
+                """
+                SELECT *
+                FROM bid_volume
+                WHERE bid_outline_id = %s
+                ORDER BY sort_order, volume_type
+                """,
+                (outline["id"],),
+            ).fetchall()
             chapter_rows = [dict(row) for row in chapters]
             chapter_ids = [row["id"] for row in chapter_rows]
             mappings_by_chapter: dict[UUID, list[dict[str, Any]]] = {chapter_id: [] for chapter_id in chapter_ids}
@@ -133,6 +174,7 @@ class BidOutlineRepository:
             chapter["requirement_mappings"] = mappings
             chapter["requirement_ids"] = [row["requirement_id"] for row in mappings]
         result = dict(outline)
+        result["volumes"] = [dict(row) for row in volumes]
         result["chapters"] = chapter_rows
         return result
 

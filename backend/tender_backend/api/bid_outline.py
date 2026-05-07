@@ -14,9 +14,11 @@ from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_outline_repo import BidOutlineRepository
 from tender_backend.services.bid_chapter_generation import generate_bid_chapter_draft
 from tender_backend.services.bid_outline_planner import build_bid_outline
+from tender_backend.services.outline_reconciliation_service import OutlineReconciliationService
 
 router = APIRouter(tags=["bid-outline"])
 _repo = BidOutlineRepository()
+_outline_service = OutlineReconciliationService()
 _CHAPTER_PROJECT_QUERY = "SELECT project_id FROM bid_chapter WHERE id = %s"
 
 
@@ -60,6 +62,29 @@ async def get_latest_bid_outline(
     if row is None:
         raise HTTPException(status_code=404, detail="bid outline not found")
     return row
+
+
+@router.get("/projects/{project_id}/bid-outline/reconciliation")
+async def preview_bid_outline_reconciliation(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _outline_service.preview(conn, project_id=project_id)
+
+
+@router.post("/projects/{project_id}/bid-outline/confirm")
+async def confirm_bid_outline(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    try:
+        return _outline_service.confirm(conn, project_id=project_id, confirmed_by=user.display_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.patch("/bid-outline/chapters/{chapter_id}")

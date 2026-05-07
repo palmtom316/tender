@@ -16,10 +16,15 @@ from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.db.repositories.requirement_match_repo import RequirementMatchRepository
 from tender_backend.services.requirement_matching import build_requirement_matches
+from tender_backend.services.requirement_grouping_service import build_requirement_workbench
+from tender_backend.services.tender_constraint_service import TenderConstraintService
+from tender_backend.db.repositories.clarification_repo import ClarificationRepository
 
 router = APIRouter(tags=["requirements"])
 _repo = RequirementRepository()
 _match_repo = RequirementMatchRepository()
+_constraint_service = TenderConstraintService()
+_clarification_repo = ClarificationRepository()
 _REQUIREMENT_PROJECT_QUERY = "SELECT project_id FROM project_requirement WHERE id = %s"
 
 
@@ -58,6 +63,20 @@ class RequirementSplitBody(BaseModel):
     parts: list[RequirementUpdateBody]
 
 
+class BulkConfirmBody(BaseModel):
+    requirement_ids: list[UUID]
+
+
+class ClarificationCreateBody(BaseModel):
+    round_no: int = 1
+    clarification_type: str = "clarification"
+    title: str
+    source_file: str | None = None
+    content_text: str = ""
+    impact_json: dict | None = None
+    status: str = "active"
+
+
 @router.get("/projects/{project_id}/requirements")
 async def list_requirements(
     project_id: UUID,
@@ -83,6 +102,17 @@ async def list_requirements(
     )
 
 
+@router.get("/projects/{project_id}/requirements/workbench")
+async def get_requirement_workbench(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    rows = _repo.list_by_project(conn, project_id=project_id)
+    return build_requirement_workbench(str(project_id), rows)
+
+
 @router.get("/projects/{project_id}/requirements/download")
 async def download_requirements(
     project_id: UUID,
@@ -106,6 +136,47 @@ async def download_requirements(
         media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="project-{project_id}-requirements{suffix}.json"'},
     )
+
+
+@router.post("/projects/{project_id}/constraint-set")
+async def build_project_constraint_set(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _constraint_service.build_from_requirements(conn, project_id=project_id)
+
+
+@router.get("/projects/{project_id}/constraint-set")
+async def get_latest_project_constraint_set(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _constraint_service.latest(conn, project_id=project_id) or {"project_id": str(project_id), "items": []}
+
+
+@router.post("/projects/{project_id}/clarifications")
+async def create_project_clarification(
+    project_id: UUID,
+    payload: ClarificationCreateBody,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _clarification_repo.create(conn, project_id=project_id, fields=payload.model_dump())
+
+
+@router.get("/projects/{project_id}/clarifications")
+async def list_project_clarifications(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _clarification_repo.list_by_project(conn, project_id=project_id)
 
 
 @router.patch("/requirements/{requirement_id}")
@@ -253,6 +324,27 @@ async def confirm_requirement(
     if row is None:
         raise HTTPException(status_code=404, detail="requirement not found")
     return row
+
+
+@router.post("/projects/{project_id}/requirements/bulk-confirm")
+async def bulk_confirm_requirements(
+    project_id: UUID,
+    payload: BulkConfirmBody,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    rows = []
+    for requirement_id in payload.requirement_ids:
+        row = _repo.confirm_if_in_project(
+            conn,
+            project_id=project_id,
+            requirement_id=requirement_id,
+            confirmed_by=user.display_name,
+        )
+        if row is not None:
+            rows.append(row)
+    return {"project_id": str(project_id), "confirmed_count": len(rows), "requirements": rows}
 
 
 @router.post("/requirements/{requirement_id}/reject")

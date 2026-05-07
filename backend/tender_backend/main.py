@@ -24,6 +24,9 @@ from tender_backend.api.template_packages import router as template_packages_rou
 from tender_backend.api.master_data import router as master_data_router
 from tender_backend.api.template_bindings import router as template_bindings_router
 from tender_backend.api.bid_outline import router as bid_outline_router
+from tender_backend.api.bid_generation import router as bid_generation_router
+from tender_backend.api.charts import router as charts_router
+from tender_backend.api.post_bid import router as post_bid_router
 from tender_backend.core.config import get_settings
 from tender_backend.core.logging import setup_logging
 from tender_backend.core.middleware import RequestContextMiddleware
@@ -69,6 +72,9 @@ def create_app() -> FastAPI:
     app.include_router(master_data_router, prefix=settings.api_prefix)
     app.include_router(template_bindings_router, prefix=settings.api_prefix)
     app.include_router(bid_outline_router, prefix=settings.api_prefix)
+    app.include_router(bid_generation_router, prefix=settings.api_prefix)
+    app.include_router(charts_router, prefix=settings.api_prefix)
+    app.include_router(post_bid_router, prefix=settings.api_prefix)
 
     return app
 

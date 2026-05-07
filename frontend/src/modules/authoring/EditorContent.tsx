@@ -1,6 +1,19 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchBidOutline, fetchDrafts, generateBidChapter, generateBidOutline, updateDraft } from "../../lib/api";
+import {
+  assembleBusinessBid,
+  confirmBidOutline,
+  createChartAsset,
+  fetchBidOutline,
+  fetchDrafts,
+  fetchTechnicalWritingPlan,
+  generateBidChapter,
+  generateBidOutline,
+  generateTechnicalChapter,
+  listChartAssets,
+  previewBidOutlineReconciliation,
+  updateDraft,
+} from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
 
@@ -29,6 +42,35 @@ export function EditorContent() {
     retry: false,
   });
 
+  const { data: reconciliation } = useQuery({
+    queryKey: ["bid-outline-reconciliation", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return previewBidOutlineReconciliation(projectId, { signal });
+    },
+    enabled: !!projectId && !!outline,
+    retry: false,
+  });
+
+  const { data: technicalPlan } = useQuery({
+    queryKey: ["technical-writing-plan", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchTechnicalWritingPlan(projectId, { signal });
+    },
+    enabled: !!projectId && outline?.status === "confirmed",
+    retry: false,
+  });
+
+  const { data: chartAssets = [] } = useQuery({
+    queryKey: ["chart-assets", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return listChartAssets(projectId, { signal });
+    },
+    enabled: !!projectId,
+  });
+
   const save = useMutation({
     mutationFn: ({ id, content }: { id: string; content: string }) =>
       updateDraft(id, content),
@@ -44,6 +86,26 @@ export function EditorContent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bid-outline", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["bid-outline-reconciliation", projectId] });
+    },
+  });
+
+  const confirmOutline = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("No project selected");
+      return confirmBidOutline(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["bid-outline", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["bid-outline-reconciliation", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["technical-writing-plan", projectId] });
+    },
+  });
+
+  const businessAssembly = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("No project selected");
+      return assembleBusinessBid(projectId);
     },
   });
 
@@ -54,6 +116,37 @@ export function EditorContent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
+    },
+  });
+
+  const generateTechnical = useMutation({
+    mutationFn: (chapterId: string) => {
+      if (!projectId) throw new Error("No project selected");
+      return generateTechnicalChapter(projectId, chapterId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
+    },
+  });
+
+  const createOrgChart = useMutation({
+    mutationFn: () => {
+      if (!projectId) throw new Error("No project selected");
+      return createChartAsset(projectId, {
+        chart_type: "org_chart",
+        title: "项目组织机构图",
+        spec_json: {
+          nodes: [
+            { label: "项目经理" },
+            { label: "技术负责人" },
+            { label: "安全负责人" },
+            { label: "质量负责人" },
+          ],
+        },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-assets", projectId] });
     },
   });
 
@@ -81,7 +174,60 @@ export function EditorContent() {
         <ClayButton onClick={() => createOutline.mutate()} disabled={createOutline.isPending}>
           {outline ? "重新规划目录" : "生成投标目录"}
         </ClayButton>
+        <ClayButton
+          variant="secondary"
+          onClick={() => confirmOutline.mutate()}
+          disabled={!outline || outline.status === "confirmed" || !reconciliation?.can_confirm || confirmOutline.isPending}
+        >
+          {outline?.status === "confirmed" ? "大纲已确认" : "确认大纲"}
+        </ClayButton>
+        <ClayButton
+          variant="secondary"
+          onClick={() => businessAssembly.mutate()}
+          disabled={outline?.status !== "confirmed" || businessAssembly.isPending}
+        >
+          {businessAssembly.isPending ? "装配中..." : "资格商务装配"}
+        </ClayButton>
+        <ClayButton
+          variant="secondary"
+          onClick={() => createOrgChart.mutate()}
+          disabled={!projectId || createOrgChart.isPending}
+        >
+          生成组织图草案
+        </ClayButton>
       </div>
+
+      {reconciliation && (
+        <section className="workflow-gate-panel">
+          <div>
+            <strong>大纲确认闸门</strong>
+            <p>
+              {reconciliation.can_confirm
+                ? `可确认，${reconciliation.diffs.length} 项章节差异已汇总。`
+                : `${reconciliation.unresolved_critical_count} 项关键条款未确认，暂不能进入商务/技术生成。`}
+            </p>
+          </div>
+          <div className="workflow-gate-panel__chips">
+            <span>目录状态：{outline?.status ?? "未生成"}</span>
+            <span>图表：{chartAssets.length} 个</span>
+            <span>技术章节：{technicalPlan?.chapter_count ?? 0} 个</span>
+          </div>
+        </section>
+      )}
+
+      {businessAssembly.data && (
+        <section className="workflow-gate-panel">
+          <div>
+            <strong>资格商务装配结果</strong>
+            <p>{businessAssembly.data.boundary}</p>
+          </div>
+          <div className="workflow-gate-panel__chips">
+            <span>章节：{businessAssembly.data.chapters.length}</span>
+            <span>缺失资料：{businessAssembly.data.missing_materials.length}</span>
+            <span>响应矩阵：{businessAssembly.data.response_matrix.length}</span>
+          </div>
+        </section>
+      )}
 
       <div className="editor-layout">
         <aside className="outline-panel">
@@ -92,10 +238,16 @@ export function EditorContent() {
               <span>{chapter.chapter_title}</span>
               <ClayButton
                 size="sm"
-                onClick={() => generateChapter.mutate(chapter.id)}
-                disabled={generateChapter.isPending}
+                onClick={() => {
+                  if (chapter.volume_type === "technical" && outline?.status === "confirmed") {
+                    generateTechnical.mutate(chapter.id);
+                  } else {
+                    generateChapter.mutate(chapter.id);
+                  }
+                }}
+                disabled={generateChapter.isPending || generateTechnical.isPending}
               >
-                生成
+                {chapter.volume_type === "technical" && outline?.status === "confirmed" ? "技术生成" : "生成"}
               </ClayButton>
             </div>
           ))}

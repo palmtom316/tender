@@ -14,7 +14,9 @@ from pathlib import Path
 from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
+from tender_backend.db.repositories.external_attachment_repo import ExternalAttachmentRepository
 from tender_backend.services.delivery_package import build_delivery_package, get_delivery_package, list_delivery_packages
+from tender_backend.services.submission_checklist_service import SubmissionChecklistService
 from tender_backend.services.export_service.docx_exporter import (
     EXPORT_MODES,
     EXPORT_MODE_MULTI_DOC_ZIP,
@@ -24,6 +26,8 @@ from tender_backend.services.export_service.docx_exporter import (
 )
 
 router = APIRouter(tags=["exports"])
+_attachment_repo = ExternalAttachmentRepository()
+_checklist_service = SubmissionChecklistService()
 _DELIVERY_PACKAGE_PROJECT_QUERY = "SELECT project_id FROM bid_delivery_package WHERE id = %s"
 _EXPORT_RECORD_PROJECT_QUERY = "SELECT project_id FROM export_record WHERE id = %s"
 
@@ -48,6 +52,16 @@ class CreateExportBody(BaseModel):
 
 class DeliveryPackageCreateBody(BaseModel):
     run_review: bool = True
+
+
+class ExternalAttachmentCreateBody(BaseModel):
+    filename: str
+    volume_type: str = "pricing"
+    attachment_type: str = "external_pricing"
+    file_path: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+    metadata_json: dict | None = None
 
 
 @router.get("/projects/{project_id}/exports")
@@ -171,6 +185,47 @@ async def check_export_gates(
     }
 
 
+@router.post("/projects/{project_id}/external-attachments")
+async def create_external_attachment(
+    project_id: UUID,
+    payload: ExternalAttachmentCreateBody,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _attachment_repo.create(
+        conn,
+        project_id=project_id,
+        filename=payload.filename,
+        volume_type=payload.volume_type,
+        attachment_type=payload.attachment_type,
+        file_path=payload.file_path,
+        content_type=payload.content_type,
+        size_bytes=payload.size_bytes,
+        metadata_json=payload.metadata_json,
+    )
+
+
+@router.get("/projects/{project_id}/external-attachments")
+async def list_external_attachments(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _attachment_repo.list_by_project(conn, project_id=project_id)
+
+
+@router.get("/projects/{project_id}/submission-checklist")
+async def get_submission_checklist(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    return _checklist_service.build(conn, project_id=project_id)
+
+
 @router.post("/projects/{project_id}/delivery-package")
 def create_delivery_package(
     project_id: UUID,
@@ -179,7 +234,10 @@ def create_delivery_package(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     require_project_access(conn, project_id=project_id, user=user)
-    return build_delivery_package(conn, project_id=project_id, created_by=user.display_name)
+    try:
+        return build_delivery_package(conn, project_id=project_id, created_by=user.display_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/projects/{project_id}/delivery-packages")

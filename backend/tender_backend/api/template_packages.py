@@ -16,11 +16,15 @@ from tender_backend.db.repositories.bid_template_package_repo import BidTemplate
 from tender_backend.services.template_service.package_importer import (
     import_template_package_from_directory,
 )
+from tender_backend.services.template_selection_service import TemplateSelectionService
+from tender_backend.core.project_access import require_project_access
+from tender_backend.core.security import CurrentUser
 
 
 router = APIRouter(tags=["template-packages"], dependencies=[Depends(get_current_user)])
 
 _repo = BidTemplatePackageRepository()
+_selection = TemplateSelectionService(template_repo=_repo)
 _DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PACKAGE_KEY_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -67,6 +71,10 @@ class TemplatePackageOut(BaseModel):
 
 class TemplatePackageDetailOut(TemplatePackageOut):
     items: list[TemplateItemOut]
+
+
+class TemplateSelectionConfirmBody(BaseModel):
+    package_id: UUID
 
 
 def _sanitize_package_key_part(value: str) -> str:
@@ -171,6 +179,33 @@ async def get_template_package(package_id: UUID, conn: Connection = Depends(get_
     if result is None:
         raise HTTPException(status_code=404, detail="template package not found")
     return result
+
+
+@router.get("/projects/{project_id}/template-selection")
+async def preview_project_template_selection(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    try:
+        return _selection.preview(conn, project_id=project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/template-selection")
+async def confirm_project_template_selection(
+    project_id: UUID,
+    payload: TemplateSelectionConfirmBody,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    try:
+        return _selection.confirm(conn, project_id=project_id, package_id=payload.package_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/template-packages/import", response_model=TemplatePackageDetailOut)
