@@ -6,9 +6,7 @@ import { StandardsWorkbench } from "./components/StandardsWorkbench";
 import { TemplateFieldWorkbench } from "./components/TemplateFieldWorkbench";
 
 const TAB_DESCRIPTIONS: Record<string, string> = {
-  history: "管理历史投标文件，支持按项目类型和时间筛选",
-  excellent: "收集和标注优秀投标文件，供编制参考",
-  templates: "配置模板包、模板项字段映射和渲染上下文",
+  templates: "配置投标文件模版、字段映射和渲染上下文",
   company: "公司资质证书、业绩证明等企业资料",
   personnel: "项目团队成员简历、资质证书等",
 };
@@ -28,7 +26,7 @@ export function DatabaseModule() {
   if (tab === "templates") {
     return (
       <div>
-        <h1 className="section-heading">模板包字段面板</h1>
+        <h1 className="section-heading">投标文件模版</h1>
         <TemplateFieldWorkbench />
       </div>
     );

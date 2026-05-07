@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   bulkConfirmRequirements,
@@ -10,12 +10,14 @@ import {
   type RequirementPackage,
   type RequirementWorkbenchLane,
   type TenderClarification,
+  uploadTenderClarification,
 } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
 import { AiExtractionRunPanel } from "./AiExtractionRunPanel";
 import { SourceChunkViewer } from "./SourceChunkViewer";
+import type { CSSProperties } from "react";
 
 const LEVEL_LABELS: Record<RequirementPackage["confirmation_level"], string> = {
   critical: "关键确认",
@@ -84,6 +86,110 @@ function impactSummary(item: TenderClarification) {
   return `新增 ${impact.created_requirement_count ?? 0} 条，覆盖 ${impact.superseded_requirement_count ?? 0} 条，标记 ${impact.stale_chapter_count ?? 0} 个章节 stale`;
 }
 
+type UploadStageMeta = {
+  percent: number;
+  label: string;
+  hint: string;
+  tone: "default" | "active" | "success" | "danger";
+};
+
+type UploadProgressStyle = CSSProperties & {
+  "--standard-progress-percent": string;
+};
+
+function clarificationTextMeta(params: {
+  text: string;
+  isPending: boolean;
+  isSuccess: boolean;
+  isError: boolean;
+}): UploadStageMeta {
+  if (params.isError) {
+    return {
+      percent: 100,
+      label: "文字分析失败",
+      hint: "请检查文本内容后重试，系统会重新匹配前文条款",
+      tone: "danger",
+    };
+  }
+  if (params.isSuccess) {
+    return {
+      percent: 100,
+      label: "文字分析完成",
+      hint: "已完成条款比对并回写覆盖影响",
+      tone: "success",
+    };
+  }
+  if (params.isPending) {
+    return {
+      percent: 72,
+      label: "文字分析中",
+      hint: "系统正在解析文本并匹配前文条款",
+      tone: "active",
+    };
+  }
+  if (params.text.trim()) {
+    return {
+      percent: 18,
+      label: "待提交文字",
+      hint: "文本已录入，提交后会直接进入覆盖分析",
+      tone: "default",
+    };
+  }
+  return {
+    percent: 0,
+    label: "未录入文字",
+    hint: "粘贴答疑、澄清或补遗正文后，系统会自动分类并匹配前文条款",
+    tone: "default",
+  };
+}
+
+function clarificationUploadMeta(params: {
+  hasFile: boolean;
+  isPending: boolean;
+  isSuccess: boolean;
+  isError: boolean;
+  fileName: string | null;
+}): UploadStageMeta {
+  if (params.isError) {
+    return {
+      percent: 100,
+      label: "分析失败",
+      hint: `文件 ${params.fileName ?? ""} 处理失败，请检查格式或解析配置`.trim(),
+      tone: "danger",
+    };
+  }
+  if (params.isSuccess) {
+    return {
+      percent: 100,
+      label: "影响分析完成",
+      hint: `文件 ${params.fileName ?? ""} 已完成解析并回写条款影响`.trim(),
+      tone: "success",
+    };
+  }
+  if (params.isPending) {
+    return {
+      percent: 72,
+      label: "解析与分析中",
+      hint: `文件 ${params.fileName ?? ""} 已上传，服务端正在解析并比对前文条款`.trim(),
+      tone: "active",
+    };
+  }
+  if (params.hasFile) {
+    return {
+      percent: 18,
+      label: "待上传",
+      hint: `已选择文件 ${params.fileName ?? ""}，提交后会直接进入解析与影响分析`.trim(),
+      tone: "default",
+    };
+  }
+  return {
+    percent: 0,
+    label: "未选择文件",
+    hint: "可上传 doc、docx、pdf，系统会自动解析文本并分析覆盖影响",
+    tone: "default",
+  };
+}
+
 export function RequirementsContent() {
   const { projectId, documentId } = useNavigation();
   const queryClient = useQueryClient();
@@ -93,6 +199,8 @@ export function RequirementsContent() {
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
   const [clarificationText, setClarificationText] = useState("");
   const [clarificationTitle, setClarificationTitle] = useState("澄清/补遗文件");
+  const [clarificationFile, setClarificationFile] = useState<File | null>(null);
+  const [expandedRiskCard, setExpandedRiskCard] = useState<"blocking" | "conflict" | null>(null);
 
   useEffect(() => {
     setLatestRunId(readStoredLatestRunId(documentId));
@@ -167,6 +275,25 @@ export function RequirementsContent() {
     },
   });
 
+  const uploadClarification = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error("No project selected");
+      if (!clarificationFile) throw new Error("请先选择澄清/补遗文件");
+      return uploadTenderClarification(projectId, {
+        title: clarificationTitle || clarificationFile.name || "澄清/补遗文件",
+        clarification_type: "addendum",
+        file: clarificationFile,
+      });
+    },
+    onSuccess: () => {
+      setClarificationFile(null);
+      queryClient.invalidateQueries({ queryKey: ["requirement-workbench", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["tender-clarifications", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["bid-outline", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
+    },
+  });
+
   if (!projectId) {
     return (
       <div className="empty-state">
@@ -181,6 +308,42 @@ export function RequirementsContent() {
   const laneTabs = lanes.filter((lane) => lane.packages.length > 0);
   const shownLanes = visibleLanes(lanes, activeLane);
   const selected = selectedPackage ?? workbench?.packages[0] ?? null;
+  const blockingPackages = useMemo(
+    () => workbench?.packages.filter((pkg) => pkg.blocking) ?? [],
+    [workbench],
+  );
+  const conflictPackages = useMemo(
+    () => workbench?.packages.filter((pkg) => pkg.has_conflict) ?? [],
+    [workbench],
+  );
+  const orderedShownLanes = useMemo(
+    () =>
+      shownLanes.map((lane) => ({
+        ...lane,
+        packages: [...lane.packages].sort((left, right) => {
+          const leftRank = left.all_confirmed ? 1 : 0;
+          const rightRank = right.all_confirmed ? 1 : 0;
+          if (leftRank !== rightRank) return leftRank - rightRank;
+          if (left.blocking !== right.blocking) return Number(right.blocking) - Number(left.blocking);
+          if (left.has_conflict !== right.has_conflict) return Number(right.has_conflict) - Number(left.has_conflict);
+          return (right.confidence ?? 0) - (left.confidence ?? 0);
+        }),
+      })),
+    [shownLanes],
+  );
+  const uploadMeta = clarificationUploadMeta({
+    hasFile: Boolean(clarificationFile),
+    isPending: uploadClarification.isPending,
+    isSuccess: uploadClarification.isSuccess,
+    isError: uploadClarification.isError,
+    fileName: clarificationFile?.name ?? uploadClarification.data?.source_file ?? null,
+  });
+  const textMeta = clarificationTextMeta({
+    text: clarificationText,
+    isPending: createClarification.isPending,
+    isSuccess: createClarification.isSuccess,
+    isError: createClarification.isError,
+  });
 
   return (
     <div className="requirement-workbench">
@@ -254,20 +417,86 @@ export function RequirementsContent() {
             onChange={(event) => setClarificationTitle(event.target.value)}
             aria-label="澄清补遗标题"
           />
-          <textarea
-            className="clay-textarea"
-            value={clarificationText}
-            onChange={(event) => setClarificationText(event.target.value)}
-            placeholder="粘贴澄清、答疑或补遗文件中的关键文字。系统会按类别和相似度匹配前文条款。"
-            aria-label="澄清补遗内容"
-          />
-          <ClayButton onClick={() => createClarification.mutate()} disabled={!clarificationText.trim() || createClarification.isPending}>
-            {createClarification.isPending ? "分析中..." : "保存并分析影响"}
-          </ClayButton>
+          <div className="clarification-impact-panel__entry-grid">
+            <div className="clarification-impact-panel__entry">
+              <div className="clarification-impact-panel__entry-header">
+                <strong>粘贴文字</strong>
+                <span>适合快速录入答疑、澄清或补遗正文</span>
+              </div>
+              <textarea
+                className="clay-textarea"
+                value={clarificationText}
+                onChange={(event) => setClarificationText(event.target.value)}
+                placeholder="粘贴澄清、答疑或补遗文件中的关键文字。系统会按类别和相似度匹配前文条款。"
+                aria-label="澄清补遗内容"
+              />
+              <ClayButton
+                size="lg"
+                className="clarification-impact-panel__action"
+                onClick={() => createClarification.mutate()}
+                disabled={!clarificationText.trim() || createClarification.isPending}
+              >
+                {createClarification.isPending ? "分析中..." : "保存文字并分析"}
+              </ClayButton>
+              <div className={`standard-progress standard-progress--${textMeta.tone}`} role="status" aria-live="polite">
+                <div className="standard-progress__top">
+                  <span className="standard-progress__label">{textMeta.label}</span>
+                  <span className="standard-progress__percent">{textMeta.percent}%</span>
+                </div>
+                <div className="standard-progress__track">
+                  <div
+                    className="standard-progress__fill"
+                    style={{ "--standard-progress-percent": `${textMeta.percent}%` } as UploadProgressStyle}
+                  />
+                </div>
+                <div className="standard-progress__hint">{textMeta.hint}</div>
+              </div>
+            </div>
+            <div className="clarification-impact-panel__entry">
+              <div className="clarification-impact-panel__entry-header">
+                <strong>上传文件</strong>
+                <span>支持 doc、docx、pdf，上传后进入解析并自动分析影响</span>
+              </div>
+              <label className="clarification-upload-picker">
+                <input
+                  type="file"
+                  accept=".doc,.docx,.pdf,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(event) => setClarificationFile(event.target.files?.[0] ?? null)}
+                />
+                <span>{clarificationFile ? clarificationFile.name : "选择澄清/补遗文件"}</span>
+              </label>
+              <ClayButton
+                size="lg"
+                className="clarification-impact-panel__action"
+                onClick={() => uploadClarification.mutate()}
+                disabled={!clarificationFile || uploadClarification.isPending}
+              >
+                {uploadClarification.isPending ? "解析并分析中..." : "上传文件并分析"}
+              </ClayButton>
+              <div className={`standard-progress standard-progress--${uploadMeta.tone}`} role="status" aria-live="polite">
+                <div className="standard-progress__top">
+                  <span className="standard-progress__label">{uploadMeta.label}</span>
+                  <span className="standard-progress__percent">{uploadMeta.percent}%</span>
+                </div>
+                <div className="standard-progress__track">
+                  <div
+                    className="standard-progress__fill"
+                    style={{ "--standard-progress-percent": `${uploadMeta.percent}%` } as UploadProgressStyle}
+                  />
+                </div>
+                <div className="standard-progress__hint">{uploadMeta.hint}</div>
+              </div>
+            </div>
+          </div>
         </div>
         {createClarification.isError && (
           <div className="warning-banner">
             影响分析失败：{createClarification.error instanceof Error ? createClarification.error.message : "请稍后重试"}
+          </div>
+        )}
+        {uploadClarification.isError && (
+          <div className="warning-banner">
+            文件分析失败：{uploadClarification.error instanceof Error ? uploadClarification.error.message : "请稍后重试"}
           </div>
         )}
         {clarifications.length > 0 && (
@@ -286,10 +515,60 @@ export function RequirementsContent() {
         <div className="requirement-workbench__metrics" aria-label="关键条款统计">
           <div><span>原始条款</span><strong>{workbench.stats.total_requirements}</strong></div>
           <div><span>条款包</span><strong>{workbench.stats.package_count}</strong></div>
-          <div><span>待确认红线</span><strong>{workbench.stats.blocking_count}</strong></div>
-          <div><span>冲突条款</span><strong>{workbench.stats.conflict_count}</strong></div>
+          <button className={`requirement-metric-card ${expandedRiskCard === "blocking" ? "is-active" : ""}`} type="button" onClick={() => setExpandedRiskCard((value) => (value === "blocking" ? null : "blocking"))}>
+            <span>待确认红线</span>
+            <strong>{workbench.stats.blocking_count}</strong>
+          </button>
+          <button className={`requirement-metric-card ${expandedRiskCard === "conflict" ? "is-active" : ""}`} type="button" onClick={() => setExpandedRiskCard((value) => (value === "conflict" ? null : "conflict"))}>
+            <span>冲突条款</span>
+            <strong>{workbench.stats.conflict_count}</strong>
+          </button>
           <div><span>自动采纳</span><strong>{workbench.stats.auto_accept_count}</strong></div>
         </div>
+      )}
+
+      {expandedRiskCard === "blocking" && blockingPackages.length > 0 && (
+        <section className="requirement-risk-panel" aria-label="待确认红线相关条款">
+          <div className="requirement-risk-panel__header">
+            <h2>待确认红线相关条款</h2>
+            <span>{blockingPackages.length} 个条款包</span>
+          </div>
+          <div className="requirement-package-list requirement-package-list--tri">
+            {blockingPackages.map((pkg) => (
+              <article key={pkg.id} className={`requirement-package ${selected?.id === pkg.id ? "is-selected" : ""} ${pkg.blocking ? "is-blocking" : ""}`} onClick={() => setSelectedPackage(pkg)}>
+                <div className="requirement-package__topline">
+                  <Badge variant={LEVEL_BADGES[pkg.confirmation_level]}>{LEVEL_LABELS[pkg.confirmation_level]}</Badge>
+                  {pkg.has_conflict && <Badge variant="danger">字段冲突</Badge>}
+                  {pkg.all_confirmed && <Badge variant="success">已确认</Badge>}
+                </div>
+                <h3>{pkg.title}</h3>
+                <p>{pkg.system_conclusion || "系统暂无结论，需查看来源原文。"}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {expandedRiskCard === "conflict" && conflictPackages.length > 0 && (
+        <section className="requirement-risk-panel" aria-label="冲突条款相关条款">
+          <div className="requirement-risk-panel__header">
+            <h2>冲突条款相关条款</h2>
+            <span>{conflictPackages.length} 个条款包</span>
+          </div>
+          <div className="requirement-package-list requirement-package-list--tri">
+            {conflictPackages.map((pkg) => (
+              <article key={pkg.id} className={`requirement-package ${selected?.id === pkg.id ? "is-selected" : ""} ${pkg.blocking ? "is-blocking" : ""}`} onClick={() => setSelectedPackage(pkg)}>
+                <div className="requirement-package__topline">
+                  <Badge variant={LEVEL_BADGES[pkg.confirmation_level]}>{LEVEL_LABELS[pkg.confirmation_level]}</Badge>
+                  <Badge variant="danger">字段冲突</Badge>
+                  {pkg.all_confirmed && <Badge variant="success">已确认</Badge>}
+                </div>
+                <h3>{pkg.title}</h3>
+                <p>{pkg.system_conclusion || "系统暂无结论，需查看来源原文。"}</p>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="requirement-workbench__tabs">
@@ -326,13 +605,13 @@ export function RequirementsContent() {
       {workbench && workbench.packages.length > 0 && (
         <div className="requirement-workbench__grid">
           <div className="requirement-workbench__lanes">
-            {shownLanes.map((lane) => (
+            {orderedShownLanes.map((lane) => (
               <section className="requirement-lane" key={lane.id} aria-label={lane.label}>
                 <div className="requirement-lane__header">
                   <h2>{lane.label}</h2>
                   <span>{lane.packages.length} 个条款包</span>
                 </div>
-                <div className="requirement-package-list">
+                <div className="requirement-package-list requirement-package-list--tri">
                   {lane.packages.map((pkg) => (
                     <article
                       key={pkg.id}

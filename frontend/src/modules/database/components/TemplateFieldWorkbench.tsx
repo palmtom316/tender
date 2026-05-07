@@ -567,7 +567,7 @@ export function TemplateFieldWorkbench() {
         <section className="template-panel template-panel--rail">
           <div className="template-panel__header">
             <div>
-              <p className="template-panel__eyebrow">模板包</p>
+              <p className="template-panel__eyebrow">投标文件模版</p>
               <h2>目录视图</h2>
             </div>
             <Badge variant="info">{packagesQuery.data?.length ?? 0}</Badge>
@@ -592,7 +592,7 @@ export function TemplateFieldWorkbench() {
             </select>
           </div>
           {packagesQuery.isLoading && (
-            <div className="skeleton-stack" aria-label="模板包加载中">
+            <div className="skeleton-stack" aria-label="投标文件模版加载中">
               <div className="skeleton-card" />
               <div className="skeleton-card" />
             </div>
@@ -618,7 +618,7 @@ export function TemplateFieldWorkbench() {
             ))}
             {(packagesQuery.data?.length ?? 0) === 0 && (
               <div className="template-strip-empty">
-                {selectedCategory ? `${selectedCategory.display_name} 下暂无模板包。` : "当前没有模板包。"}
+                {selectedCategory ? `${selectedCategory.display_name} 下暂无投标文件模版。` : "当前没有投标文件模版。"}
               </div>
             )}
           </div>
@@ -628,7 +628,7 @@ export function TemplateFieldWorkbench() {
           <div className="template-panel__header">
             <div>
               <p className="template-panel__eyebrow">模板项</p>
-              <h2>{packageDetailQuery.data?.display_name ?? "未选择模板包"}</h2>
+              <h2>{packageDetailQuery.data?.display_name ?? "未选择投标文件模版"}</h2>
             </div>
             <Badge variant="default">{filteredPackageItems.length}</Badge>
           </div>
@@ -677,7 +677,7 @@ export function TemplateFieldWorkbench() {
               );
             })}
             {showOnlyBlockedItems && filteredPackageItems.length === 0 && (
-              <div className="template-strip-empty">当前模板包没有待修复项。</div>
+              <div className="template-strip-empty">当前投标文件模版没有待修复项。</div>
             )}
           </div>
         </section>

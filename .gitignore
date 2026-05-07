@@ -30,3 +30,8 @@ docs/samples/**/*.docx
 tmp/
 backend/data/
 backend/rerun_missing_files.py
+
+# Local tender test and parsing bundles
+.codex
+docs/国网招标文件/
+docs/投标文件样板/

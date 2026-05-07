@@ -113,10 +113,21 @@ export function AiExtractionRunPanel({ runId }: AiExtractionRunPanelProps) {
       <div className="ai-extraction-panel__table-wrap">
         <table className="ai-extraction-panel__table">
           <caption>文件覆盖</caption>
+          <colgroup>
+            <col className="ai-extraction-panel__col-file" />
+            <col className="ai-extraction-panel__col-chunks" />
+            <col className="ai-extraction-panel__col-count" />
+            <col className="ai-extraction-panel__col-count" />
+            <col className="ai-extraction-panel__col-count" />
+            <col className="ai-extraction-panel__col-count" />
+            <col className="ai-extraction-panel__col-count" />
+            <col className="ai-extraction-panel__col-extracted" />
+            <col className="ai-extraction-panel__col-reason" />
+          </colgroup>
           <thead>
             <tr>
               <th>文件</th>
-              <th>Chunks</th>
+              <th>片段数</th>
               <th>批次</th>
               <th>成功</th>
               <th>失败</th>

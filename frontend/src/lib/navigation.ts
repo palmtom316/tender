@@ -38,10 +38,8 @@ export const MODULE_CONFIG: ModuleConfig[] = [
     label: "投标资料库",
     icon: "database",
     tabs: [
-      { id: "history", label: "历史投标文件" },
-      { id: "excellent", label: "优秀投标文件" },
       { id: "standards", label: "规范规程" },
-      { id: "templates", label: "模板包" },
+      { id: "templates", label: "投标文件模版" },
       { id: "company", label: "公司资料" },
       { id: "personnel", label: "人员资料" },
     ],

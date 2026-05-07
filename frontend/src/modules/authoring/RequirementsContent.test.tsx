@@ -1,14 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { useNavigationMock, fetchWorkbenchMock, fetchTenderSummaryMock, startRunMock, bulkConfirmMock } = vi.hoisted(() => ({
+const { useNavigationMock, fetchWorkbenchMock, fetchTenderSummaryMock, startRunMock, bulkConfirmMock, listTenderClarificationsMock, createTenderClarificationMock, uploadTenderClarificationMock } = vi.hoisted(() => ({
   useNavigationMock: vi.fn(),
   fetchWorkbenchMock: vi.fn(),
   fetchTenderSummaryMock: vi.fn(),
   startRunMock: vi.fn(),
   bulkConfirmMock: vi.fn(),
+  listTenderClarificationsMock: vi.fn(),
+  createTenderClarificationMock: vi.fn(),
+  uploadTenderClarificationMock: vi.fn(),
 }));
 
 vi.mock("../../lib/NavigationContext", () => ({
@@ -23,6 +26,9 @@ vi.mock("../../lib/api", async () => {
     fetchTenderSummary: fetchTenderSummaryMock,
     startTenderAiExtractionRun: startRunMock,
     bulkConfirmRequirements: bulkConfirmMock,
+    listTenderClarifications: listTenderClarificationsMock,
+    createTenderClarification: createTenderClarificationMock,
+    uploadTenderClarification: uploadTenderClarificationMock,
   };
 });
 
@@ -146,6 +152,7 @@ describe("RequirementsContent workbench", () => {
     useNavigationMock.mockReturnValue({ projectId: "proj-1", documentId: "doc-1" });
     fetchTenderSummaryMock.mockResolvedValue(summary());
     fetchWorkbenchMock.mockResolvedValue(workbench());
+    listTenderClarificationsMock.mockResolvedValue([]);
   });
 
   it("renders grouped critical clauses and auto-accepted sampling", async () => {
@@ -178,5 +185,34 @@ describe("RequirementsContent workbench", () => {
     button.click();
 
     await waitFor(() => expect(bulkConfirmMock).toHaveBeenCalledWith("proj-1", ["req-1", "req-2"]));
+  });
+
+  it("uploads clarification file for analysis", async () => {
+    uploadTenderClarificationMock.mockResolvedValueOnce({
+      id: "clar-1",
+      project_id: "proj-1",
+      round_no: 1,
+      clarification_type: "addendum",
+      title: "澄清/补遗文件",
+      source_file: "答疑.pdf",
+      content_text: "澄清内容",
+      impact_json: {},
+      status: "active",
+      created_at: "2026-05-07T00:00:00Z",
+    });
+    render(withClient(<RequirementsContent />));
+
+    const file = new File(["pdf"], "答疑.pdf", { type: "application/pdf" });
+    const fileInput = document.querySelector('input[type="file"][accept*=".doc"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    const button = await screen.findByRole("button", { name: "上传文件并分析" });
+    button.click();
+
+    await waitFor(() => expect(uploadTenderClarificationMock).toHaveBeenCalledWith("proj-1", expect.objectContaining({
+      title: "澄清/补遗文件",
+      file,
+      clarification_type: "addendum",
+    })));
   });
 });

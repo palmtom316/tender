@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from psycopg import Connection
 from pydantic import BaseModel
 
+from tender_backend.core.config import Settings, get_settings
+from tender_backend.core.path_safety import ensure_path_within_root
 from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
@@ -20,6 +24,8 @@ from tender_backend.services.requirement_grouping_service import build_requireme
 from tender_backend.services.tender_constraint_service import TenderConstraintService
 from tender_backend.services.clarification_merge_service import ClarificationMergeService
 from tender_backend.db.repositories.clarification_repo import ClarificationRepository
+from tender_backend.services.office_document_parser import OfficeParseError, parse_office_file
+from tender_backend.services.pdf_document_parser import PdfParseError, parse_pdf_with_mineru
 
 router = APIRouter(tags=["requirements"])
 _repo = RequirementRepository()
@@ -28,6 +34,45 @@ _constraint_service = TenderConstraintService()
 _clarification_repo = ClarificationRepository()
 _clarification_merge_service = ClarificationMergeService()
 _REQUIREMENT_PROJECT_QUERY = "SELECT project_id FROM project_requirement WHERE id = %s"
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+async def _read_upload_with_limit(file: UploadFile, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail=f"file exceeds {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _clarification_upload_dir(settings: Settings, project_id: UUID) -> Path:
+    return settings.tender_document_storage_root / str(project_id) / "_clarifications"
+
+
+async def _extract_clarification_text(
+    path: Path,
+    *,
+    filename: str,
+) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        chunks = await parse_pdf_with_mineru(path, source_file=filename)
+    elif suffix in {".doc", ".docx"}:
+        _file_type, chunks = await asyncio.to_thread(parse_office_file, path, source_file=filename)
+    else:
+        raise HTTPException(status_code=400, detail="澄清/补遗文件仅支持 doc、docx、pdf")
+
+    text_parts = [str(chunk.get("text") or "").strip() for chunk in chunks if str(chunk.get("text") or "").strip()]
+    content_text = "\n\n".join(text_parts).strip()
+    if not content_text:
+        raise HTTPException(status_code=422, detail="上传文件解析后无可用文本")
+    return content_text
 
 
 class ConfirmBody(BaseModel):
@@ -171,6 +216,55 @@ async def create_project_clarification(
 ) -> dict:
     require_project_access(conn, project_id=project_id, user=user)
     return _clarification_merge_service.create_and_apply(conn, project_id=project_id, fields=payload.model_dump())
+
+
+@router.post("/projects/{project_id}/clarifications/upload")
+async def upload_project_clarification(
+    project_id: UUID,
+    title: str,
+    round_no: int = 1,
+    clarification_type: str = "addendum",
+    file: UploadFile = File(...),
+    conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    filename = file.filename or "clarification"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".doc", ".docx", ".pdf"}:
+        raise HTTPException(status_code=400, detail="澄清/补遗文件仅支持 doc、docx、pdf")
+
+    content = await _read_upload_with_limit(file, max_bytes=settings.tender_document_upload_max_bytes)
+    if not content:
+        raise HTTPException(status_code=422, detail="file is empty")
+
+    upload_dir = _clarification_upload_dir(settings, project_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    persisted_path = ensure_path_within_root(
+        upload_dir / filename,
+        settings.tender_document_storage_root,
+        label="clarification upload path",
+    )
+    persisted_path.write_bytes(content)
+
+    try:
+        extracted_text = await _extract_clarification_text(persisted_path, filename=filename)
+    except (OfficeParseError, PdfParseError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _clarification_merge_service.create_and_apply(
+        conn,
+        project_id=project_id,
+        fields={
+            "round_no": round_no,
+            "clarification_type": clarification_type,
+            "title": title,
+            "source_file": filename,
+            "content_text": extracted_text,
+            "status": "active",
+        },
+    )
 
 
 @router.get("/projects/{project_id}/clarifications")
