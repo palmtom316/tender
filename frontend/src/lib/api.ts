@@ -84,6 +84,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (error instanceof DOMException && error.name === "AbortError" && controller) {
       throw new Error("请求超时");
     }
+    if (error instanceof TypeError) {
+      throw new Error("无法连接后端服务，请确认后端 API 已启动并且前端代理配置正确");
+    }
     throw error;
   } finally {
     if (timeout) window.clearTimeout(timeout);
@@ -559,6 +562,21 @@ export function createTenderClarification(
 
 export function listTenderClarifications(projectId: string, options?: { signal?: AbortSignal }): Promise<TenderClarification[]> {
   return request<TenderClarification[]>(`/projects/${projectId}/clarifications`, { signal: options?.signal });
+}
+
+export function uploadTenderClarification(
+  projectId: string,
+  data: { title: string; file: File; round_no?: number; clarification_type?: string },
+): Promise<TenderClarification> {
+  const form = new FormData();
+  form.append("title", data.title);
+  form.append("file", data.file);
+  form.append("round_no", String(data.round_no ?? 1));
+  form.append("clarification_type", data.clarification_type ?? "addendum");
+  return request<TenderClarification>(`/projects/${projectId}/clarifications/upload`, {
+    method: "POST",
+    body: form,
+  });
 }
 
 export function confirmRequirement(id: string): Promise<Requirement> {
@@ -1415,6 +1433,69 @@ export interface EvidenceAsset {
   updated_at: string;
 }
 
+export interface CompanyContractPerformance {
+  id: string;
+  library_company_id: string | null;
+  auto_number: number;
+  contract_name: string;
+  party_a_company: string;
+  contract_category: string | null;
+  engineering_category: string | null;
+  contract_amount: string | null;
+  contract_signed_date: string | null;
+  contract_completed_date: string | null;
+  contract_status: string | null;
+  signature_asset_id: string | null;
+  signature_asset_name: string | null;
+  invoice_asset_id: string | null;
+  invoice_asset_name: string | null;
+  invoice_verification_asset_id: string | null;
+  invoice_verification_asset_name: string | null;
+  performance_evaluation_asset_id: string | null;
+  performance_evaluation_asset_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyContractPerformanceCreatePayload {
+  library_company_id: string;
+  contract_name: string;
+  party_a_company: string;
+  contract_category?: string | null;
+  engineering_category?: string | null;
+  contract_amount?: string | null;
+  contract_signed_date?: string | null;
+  contract_completed_date?: string | null;
+  contract_status?: string | null;
+  signature_asset_id?: string | null;
+  signature_asset_name?: string | null;
+  invoice_asset_id?: string | null;
+  invoice_asset_name?: string | null;
+  invoice_verification_asset_id?: string | null;
+  invoice_verification_asset_name?: string | null;
+  performance_evaluation_asset_id?: string | null;
+  performance_evaluation_asset_name?: string | null;
+}
+
+export interface CompanyContractPerformanceUpdatePayload {
+  contract_name?: string;
+  party_a_company?: string;
+  contract_category?: string | null;
+  engineering_category?: string | null;
+  contract_amount?: string | null;
+  contract_signed_date?: string | null;
+  contract_completed_date?: string | null;
+  contract_status?: string | null;
+  signature_asset_id?: string | null;
+  signature_asset_name?: string | null;
+  invoice_asset_id?: string | null;
+  invoice_asset_name?: string | null;
+  invoice_verification_asset_id?: string | null;
+  invoice_verification_asset_name?: string | null;
+  performance_evaluation_asset_id?: string | null;
+  performance_evaluation_asset_name?: string | null;
+}
+
 export interface AssetTaxonomyCategory {
   code: string;
   label: string;
@@ -1535,6 +1616,54 @@ export function uploadEvidenceAsset(data: EvidenceAssetUploadPayload): Promise<E
     method: "POST",
     body: form,
   });
+}
+
+export function fetchCompanyContractPerformances(options: {
+  signal?: AbortSignal;
+  libraryCompanyId: string;
+}): Promise<CompanyContractPerformance[]> {
+  const params = new URLSearchParams();
+  params.set("library_company_id", options.libraryCompanyId);
+  return request<CompanyContractPerformance[]>(`/master-data/company-contract-performances?${params.toString()}`, {
+    signal: options.signal,
+  });
+}
+
+export function createCompanyContractPerformance(
+  data: CompanyContractPerformanceCreatePayload,
+): Promise<CompanyContractPerformance> {
+  return request<CompanyContractPerformance>("/master-data/company-contract-performances", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateCompanyContractPerformance(
+  recordId: string,
+  data: CompanyContractPerformanceUpdatePayload,
+): Promise<CompanyContractPerformance> {
+  return request<CompanyContractPerformance>(`/master-data/company-contract-performances/${recordId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteCompanyContractPerformance(recordId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/master-data/company-contract-performances/${recordId}`, {
+    method: "DELETE",
+  });
+}
+
+export function companyContractPerformanceExportUrl(libraryCompanyId: string): string {
+  const params = new URLSearchParams();
+  params.set("library_company_id", libraryCompanyId);
+  return buildApiUrl(`/master-data/company-contract-performances/export?${params.toString()}`);
+}
+
+export function evidenceAssetDownloadUrl(assetId: string): string {
+  return buildApiUrl(`/master-data/evidence-assets/${assetId}/download`);
 }
 
 // ── Table Override ──

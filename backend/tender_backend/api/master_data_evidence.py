@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from psycopg import Connection
 
@@ -278,3 +279,21 @@ async def delete_evidence_asset(record_id: UUID, conn: Connection = Depends(get_
     if not _repo.delete_evidence_asset(conn, record_id):
         raise HTTPException(status_code=404, detail="evidence asset not found")
     return {"deleted": True}
+
+
+@router.get("/master-data/evidence-assets/{record_id}/download")
+async def download_evidence_asset(
+    record_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    row = _repo.get_evidence_asset(conn, record_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="evidence asset not found")
+    file_path = _validate_managed_asset_path(row.file_path, settings=settings)
+    media_type = row.media_type or "application/octet-stream"
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=row.file_name,
+    )

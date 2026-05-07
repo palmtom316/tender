@@ -52,12 +52,6 @@ _ASSET_TAXONOMY = [
             ("contract_document", "合同"),
             ("invoice_document", "发票"),
             ("invoice_verification", "发票验证"),
-        ],
-    },
-    {
-        "domain": "company_evaluation",
-        "label": "公司履约评价",
-        "categories": [
             ("performance_evaluation", "履约评价文件"),
         ],
     },

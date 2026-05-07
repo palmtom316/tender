@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import os
 from pathlib import Path
 from uuid import UUID
@@ -408,6 +409,145 @@ def test_login_session_token_can_access_protected_master_data(monkeypatch: pytes
         session_client.headers.update({"Authorization": f"Bearer {token}"})
         protected = session_client.get("/api/master-data/company-profiles")
         assert protected.status_code == 200
+    finally:
+        client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_master_data_tables(conn)
+
+
+def test_company_contract_performance_export_excludes_pdf_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = _db_url()
+    if not db_url:
+        pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    upload_root = Path.cwd() / "tmp" / "test_master_data_contract_export"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("EVIDENCE_UPLOAD_DIR", str(upload_root))
+    get_settings.cache_clear()
+
+    with psycopg.connect(db_url) as conn:
+        _apply_master_data_schema(conn)
+        _reset_master_data_tables(conn)
+
+    client = SyncASGIClient(app)
+    client.headers.update(_AUTH_HEADERS)
+    try:
+        library = client.post(
+            "/api/master-data/library-companies",
+            json={"company_name": "REDACTED", "company_type": "施工总承包"},
+        )
+        assert library.status_code == 201
+        library_id = library.json()["id"]
+
+        created = client.post(
+            "/api/master-data/company-contract-performances",
+            json={
+                "library_company_id": library_id,
+                "contract_name": "配网建设项目合同",
+                "party_a_company": "REDACTED",
+                "contract_category": "施工合同",
+                "engineering_category": "配网工程",
+                "contract_amount": 1200000,
+                "contract_signed_date": "2025-01-08",
+                "contract_completed_date": "2025-12-20",
+                "contract_status": "履约中",
+                "signature_asset_name": "合同主要签署页面.pdf",
+                "invoice_asset_name": "合同发票.pdf",
+                "invoice_verification_asset_name": "合同发票验证.pdf",
+                "performance_evaluation_asset_name": "合同履约评价.pdf",
+            },
+        )
+        assert created.status_code == 201
+
+        exported = client.get(f"/api/master-data/company-contract-performances/export?library_company_id={library_id}")
+        assert exported.status_code == 200
+        assert exported.headers["content-type"].startswith("text/csv")
+        content = exported.text.lstrip("\ufeff")
+        rows = list(csv.reader(content.splitlines()))
+        assert rows[0] == [
+            "自动编号",
+            "合同名称",
+            "合同甲方单位",
+            "合同类别",
+            "工程类别",
+            "合同金额",
+            "合同签订日期",
+            "合同竣工日期",
+            "合同状态",
+        ]
+        assert "合同主要签署页面" not in rows[0]
+        assert "合同发票" not in rows[0]
+        assert "合同发票验证" not in rows[0]
+        assert "合同履约评价" not in rows[0]
+        assert rows[1][1] == "配网建设项目合同"
+    finally:
+        client.close()
+        with psycopg.connect(db_url) as conn:
+            _reset_master_data_tables(conn)
+
+
+def test_company_contract_performance_update_and_delete(monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = _db_url()
+    if not db_url:
+        pytest.skip("DATABASE_URL not set; skipping integration test")
+
+    upload_root = Path.cwd() / "tmp" / "test_master_data_contract_update"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("EVIDENCE_UPLOAD_DIR", str(upload_root))
+    get_settings.cache_clear()
+
+    with psycopg.connect(db_url) as conn:
+        _apply_master_data_schema(conn)
+        _reset_master_data_tables(conn)
+
+    client = SyncASGIClient(app)
+    client.headers.update(_AUTH_HEADERS)
+    try:
+        library = client.post(
+            "/api/master-data/library-companies",
+            json={"company_name": "REDACTED", "company_type": "施工总承包"},
+        )
+        assert library.status_code == 201
+        library_id = library.json()["id"]
+
+        created = client.post(
+            "/api/master-data/company-contract-performances",
+            json={
+                "library_company_id": library_id,
+                "contract_name": "配网建设项目合同",
+                "party_a_company": "REDACTED",
+                "contract_category": "施工合同",
+                "engineering_category": "配网工程",
+                "contract_amount": 1200000,
+                "contract_signed_date": "2025-01-08",
+                "contract_completed_date": "2025-12-20",
+                "contract_status": "履约中",
+            },
+        )
+        assert created.status_code == 201
+        performance_id = created.json()["id"]
+
+        updated = client.put(
+            f"/api/master-data/company-contract-performances/{performance_id}",
+            json={
+                "contract_name": "配网建设项目合同-更新",
+                "contract_amount": 1300000,
+                "contract_status": "已完工",
+                "invoice_asset_name": "合同发票.pdf",
+            },
+        )
+        assert updated.status_code == 200
+        assert updated.json()["contract_name"] == "配网建设项目合同-更新"
+        assert updated.json()["contract_status"] == "已完工"
+        assert updated.json()["invoice_asset_name"] == "合同发票.pdf"
+
+        deleted = client.delete(f"/api/master-data/company-contract-performances/{performance_id}")
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+
+        listed = client.get(f"/api/master-data/company-contract-performances?library_company_id={library_id}")
+        assert listed.status_code == 200
+        assert listed.json() == []
     finally:
         client.close()
         with psycopg.connect(db_url) as conn:
