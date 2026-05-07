@@ -53,6 +53,7 @@ def _load_chapter_context(conn: Connection, *, project_id: UUID, chapter_id: UUI
             JOIN project_requirement pr ON pr.id = bcr.requirement_id
             WHERE bcr.bid_chapter_id = %s
               AND COALESCE(pr.ignored_for_pricing, false) = false
+              AND COALESCE(pr.is_stale, false) = false
               AND COALESCE(pr.review_status, 'pending') <> 'rejected'
             ORDER BY bcr.priority_level, pr.created_at
             """,

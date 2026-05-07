@@ -454,6 +454,37 @@ export interface RequirementWorkbench {
   packages: RequirementPackage[];
 }
 
+export interface ClarificationImpact {
+  override_policy: string;
+  clarification_id: string;
+  created_requirement_count: number;
+  superseded_requirement_count: number;
+  affected_pairs: Array<{
+    old_requirement_id: string;
+    new_requirement_id: string;
+    category: string;
+    title: string;
+    similarity?: number;
+  }>;
+  stale_outline_count: number;
+  stale_chapter_count: number;
+  stale_draft_count: number;
+  requires_reconfirmation: boolean;
+}
+
+export interface TenderClarification {
+  id: string;
+  project_id: string;
+  round_no: number;
+  clarification_type: string;
+  title: string;
+  source_file: string | null;
+  content_text: string;
+  impact_json: ClarificationImpact | Record<string, unknown>;
+  status: string;
+  created_at: string;
+}
+
 export interface SourceChunk {
   id: string;
   tender_document_id: string;
@@ -513,6 +544,21 @@ export function fetchRequirementWorkbench(
   return request<RequirementWorkbench>(`/projects/${projectId}/requirements/workbench`, {
     signal: options?.signal,
   });
+}
+
+export function createTenderClarification(
+  projectId: string,
+  data: { round_no?: number; clarification_type?: string; title: string; source_file?: string; content_text: string },
+): Promise<TenderClarification> {
+  return request<TenderClarification>(`/projects/${projectId}/clarifications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function listTenderClarifications(projectId: string, options?: { signal?: AbortSignal }): Promise<TenderClarification[]> {
+  return request<TenderClarification[]>(`/projects/${projectId}/clarifications`, { signal: options?.signal });
 }
 
 export function confirmRequirement(id: string): Promise<Requirement> {

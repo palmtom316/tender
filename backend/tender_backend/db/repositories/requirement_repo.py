@@ -87,6 +87,10 @@ class RequirementRepository:
                       ignored_for_pricing = EXCLUDED.ignored_for_pricing,
                       source_metadata = EXCLUDED.source_metadata,
                       is_hard_constraint = EXCLUDED.is_hard_constraint,
+                      is_stale = false,
+                      stale_reason = NULL,
+                      stale_by_clarification_id = NULL,
+                      superseded_by_requirement_id = NULL,
                       extraction_method = CASE
                           WHEN project_requirement.extraction_method = EXCLUDED.extraction_method
                               THEN project_requirement.extraction_method
@@ -130,9 +134,12 @@ class RequirementRepository:
         requires_human_confirm: bool | None = None,
         is_veto: bool | None = None,
         is_hard_constraint: bool | None = None,
+        include_stale: bool = False,
     ) -> list[dict]:
         query = "SELECT * FROM project_requirement WHERE project_id = %s"
         params: list = [project_id]
+        if not include_stale:
+            query += " AND COALESCE(is_stale, false) = false"
         if category:
             query += " AND category = %s"
             params.append(category)
@@ -180,6 +187,10 @@ class RequirementRepository:
             "review_note",
             "source_metadata",
             "is_hard_constraint",
+            "is_stale",
+            "stale_reason",
+            "stale_by_clarification_id",
+            "superseded_by_requirement_id",
         }
         updates = {key: value for key, value in fields.items() if key in allowed}
         if not updates:

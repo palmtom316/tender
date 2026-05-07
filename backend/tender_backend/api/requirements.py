@@ -18,6 +18,7 @@ from tender_backend.db.repositories.requirement_match_repo import RequirementMat
 from tender_backend.services.requirement_matching import build_requirement_matches
 from tender_backend.services.requirement_grouping_service import build_requirement_workbench
 from tender_backend.services.tender_constraint_service import TenderConstraintService
+from tender_backend.services.clarification_merge_service import ClarificationMergeService
 from tender_backend.db.repositories.clarification_repo import ClarificationRepository
 
 router = APIRouter(tags=["requirements"])
@@ -25,6 +26,7 @@ _repo = RequirementRepository()
 _match_repo = RequirementMatchRepository()
 _constraint_service = TenderConstraintService()
 _clarification_repo = ClarificationRepository()
+_clarification_merge_service = ClarificationMergeService()
 _REQUIREMENT_PROJECT_QUERY = "SELECT project_id FROM project_requirement WHERE id = %s"
 
 
@@ -86,6 +88,7 @@ async def list_requirements(
     requires_human_confirm: bool | None = None,
     is_veto: bool | None = None,
     is_hard_constraint: bool | None = None,
+    include_stale: bool = False,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
@@ -99,6 +102,7 @@ async def list_requirements(
         requires_human_confirm=requires_human_confirm,
         is_veto=is_veto,
         is_hard_constraint=is_hard_constraint,
+        include_stale=include_stale,
     )
 
 
@@ -166,7 +170,7 @@ async def create_project_clarification(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     require_project_access(conn, project_id=project_id, user=user)
-    return _clarification_repo.create(conn, project_id=project_id, fields=payload.model_dump())
+    return _clarification_merge_service.create_and_apply(conn, project_id=project_id, fields=payload.model_dump())
 
 
 @router.get("/projects/{project_id}/clarifications")

@@ -30,7 +30,13 @@ def build_compliance_matrix(
     """Build the compliance matrix by matching requirements to chapter drafts."""
     with conn.cursor(row_factory=dict_row) as cur:
         requirements = cur.execute(
-            "SELECT id, title, category, source_text FROM project_requirement WHERE project_id = %s ORDER BY category, created_at",
+            """
+            SELECT id, title, category, source_text
+            FROM project_requirement
+            WHERE project_id = %s
+              AND COALESCE(is_stale, false) = false
+            ORDER BY category, created_at
+            """,
             (project_id,),
         ).fetchall()
 

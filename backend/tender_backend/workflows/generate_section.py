@@ -53,6 +53,7 @@ class LoadSectionRequirements(WorkflowStep):
                 FROM project_requirement
                 WHERE project_id = %s
                   AND COALESCE(ignored_for_pricing, false) = false
+                  AND COALESCE(is_stale, false) = false
                   AND COALESCE(review_status, 'pending') <> 'rejected'
                 ORDER BY category, created_at
                 """,

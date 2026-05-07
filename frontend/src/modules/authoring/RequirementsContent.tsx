@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   bulkConfirmRequirements,
+  createTenderClarification,
   fetchRequirementWorkbench,
   fetchTenderSummary,
+  listTenderClarifications,
   startTenderAiExtractionRun,
   type RequirementPackage,
   type RequirementWorkbenchLane,
+  type TenderClarification,
 } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
@@ -61,6 +64,26 @@ function visibleLanes(lanes: RequirementWorkbenchLane[], activeLane: string) {
   return lanes.filter((lane) => lane.id === activeLane);
 }
 
+function impactPayload(item: TenderClarification) {
+  return item.impact_json as Partial<{
+    created_requirement_count: number;
+    superseded_requirement_count: number;
+    stale_outline_count: number;
+    stale_chapter_count: number;
+    stale_draft_count: number;
+    requires_reconfirmation: boolean;
+  }>;
+}
+
+function hasReconfirmationImpact(item: TenderClarification) {
+  return Boolean(impactPayload(item).requires_reconfirmation);
+}
+
+function impactSummary(item: TenderClarification) {
+  const impact = impactPayload(item);
+  return `新增 ${impact.created_requirement_count ?? 0} 条，覆盖 ${impact.superseded_requirement_count ?? 0} 条，标记 ${impact.stale_chapter_count ?? 0} 个章节 stale`;
+}
+
 export function RequirementsContent() {
   const { projectId, documentId } = useNavigation();
   const queryClient = useQueryClient();
@@ -68,6 +91,8 @@ export function RequirementsContent() {
   const [sourceChunkId, setSourceChunkId] = useState<string | null>(null);
   const [selectedPackage, setSelectedPackage] = useState<RequirementPackage | null>(null);
   const [latestRunId, setLatestRunId] = useState<string | null>(null);
+  const [clarificationText, setClarificationText] = useState("");
+  const [clarificationTitle, setClarificationTitle] = useState("澄清/补遗文件");
 
   useEffect(() => {
     setLatestRunId(readStoredLatestRunId(documentId));
@@ -92,6 +117,15 @@ export function RequirementsContent() {
     retry: false,
   });
 
+  const { data: clarifications = [] } = useQuery({
+    queryKey: ["tender-clarifications", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return listTenderClarifications(projectId, { signal });
+    },
+    enabled: !!projectId,
+  });
+
   const confirmPackage = useMutation({
     mutationFn: async (pkg: RequirementPackage) => {
       if (!projectId) throw new Error("No project selected");
@@ -112,6 +146,24 @@ export function RequirementsContent() {
       if (documentId && typeof window !== "undefined") {
         window.localStorage.setItem(getLatestRunStorageKey(documentId), result.id);
       }
+    },
+  });
+
+  const createClarification = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error("No project selected");
+      return createTenderClarification(projectId, {
+        title: clarificationTitle || "澄清/补遗文件",
+        clarification_type: "addendum",
+        content_text: clarificationText,
+      });
+    },
+    onSuccess: () => {
+      setClarificationText("");
+      queryClient.invalidateQueries({ queryKey: ["requirement-workbench", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["tender-clarifications", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["bid-outline", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
     },
   });
 
@@ -183,6 +235,52 @@ export function RequirementsContent() {
           提交失败：{startAiExtraction.error instanceof Error ? startAiExtraction.error.message : "请稍后重试"}
         </div>
       )}
+
+      <section className="clarification-impact-panel" aria-label="澄清补遗影响分析">
+        <div className="clarification-impact-panel__header">
+          <div>
+            <span className="tender-summary-card__eyebrow">Later File Wins</span>
+            <h2>澄清/补遗覆盖分析</h2>
+            <p>后发文件覆盖前文；系统会自动标记受影响条款、大纲、章节和草稿为 stale，并把新条款送回关键确认。</p>
+          </div>
+          <Badge variant={clarifications.some(hasReconfirmationImpact) ? "danger" : "info"}>
+            {clarifications.some(hasReconfirmationImpact) ? "需重新确认" : "无待处理影响"}
+          </Badge>
+        </div>
+        <div className="clarification-impact-panel__form">
+          <input
+            className="clay-input"
+            value={clarificationTitle}
+            onChange={(event) => setClarificationTitle(event.target.value)}
+            aria-label="澄清补遗标题"
+          />
+          <textarea
+            className="clay-textarea"
+            value={clarificationText}
+            onChange={(event) => setClarificationText(event.target.value)}
+            placeholder="粘贴澄清、答疑或补遗文件中的关键文字。系统会按类别和相似度匹配前文条款。"
+            aria-label="澄清补遗内容"
+          />
+          <ClayButton onClick={() => createClarification.mutate()} disabled={!clarificationText.trim() || createClarification.isPending}>
+            {createClarification.isPending ? "分析中..." : "保存并分析影响"}
+          </ClayButton>
+        </div>
+        {createClarification.isError && (
+          <div className="warning-banner">
+            影响分析失败：{createClarification.error instanceof Error ? createClarification.error.message : "请稍后重试"}
+          </div>
+        )}
+        {clarifications.length > 0 && (
+          <div className="clarification-impact-list">
+            {clarifications.slice(0, 3).map((item) => (
+              <div className="clarification-impact-card" key={item.id}>
+                <strong>{item.title}</strong>
+                <span>{impactSummary(item)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {workbench && (
         <div className="requirement-workbench__metrics" aria-label="关键条款统计">

@@ -20,7 +20,12 @@ class TenderConstraintService:
                 (project_id,),
             ).fetchone()
             requirements = cur.execute(
-                "SELECT * FROM project_requirement WHERE project_id = %s ORDER BY created_at",
+                """
+                SELECT * FROM project_requirement
+                WHERE project_id = %s
+                  AND COALESCE(is_stale, false) = false
+                ORDER BY created_at
+                """,
                 (project_id,),
             ).fetchall()
             version = int(version_row["version"] if version_row else 1)

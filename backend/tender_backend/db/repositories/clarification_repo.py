@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 
 
 class ClarificationRepository:
-    def create(self, conn: Connection, *, project_id: UUID, fields: dict[str, Any]) -> dict[str, Any]:
+    def create(self, conn: Connection, *, project_id: UUID, fields: dict[str, Any], commit: bool = True) -> dict[str, Any]:
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
                 """
@@ -31,7 +31,8 @@ class ClarificationRepository:
                     fields.get("status") or "active",
                 ),
             ).fetchone()
-        conn.commit()
+        if commit:
+            conn.commit()
         return dict(row) if row else {}
 
     def list_by_project(self, conn: Connection, *, project_id: UUID) -> list[dict[str, Any]]:
@@ -41,6 +42,28 @@ class ClarificationRepository:
                 (project_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def update_impact(
+        self,
+        conn: Connection,
+        *,
+        clarification_id: UUID,
+        impact_json: dict[str, Any],
+        commit: bool = True,
+    ) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                UPDATE tender_clarification
+                SET impact_json = %s
+                WHERE id = %s
+                RETURNING *
+                """,
+                (Jsonb(impact_json), clarification_id),
+            ).fetchone()
+        if commit:
+            conn.commit()
+        return dict(row) if row else None
 
 
 __all__ = ["ClarificationRepository"]

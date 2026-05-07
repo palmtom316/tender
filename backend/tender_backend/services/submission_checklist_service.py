@@ -18,6 +18,7 @@ class SubmissionChecklistService:
                 SELECT id, category, title, requirement_text, source_text, human_confirmed
                 FROM project_requirement
                 WHERE project_id = %s
+                  AND COALESCE(is_stale, false) = false
                 ORDER BY category, created_at
                 """,
                 (project_id,),

@@ -55,6 +55,7 @@ def _load_confirmation_records(conn: Connection, project_id: UUID) -> list[dict]
             SELECT id, category, title, human_confirmed, confirmed_by, confirmed_at, review_status
             FROM project_requirement
             WHERE project_id = %s
+              AND COALESCE(is_stale, false) = false
             ORDER BY category, created_at
             """,
             (project_id,),
@@ -72,6 +73,7 @@ def _load_traceability(conn: Connection, project_id: UUID) -> list[dict]:
             LEFT JOIN bid_chapter_requirement bcr ON bcr.requirement_id = pr.id
             LEFT JOIN bid_chapter bc ON bc.id = bcr.bid_chapter_id
             WHERE pr.project_id = %s
+              AND COALESCE(pr.is_stale, false) = false
             ORDER BY pr.category, pr.created_at
             """,
             (project_id,),

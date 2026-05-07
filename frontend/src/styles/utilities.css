@@ -1224,6 +1224,63 @@
   font-size: var(--text-2xl);
 }
 
+.clarification-impact-panel {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid color-mix(in oklch, var(--color-warning) 36%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--color-warning) 10%, transparent), transparent 42%),
+    var(--color-surface);
+}
+
+.clarification-impact-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+.clarification-impact-panel__header h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+
+.clarification-impact-panel__header p {
+  margin: var(--space-1) 0 0;
+  max-width: 760px;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+}
+
+.clarification-impact-panel__form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.clarification-impact-panel__form .clay-textarea {
+  min-height: 110px;
+}
+
+.clarification-impact-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.clarification-impact-card {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-surface-muted) 85%, transparent);
+}
+
+.clarification-impact-card span {
+  color: var(--color-text-muted);
+}
+
 .requirement-workbench__tabs {
   display: flex;
   flex-wrap: wrap;

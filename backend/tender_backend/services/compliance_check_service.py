@@ -137,6 +137,7 @@ class ComplianceCheckService:
                 """
                 SELECT * FROM project_requirement
                 WHERE project_id = %s
+                  AND COALESCE(is_stale, false) = false
                   AND COALESCE(review_status, 'pending') <> 'rejected'
                 ORDER BY created_at
                 """,
