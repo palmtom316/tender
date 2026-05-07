@@ -1,6 +1,5 @@
-import type { CSSProperties } from "react";
-
 import type { Standard } from "../../../lib/api";
+import { ProgressBar, type ProgressMeta } from "../../../components/ui/ProgressBar";
 
 type StandardProgressBarProps = {
   processingStatus: string;
@@ -8,15 +7,11 @@ type StandardProgressBarProps = {
   aiStatus: string | null;
 };
 
-type ProgressFillStyle = CSSProperties & {
-  "--standard-progress-percent": string;
-};
-
 function progressMeta(
   processingStatus: string,
   ocrStatus: string | null,
   aiStatus: string | null,
-): { percent: number; label: string; hint: string; tone: "default" | "active" | "success" | "danger" } {
+): ProgressMeta {
   if (processingStatus === "failed") {
     if (aiStatus === "failed") {
       return { percent: 78, label: "AI 失败", hint: "AI 解析失败，可重新入队", tone: "danger" };
@@ -51,21 +46,5 @@ export function StandardProgressBar({
   ocrStatus,
   aiStatus,
 }: StandardProgressBarProps) {
-  const meta = progressMeta(processingStatus, ocrStatus, aiStatus);
-
-  return (
-    <div className={`standard-progress standard-progress--${meta.tone}`}>
-      <div className="standard-progress__top">
-        <span className="standard-progress__label">{meta.label}</span>
-        <span className="standard-progress__percent">{meta.percent}%</span>
-      </div>
-      <div className="standard-progress__track">
-        <div
-          className="standard-progress__fill"
-          style={{ "--standard-progress-percent": `${meta.percent}%` } as ProgressFillStyle}
-        />
-      </div>
-      <div className="standard-progress__hint">{meta.hint}</div>
-    </div>
-  );
+  return <ProgressBar meta={progressMeta(processingStatus, ocrStatus, aiStatus)} />;
 }

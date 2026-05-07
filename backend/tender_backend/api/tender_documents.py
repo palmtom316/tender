@@ -13,6 +13,7 @@ from tender_backend.core.config import Settings, get_settings
 from tender_backend.core.path_safety import ensure_path_within_root
 from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
+from tender_backend.core.uploads import read_upload_with_limit
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
@@ -58,7 +59,6 @@ _agent_repo = AgentConfigRepository()
 _ai_extraction_repo = TenderAiExtractionRepository()
 _summary_repo = TenderSummaryRepository()
 _scoring_repo = ScoringRepository()
-_UPLOAD_CHUNK_SIZE = 1024 * 1024
 _DOCUMENT_PROJECT_QUERY = "SELECT project_id FROM tender_document WHERE id = %s"
 _FILE_PROJECT_QUERY = """
     SELECT td.project_id
@@ -468,20 +468,6 @@ def _parse_status_out(document: dict, files: list[dict], chunk_count: int) -> Te
     )
 
 
-async def _read_upload_with_limit(file: UploadFile, *, max_bytes: int) -> bytes:
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(_UPLOAD_CHUNK_SIZE)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(status_code=413, detail=f"file exceeds {max_bytes} bytes")
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
 async def _parse_file(conn: Connection, file_row: dict, *, settings: Settings) -> tuple[str, int]:
     if not file_row["is_parsable"] or file_row["is_archive"]:
         _repo.update_file_parse_status(conn, tender_document_file_id=file_row["id"], parse_status="skipped", error=None)
@@ -576,7 +562,7 @@ async def upload_tender_document(
 ) -> TenderDocumentDetailOut:
     require_project_access(conn, project_id=project_id, user=user)
     filename = file.filename or "unnamed"
-    content = await _read_upload_with_limit(file, max_bytes=settings.tender_document_upload_max_bytes)
+    content = await read_upload_with_limit(file, max_bytes=settings.tender_document_upload_max_bytes)
     if not content:
         raise HTTPException(status_code=422, detail="file is empty")
 

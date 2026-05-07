@@ -16,6 +16,7 @@ from tender_backend.core.config import Settings, get_settings
 from tender_backend.core.path_safety import ensure_path_within_root
 from tender_backend.core.project_access import require_project_access, require_resource_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
+from tender_backend.core.uploads import read_upload_with_limit
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.db.repositories.requirement_match_repo import RequirementMatchRepository
@@ -34,21 +35,6 @@ _constraint_service = TenderConstraintService()
 _clarification_repo = ClarificationRepository()
 _clarification_merge_service = ClarificationMergeService()
 _REQUIREMENT_PROJECT_QUERY = "SELECT project_id FROM project_requirement WHERE id = %s"
-_UPLOAD_CHUNK_SIZE = 1024 * 1024
-
-
-async def _read_upload_with_limit(file: UploadFile, *, max_bytes: int) -> bytes:
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(_UPLOAD_CHUNK_SIZE)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(status_code=413, detail=f"file exceeds {max_bytes} bytes")
-        chunks.append(chunk)
-    return b"".join(chunks)
 
 
 def _clarification_upload_dir(settings: Settings, project_id: UUID) -> Path:
@@ -235,7 +221,7 @@ async def upload_project_clarification(
     if suffix not in {".doc", ".docx", ".pdf"}:
         raise HTTPException(status_code=400, detail="澄清/补遗文件仅支持 doc、docx、pdf")
 
-    content = await _read_upload_with_limit(file, max_bytes=settings.tender_document_upload_max_bytes)
+    content = await read_upload_with_limit(file, max_bytes=settings.tender_document_upload_max_bytes)
     if not content:
         raise HTTPException(status_code=422, detail="file is empty")
 

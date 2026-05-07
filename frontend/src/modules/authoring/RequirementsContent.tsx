@@ -15,9 +15,9 @@ import {
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
+import { ProgressBar, type ProgressMeta } from "../../components/ui/ProgressBar";
 import { AiExtractionRunPanel } from "./AiExtractionRunPanel";
 import { SourceChunkViewer } from "./SourceChunkViewer";
-import type { CSSProperties } from "react";
 
 const LEVEL_LABELS: Record<RequirementPackage["confirmation_level"], string> = {
   critical: "关键确认",
@@ -86,16 +86,7 @@ function impactSummary(item: TenderClarification) {
   return `新增 ${impact.created_requirement_count ?? 0} 条，覆盖 ${impact.superseded_requirement_count ?? 0} 条，标记 ${impact.stale_chapter_count ?? 0} 个章节 stale`;
 }
 
-type UploadStageMeta = {
-  percent: number;
-  label: string;
-  hint: string;
-  tone: "default" | "active" | "success" | "danger";
-};
-
-type UploadProgressStyle = CSSProperties & {
-  "--standard-progress-percent": string;
-};
+type UploadStageMeta = ProgressMeta;
 
 function clarificationTextMeta(params: {
   text: string;
@@ -306,7 +297,6 @@ export function RequirementsContent() {
 
   const lanes = workbench?.lanes ?? [];
   const laneTabs = lanes.filter((lane) => lane.packages.length > 0);
-  const shownLanes = visibleLanes(lanes, activeLane);
   const selected = selectedPackage ?? workbench?.packages[0] ?? null;
   const blockingPackages = useMemo(
     () => workbench?.packages.filter((pkg) => pkg.blocking) ?? [],
@@ -318,7 +308,7 @@ export function RequirementsContent() {
   );
   const orderedShownLanes = useMemo(
     () =>
-      shownLanes.map((lane) => ({
+      visibleLanes(lanes, activeLane).map((lane) => ({
         ...lane,
         packages: [...lane.packages].sort((left, right) => {
           const leftRank = left.all_confirmed ? 1 : 0;
@@ -329,7 +319,7 @@ export function RequirementsContent() {
           return (right.confidence ?? 0) - (left.confidence ?? 0);
         }),
       })),
-    [shownLanes],
+    [lanes, activeLane],
   );
   const uploadMeta = clarificationUploadMeta({
     hasFile: Boolean(clarificationFile),
@@ -438,19 +428,7 @@ export function RequirementsContent() {
               >
                 {createClarification.isPending ? "分析中..." : "保存文字并分析"}
               </ClayButton>
-              <div className={`standard-progress standard-progress--${textMeta.tone}`} role="status" aria-live="polite">
-                <div className="standard-progress__top">
-                  <span className="standard-progress__label">{textMeta.label}</span>
-                  <span className="standard-progress__percent">{textMeta.percent}%</span>
-                </div>
-                <div className="standard-progress__track">
-                  <div
-                    className="standard-progress__fill"
-                    style={{ "--standard-progress-percent": `${textMeta.percent}%` } as UploadProgressStyle}
-                  />
-                </div>
-                <div className="standard-progress__hint">{textMeta.hint}</div>
-              </div>
+              <ProgressBar meta={textMeta} role="status" ariaLive="polite" />
             </div>
             <div className="clarification-impact-panel__entry">
               <div className="clarification-impact-panel__entry-header">
@@ -473,19 +451,7 @@ export function RequirementsContent() {
               >
                 {uploadClarification.isPending ? "解析并分析中..." : "上传文件并分析"}
               </ClayButton>
-              <div className={`standard-progress standard-progress--${uploadMeta.tone}`} role="status" aria-live="polite">
-                <div className="standard-progress__top">
-                  <span className="standard-progress__label">{uploadMeta.label}</span>
-                  <span className="standard-progress__percent">{uploadMeta.percent}%</span>
-                </div>
-                <div className="standard-progress__track">
-                  <div
-                    className="standard-progress__fill"
-                    style={{ "--standard-progress-percent": `${uploadMeta.percent}%` } as UploadProgressStyle}
-                  />
-                </div>
-                <div className="standard-progress__hint">{uploadMeta.hint}</div>
-              </div>
+              <ProgressBar meta={uploadMeta} role="status" ariaLive="polite" />
             </div>
           </div>
         </div>
@@ -527,48 +493,31 @@ export function RequirementsContent() {
         </div>
       )}
 
-      {expandedRiskCard === "blocking" && blockingPackages.length > 0 && (
-        <section className="requirement-risk-panel" aria-label="待确认红线相关条款">
-          <div className="requirement-risk-panel__header">
-            <h2>待确认红线相关条款</h2>
-            <span>{blockingPackages.length} 个条款包</span>
-          </div>
-          <div className="requirement-package-list requirement-package-list--tri">
-            {blockingPackages.map((pkg) => (
-              <article key={pkg.id} className={`requirement-package ${selected?.id === pkg.id ? "is-selected" : ""} ${pkg.blocking ? "is-blocking" : ""}`} onClick={() => setSelectedPackage(pkg)}>
-                <div className="requirement-package__topline">
-                  <Badge variant={LEVEL_BADGES[pkg.confirmation_level]}>{LEVEL_LABELS[pkg.confirmation_level]}</Badge>
-                  {pkg.has_conflict && <Badge variant="danger">字段冲突</Badge>}
-                  {pkg.all_confirmed && <Badge variant="success">已确认</Badge>}
-                </div>
-                <h3>{pkg.title}</h3>
-                <p>{pkg.system_conclusion || "系统暂无结论，需查看来源原文。"}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {expandedRiskCard === "conflict" && conflictPackages.length > 0 && (
-        <section className="requirement-risk-panel" aria-label="冲突条款相关条款">
-          <div className="requirement-risk-panel__header">
-            <h2>冲突条款相关条款</h2>
-            <span>{conflictPackages.length} 个条款包</span>
-          </div>
-          <div className="requirement-package-list requirement-package-list--tri">
-            {conflictPackages.map((pkg) => (
-              <article key={pkg.id} className={`requirement-package ${selected?.id === pkg.id ? "is-selected" : ""} ${pkg.blocking ? "is-blocking" : ""}`} onClick={() => setSelectedPackage(pkg)}>
-                <div className="requirement-package__topline">
-                  <Badge variant={LEVEL_BADGES[pkg.confirmation_level]}>{LEVEL_LABELS[pkg.confirmation_level]}</Badge>
-                  <Badge variant="danger">字段冲突</Badge>
-                  {pkg.all_confirmed && <Badge variant="success">已确认</Badge>}
-                </div>
-                <h3>{pkg.title}</h3>
-                <p>{pkg.system_conclusion || "系统暂无结论，需查看来源原文。"}</p>
-              </article>
-            ))}
-          </div>
-        </section>
+      {([
+        { kind: "blocking", heading: "待确认红线相关条款", packages: blockingPackages },
+        { kind: "conflict", heading: "冲突条款相关条款", packages: conflictPackages },
+      ] as const).map((panel) =>
+        expandedRiskCard === panel.kind && panel.packages.length > 0 ? (
+          <section key={panel.kind} className="requirement-risk-panel" aria-label={panel.heading}>
+            <div className="requirement-risk-panel__header">
+              <h2>{panel.heading}</h2>
+              <span>{panel.packages.length} 个条款包</span>
+            </div>
+            <div className="requirement-package-list requirement-package-list--tri">
+              {panel.packages.map((pkg) => (
+                <article key={pkg.id} className={`requirement-package ${selected?.id === pkg.id ? "is-selected" : ""} ${pkg.blocking ? "is-blocking" : ""}`} onClick={() => setSelectedPackage(pkg)}>
+                  <div className="requirement-package__topline">
+                    <Badge variant={LEVEL_BADGES[pkg.confirmation_level]}>{LEVEL_LABELS[pkg.confirmation_level]}</Badge>
+                    {pkg.has_conflict && <Badge variant="danger">字段冲突</Badge>}
+                    {pkg.all_confirmed && <Badge variant="success">已确认</Badge>}
+                  </div>
+                  <h3>{pkg.title}</h3>
+                  <p>{pkg.system_conclusion || "系统暂无结论，需查看来源原文。"}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null,
       )}
 
       <div className="requirement-workbench__tabs">
