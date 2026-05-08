@@ -15,6 +15,7 @@ from tender_backend.services.export_service.docx_exporter import (
     render_chapter_docx_zip,
     render_docx,
     render_export,
+    render_volume_docx,
 )
 
 
@@ -76,6 +77,45 @@ def test_render_docx_without_template_creates_plain_word_file(tmp_path: Path, mo
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "测试项目 投标文件" in text
     assert "已提供营业执照" in text
+
+
+def test_render_volume_docx_injects_equipment_tables_for_business_and_technical(tmp_path: Path, monkeypatch) -> None:
+    injected: list[tuple[object, str]] = []
+
+    class _Injector:
+        def __init__(self, document, _conn, *, project_id):
+            injected.append((document, str(project_id)))
+
+        def inject_all(self):
+            injected.append(("inject", "done"))
+            return 4
+
+    monkeypatch.setattr(docx_exporter, "EquipmentTableInjector", _Injector)
+
+    business_output = tmp_path / "business.docx"
+    technical_output = tmp_path / "technical.docx"
+    qualification_output = tmp_path / "qualification.docx"
+    project_id = uuid4()
+
+    render_volume_docx(_Conn(_multi_chapter_drafts()), project_id=project_id, volume_type="business", output_path=business_output)
+    render_volume_docx(_Conn(_multi_chapter_drafts()), project_id=project_id, volume_type="technical", output_path=technical_output)
+    render_volume_docx(_Conn(_multi_chapter_drafts()), project_id=project_id, volume_type="qualification", output_path=qualification_output)
+
+    business_doc = Document(str(business_output))
+    technical_doc = Document(str(technical_output))
+    qualification_doc = Document(str(qualification_output))
+
+    business_text = "\n".join(paragraph.text for paragraph in business_doc.paragraphs)
+    technical_text = "\n".join(paragraph.text for paragraph in technical_doc.paragraphs)
+    qualification_text = "\n".join(paragraph.text for paragraph in qualification_doc.paragraphs)
+
+    assert "主要施工设备表" in business_text
+    assert "{{equipment_table:vehicle}}" in business_text
+    assert "主要施工设备表" in technical_text
+    assert "{{equipment_table:vehicle}}" in technical_text
+    assert "主要施工设备表" not in qualification_text
+    assert "{{equipment_table:vehicle}}" not in qualification_text
+    assert injected.count(("inject", "done")) == 2
 
 
 def _multi_chapter_drafts() -> list[dict]:

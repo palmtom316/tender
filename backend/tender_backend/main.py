@@ -11,6 +11,8 @@ from tender_backend.api.requirements import router as requirements_router
 from tender_backend.api.scoring import router as scoring_router
 from tender_backend.api.search import router as search_router
 from tender_backend.api.drafts import router as drafts_router
+from tender_backend.api.equipment_selection import router as equipment_selection_router
+from tender_backend.api.personnel_selection import router as personnel_selection_router
 from tender_backend.api.review import router as review_router
 from tender_backend.api.compliance import router as compliance_router
 from tender_backend.api.table_overrides import router as table_overrides_router
@@ -59,6 +61,8 @@ def create_app() -> FastAPI:
     app.include_router(scoring_router, prefix=settings.api_prefix)
     app.include_router(search_router, prefix=settings.api_prefix)
     app.include_router(drafts_router, prefix=settings.api_prefix)
+    app.include_router(equipment_selection_router, prefix=settings.api_prefix)
+    app.include_router(personnel_selection_router, prefix=settings.api_prefix)
     app.include_router(review_router, prefix=settings.api_prefix)
     app.include_router(compliance_router, prefix=settings.api_prefix)
     app.include_router(table_overrides_router, prefix=settings.api_prefix)

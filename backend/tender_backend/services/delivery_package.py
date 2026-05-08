@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 
 from tender_backend.services.export_service.doc_converter import convert_docx_to_doc
 from tender_backend.services.export_service.docx_exporter import EXPORT_ROOT, render_docx, render_volume_docx
+from tender_backend.services.export_service.equipment_table_renderer import EquipmentTableRenderer
 from tender_backend.services.compliance_check_service import ComplianceCheckService
 from tender_backend.services.review_service.compliance_matrix import build_compliance_matrix
 from tender_backend.services.review_service.review_engine import build_project_review
@@ -109,6 +110,8 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
 
     docx_path = render_docx(conn, project_id=project_id, output_path=root / "投标文件.docx")
     doc_path = convert_docx_to_doc(docx_path)
+    equipment_xlsx_path = root / "主要施工设备一览表.xlsx"
+    equipment_xlsx_path.write_bytes(EquipmentTableRenderer().render_attachment_xlsx(conn, project_id=project_id))
     warnings: list[dict[str, str]] = []
     if doc_path is None:
         warnings.append({"code": "doc_conversion_unavailable", "message": "DOC conversion did not produce an output file"})
@@ -134,7 +137,7 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
     package_name = f"{project_name}-投标交付包-v{version}.zip"
     package_path = root.parent / package_name
     with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in [docx_path, *([doc_path] if doc_path else []), *volume_paths, review_report_path, response_matrix_path, missing_items_path, traceability_path, confirmation_record_path, submission_checklist_path]:
+        for path in [docx_path, *([doc_path] if doc_path else []), equipment_xlsx_path, *volume_paths, review_report_path, response_matrix_path, missing_items_path, traceability_path, confirmation_record_path, submission_checklist_path]:
             archive.write(path, path.name)
 
     with conn.cursor(row_factory=dict_row) as cur:
@@ -162,7 +165,12 @@ def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: st
                 str(missing_items_path),
                 str(traceability_path),
                 str(confirmation_record_path),
-                Jsonb({"volume_paths": [str(path) for path in volume_paths], "warnings": warnings, "submission_checklist_path": str(submission_checklist_path)}),
+                Jsonb({
+                    "volume_paths": [str(path) for path in volume_paths],
+                    "warnings": warnings,
+                    "submission_checklist_path": str(submission_checklist_path),
+                    "equipment_table_xlsx_path": str(equipment_xlsx_path),
+                }),
                 created_by,
             ),
         ).fetchone()

@@ -17,6 +17,8 @@ import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
 import { ProgressBar, type ProgressMeta } from "../../components/ui/ProgressBar";
 import { AiExtractionRunPanel } from "./AiExtractionRunPanel";
+import { EquipmentSelectionWorkbench } from "./EquipmentSelectionWorkbench";
+import { PersonnelSelectionWorkbench } from "./PersonnelSelectionWorkbench";
 import { SourceChunkViewer } from "./SourceChunkViewer";
 
 const LEVEL_LABELS: Record<RequirementPackage["confirmation_level"], string> = {
@@ -388,6 +390,9 @@ export function RequirementsContent() {
           提交失败：{startAiExtraction.error instanceof Error ? startAiExtraction.error.message : "请稍后重试"}
         </div>
       )}
+
+      <EquipmentSelectionWorkbench projectId={projectId} />
+      <PersonnelSelectionWorkbench projectId={projectId} />
 
       <section className="clarification-impact-panel" aria-label="澄清补遗影响分析">
         <div className="clarification-impact-panel__header">

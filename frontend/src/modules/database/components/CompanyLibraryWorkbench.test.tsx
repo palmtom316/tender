@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const {
   fetchLibraryCompaniesMock,
@@ -7,6 +7,7 @@ const {
   fetchCompanyProfilesMock,
   fetchEvidenceAssetsMock,
   fetchCompanyContractPerformancesMock,
+  deleteLibraryCompanyMock,
   createCompanyContractPerformanceMock,
   updateCompanyContractPerformanceMock,
   deleteCompanyContractPerformanceMock,
@@ -17,6 +18,7 @@ const {
   fetchCompanyProfilesMock: vi.fn(),
   fetchEvidenceAssetsMock: vi.fn(),
   fetchCompanyContractPerformancesMock: vi.fn(),
+  deleteLibraryCompanyMock: vi.fn(),
   createCompanyContractPerformanceMock: vi.fn(),
   updateCompanyContractPerformanceMock: vi.fn(),
   deleteCompanyContractPerformanceMock: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("../../../lib/api", async () => {
     fetchCompanyProfiles: fetchCompanyProfilesMock,
     fetchEvidenceAssets: fetchEvidenceAssetsMock,
     fetchCompanyContractPerformances: fetchCompanyContractPerformancesMock,
+    deleteLibraryCompany: deleteLibraryCompanyMock,
     createCompanyContractPerformance: createCompanyContractPerformanceMock,
     updateCompanyContractPerformance: updateCompanyContractPerformanceMock,
     deleteCompanyContractPerformance: deleteCompanyContractPerformanceMock,
@@ -41,7 +44,47 @@ vi.mock("../../../lib/api", async () => {
 
 import { CompanyLibraryWorkbench } from "./CompanyLibraryWorkbench";
 
+afterEach(() => {
+  cleanup();
+});
+
 describe("CompanyLibraryWorkbench", () => {
+  it("deletes a library company from the list", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fetchLibraryCompaniesMock
+      .mockResolvedValueOnce([
+        { id: "lib-1", company_name: "REDACTED", company_type: "施工总承包", company_key: "REDACTED", enabled: true, metadata_json: {}, created_at: "", updated_at: "" },
+        { id: "lib-2", company_name: "重庆山城电建", company_type: "输变电", company_key: "cq-sc", enabled: true, metadata_json: {}, created_at: "", updated_at: "" },
+      ])
+      .mockResolvedValueOnce([
+        { id: "lib-2", company_name: "重庆山城电建", company_type: "输变电", company_key: "cq-sc", enabled: true, metadata_json: {}, created_at: "", updated_at: "" },
+      ]);
+    fetchAssetTaxonomyMock.mockResolvedValue({
+      domains: [
+        { domain: "company_qualification", label: "公司资质文件", categories: [["business_license", "营业执照"]] },
+        { domain: "company_asset", label: "公司资产文件", categories: [["vehicle_certificate", "机动车辆证明文件"]] },
+        { domain: "company_performance", label: "公司业绩文件", categories: [["contract_document", "合同"]] },
+      ],
+    });
+    fetchCompanyProfilesMock.mockResolvedValue([]);
+    fetchEvidenceAssetsMock.mockResolvedValue([]);
+    fetchCompanyContractPerformancesMock.mockResolvedValue([]);
+    deleteLibraryCompanyMock.mockResolvedValue({ deleted: true });
+
+    render(<CompanyLibraryWorkbench />);
+
+    expect(await screen.findByRole("button", { name: "删除公司库 REDACTED" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "删除公司库 重庆山城电建" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除公司库 REDACTED" }));
+
+    await waitFor(() => expect(deleteLibraryCompanyMock).toHaveBeenCalledWith("lib-1"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "删除公司库 REDACTED" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "删除公司库 重庆山城电建" })).toBeInTheDocument();
+  });
+
   it("renders contract performance ledger and submits structured form", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     fetchLibraryCompaniesMock.mockResolvedValue([{ id: "lib-1", company_name: "REDACTED", company_type: "施工总承包", company_key: "REDACTED", enabled: true, metadata_json: {}, created_at: "", updated_at: "" }]);
@@ -324,7 +367,7 @@ describe("CompanyLibraryWorkbench", () => {
         },
       ]);
     render(<CompanyLibraryWorkbench />);
-    expect(await screen.findByText("公司业绩表")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "下载合同业绩表" })).toBeInTheDocument();
     expect(await screen.findByText("配网工程合同")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("合同名称"), { target: { value: "输电线路改造合同" } });

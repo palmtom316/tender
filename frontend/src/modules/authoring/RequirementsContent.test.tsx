@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { useNavigationMock, fetchWorkbenchMock, fetchTenderSummaryMock, startRunMock, bulkConfirmMock, listTenderClarificationsMock, createTenderClarificationMock, uploadTenderClarificationMock } = vi.hoisted(() => ({
+const { useNavigationMock, fetchWorkbenchMock, fetchTenderSummaryMock, startRunMock, bulkConfirmMock, listTenderClarificationsMock, createTenderClarificationMock, uploadTenderClarificationMock, fetchProjectEquipmentAssetsMock, fetchProjectEquipmentSelectionsMock, confirmProjectEquipmentSelectionsMock, createProjectEquipmentSelectionMock, deleteProjectEquipmentSelectionMock, updateProjectEquipmentSelectionMock, fetchProjectEquipmentPreviewMock } = vi.hoisted(() => ({
   useNavigationMock: vi.fn(),
   fetchWorkbenchMock: vi.fn(),
   fetchTenderSummaryMock: vi.fn(),
@@ -12,6 +12,13 @@ const { useNavigationMock, fetchWorkbenchMock, fetchTenderSummaryMock, startRunM
   listTenderClarificationsMock: vi.fn(),
   createTenderClarificationMock: vi.fn(),
   uploadTenderClarificationMock: vi.fn(),
+  fetchProjectEquipmentAssetsMock: vi.fn(),
+  fetchProjectEquipmentSelectionsMock: vi.fn(),
+  confirmProjectEquipmentSelectionsMock: vi.fn(),
+  createProjectEquipmentSelectionMock: vi.fn(),
+  deleteProjectEquipmentSelectionMock: vi.fn(),
+  updateProjectEquipmentSelectionMock: vi.fn(),
+  fetchProjectEquipmentPreviewMock: vi.fn(),
 }));
 
 vi.mock("../../lib/NavigationContext", () => ({
@@ -29,6 +36,13 @@ vi.mock("../../lib/api", async () => {
     listTenderClarifications: listTenderClarificationsMock,
     createTenderClarification: createTenderClarificationMock,
     uploadTenderClarification: uploadTenderClarificationMock,
+    fetchProjectEquipmentAssets: fetchProjectEquipmentAssetsMock,
+    fetchProjectEquipmentSelections: fetchProjectEquipmentSelectionsMock,
+    confirmProjectEquipmentSelections: confirmProjectEquipmentSelectionsMock,
+    createProjectEquipmentSelection: createProjectEquipmentSelectionMock,
+    deleteProjectEquipmentSelection: deleteProjectEquipmentSelectionMock,
+    updateProjectEquipmentSelection: updateProjectEquipmentSelectionMock,
+    fetchProjectEquipmentPreview: fetchProjectEquipmentPreviewMock,
   };
 });
 
@@ -153,6 +167,13 @@ describe("RequirementsContent workbench", () => {
     fetchTenderSummaryMock.mockResolvedValue(summary());
     fetchWorkbenchMock.mockResolvedValue(workbench());
     listTenderClarificationsMock.mockResolvedValue([]);
+    fetchProjectEquipmentAssetsMock.mockResolvedValue([]);
+    fetchProjectEquipmentSelectionsMock.mockResolvedValue([]);
+    confirmProjectEquipmentSelectionsMock.mockResolvedValue([]);
+    createProjectEquipmentSelectionMock.mockResolvedValue({});
+    deleteProjectEquipmentSelectionMock.mockResolvedValue({ deleted: true });
+    updateProjectEquipmentSelectionMock.mockResolvedValue({});
+    fetchProjectEquipmentPreviewMock.mockResolvedValue({ vehicle: [], machine: [], tool: [], safety: [] });
   });
 
   it("renders grouped critical clauses and auto-accepted sampling", async () => {

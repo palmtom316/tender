@@ -23,6 +23,7 @@ router = APIRouter(tags=["master-data"], dependencies=[Depends(get_current_user)
 _repo = MasterDataRepository()
 _EVIDENCE_OWNER_TYPES = {
     "library_company",
+    "company_asset",
     "company_profile",
     "person_profile",
     "project_performance",
@@ -254,6 +255,34 @@ async def upload_evidence_asset(
         sort_order=sort_order,
     )
     return _evidence_asset_out(row)
+
+
+@router.post("/master-data/evidence-assets/{record_id}/replace-file", response_model=EvidenceAssetOut)
+async def replace_evidence_asset_file(
+    record_id: UUID,
+    file: UploadFile = File(...),
+    conn: Connection = Depends(get_db_conn),
+    settings: Settings = Depends(get_settings),
+) -> EvidenceAssetOut:
+    row = _repo.get_evidence_asset(conn, record_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="evidence asset not found")
+    content = await file.read()
+    suffix, media_type = _validate_uploaded_file(file, content, settings=settings)
+    local_name = f"{uuid4()}{suffix}"
+    settings.evidence_upload_dir.mkdir(parents=True, exist_ok=True)
+    local_path = settings.evidence_upload_dir / local_name
+    local_path.write_bytes(content)
+    updated = _repo.update_evidence_asset(
+        conn,
+        record_id,
+        file_name=file.filename or local_name,
+        file_path=str(local_path),
+        media_type=media_type,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="evidence asset not found")
+    return _evidence_asset_out(updated)
 
 
 @router.put("/master-data/evidence-assets/{record_id}", response_model=EvidenceAssetOut)

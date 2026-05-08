@@ -93,6 +93,11 @@ def test_build_delivery_package_records_degraded_warnings(tmp_path: Path, monkey
     monkeypatch.setattr(delivery_package, "render_docx", fake_render_docx)
     monkeypatch.setattr(delivery_package, "render_volume_docx", fake_render_volume_docx)
     monkeypatch.setattr(delivery_package, "convert_docx_to_doc", lambda _path: None)
+    monkeypatch.setattr(
+        delivery_package,
+        "EquipmentTableRenderer",
+        lambda: type("Renderer", (), {"render_attachment_xlsx": lambda self, _conn, project_id: b"xlsx"})(),
+    )
 
     conn = _Conn()
     row = delivery_package.build_delivery_package(conn, project_id=project_id, created_by="Tester")
@@ -102,12 +107,14 @@ def test_build_delivery_package_records_degraded_warnings(tmp_path: Path, monkey
     warnings = row["metadata_json"]["warnings"]
     assert {item["code"] for item in warnings} == {"doc_conversion_unavailable", "volume_render_failed"}
     assert row["metadata_json"]["volume_paths"]
+    assert row["metadata_json"]["equipment_table_xlsx_path"].endswith("主要施工设备一览表.xlsx")
 
     package_path = Path(row["package_path"])
     assert package_path.is_file()
     with zipfile.ZipFile(package_path) as archive:
         names = set(archive.namelist())
     assert "投标文件.docx" in names
+    assert "主要施工设备一览表.xlsx" in names
     assert "审查报告.json" in names
     assert "约束响应矩阵.json" in names
 

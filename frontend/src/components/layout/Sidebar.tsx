@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { MODULE_CONFIG, type ModuleId } from "../../lib/navigation";
 import { useNavigation } from "../../lib/NavigationContext";
+import { useTheme } from "../../lib/ThemeContext";
 import { Icon } from "../ui/Icon";
 import { fetchMe, logout, type MeResponse } from "../../lib/api";
 
 export function Sidebar() {
   const { module, setModule, sidebarCollapsed, toggleSidebar, navigate } = useNavigation();
+  const { theme, toggleTheme } = useTheme();
   const [showMenu, setShowMenu] = useState(false);
   const [currentUser, setCurrentUser] = useState<MeResponse | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -82,6 +84,17 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer" ref={menuRef}>
+        <button
+          className="sidebar-theme-toggle"
+          type="button"
+          onClick={toggleTheme}
+          title={theme === "dark" ? "切换到浅色模式" : "切换到暗色模式"}
+          aria-label={theme === "dark" ? "切换到浅色模式" : "切换到暗色模式"}
+        >
+          <Icon name={theme === "dark" ? "sun" : "moon"} size={16} />
+          <span>{theme === "dark" ? "浅色模式" : "暗色模式"}</span>
+        </button>
+
         <button
           className="sidebar-avatar"
           onClick={() => setShowMenu((v) => !v)}

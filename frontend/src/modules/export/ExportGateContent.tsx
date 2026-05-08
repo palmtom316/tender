@@ -146,16 +146,22 @@ export function ExportGateContent() {
         </div>
       </fieldset>
 
-      {gatesData && (
-        <ClayButton
-          size="lg"
-          disabled={!gatesData.can_export || exportDocx.isPending}
-          onClick={() => exportDocx.mutate(exportMode)}
-          style={{ marginBottom: "var(--space-8)" }}
-        >
-          {exportButtonLabel}
-        </ClayButton>
-      )}
+      <div className="export-actions">
+        {gatesData && (
+          <ClayButton
+            size="lg"
+            disabled={!gatesData.can_export || exportDocx.isPending}
+            onClick={() => exportDocx.mutate(exportMode)}
+          >
+            {exportButtonLabel}
+          </ClayButton>
+        )}
+        {gatesData?.can_export && (
+          <ClayButton size="lg" onClick={() => delivery.mutate()} disabled={delivery.isPending}>
+            {delivery.isPending ? "打包中..." : "生成最终交付包"}
+          </ClayButton>
+        )}
+      </div>
       {exportDocx.isError && (
         <p className="error-message" role="alert">
           导出失败：{exportDocx.error instanceof Error ? exportDocx.error.message : String(exportDocx.error)}
@@ -163,11 +169,6 @@ export function ExportGateContent() {
       )}
       {exportDocx.isSuccess && currentMode && (
         <p className="success-message">已生成 {currentMode.label} 输出。</p>
-      )}
-      {gatesData?.can_export && (
-        <ClayButton size="lg" onClick={() => delivery.mutate()} disabled={delivery.isPending}>
-          {delivery.isPending ? "打包中..." : "生成最终交付包"}
-        </ClayButton>
       )}
     </div>
   );

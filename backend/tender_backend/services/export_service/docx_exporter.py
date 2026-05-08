@@ -18,9 +18,18 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from tender_backend.services.export_service.doc_converter import convert_docx_to_doc
+from tender_backend.services.export_service.equipment_table_injector import EquipmentTableInjector
+from tender_backend.services.export_service.personnel_table_injector import PersonnelTableInjector
 from tender_backend.services.tender_requirement_priority import load_tender_requirement_overrides
 
 logger = structlog.stdlib.get_logger(__name__)
+
+_EQUIPMENT_TABLE_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("车辆", "vehicle"),
+    ("施工机械", "machine"),
+    ("施工工器具", "tool"),
+    ("安全设施设备及器具", "safety"),
+)
 
 TEMPLATE_DIR = Path(os.environ.get("TEMPLATE_DIR", "templates"))
 EXPORT_ROOT = Path(os.environ.get("TENDER_EXPORT_ROOT", "/tmp/tender-exports"))
@@ -85,6 +94,26 @@ def _apply_basic_style(document: Document) -> None:
         footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
+def _should_include_equipment_tables(volume_type: str | None) -> bool:
+    return volume_type in (None, "business", "technical")
+
+
+def _should_include_personnel_table(volume_type: str | None) -> bool:
+    return volume_type in (None, "technical")
+
+
+def _append_equipment_table_anchors(document: Document) -> None:
+    document.add_heading("主要施工设备表", level=1)
+    for title, asset_type in _EQUIPMENT_TABLE_SECTIONS:
+        document.add_paragraph(title)
+        document.add_paragraph(f"{{{{equipment_table:{asset_type}}}}}")
+
+
+def _append_personnel_table_anchor(document: Document) -> None:
+    document.add_heading("项目管理机构人员表", level=1)
+    document.add_paragraph("{{personnel_table}}")
+
+
 def _render_plain_docx(
     conn: Connection,
     *,
@@ -128,6 +157,12 @@ def _render_plain_docx(
     document.add_heading("目录", level=1)
     for draft in drafts:
         document.add_paragraph(f"{draft['chapter_code']} {draft.get('chapter_title') or ''}".strip())
+    if _should_include_equipment_tables(volume_type):
+        document.add_page_break()
+        _append_equipment_table_anchors(document)
+    if _should_include_personnel_table(volume_type):
+        document.add_page_break()
+        _append_personnel_table_anchor(document)
     document.add_heading("附件清单", level=1)
     document.add_paragraph("资质证书、人员证书、业绩证明等附件按招标文件要求随交付包一并提交。")
     document.add_heading("签章位置", level=1)
@@ -138,6 +173,11 @@ def _render_plain_docx(
         if index:
             document.add_page_break()
         _add_markdown_content(document, draft["content_md"])
+
+    if _should_include_equipment_tables(volume_type):
+        EquipmentTableInjector(document, conn, project_id=project_id).inject_all()
+    if _should_include_personnel_table(volume_type):
+        PersonnelTableInjector(document, conn, project_id=project_id).inject_all()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.save(str(output_path))
@@ -195,9 +235,11 @@ def render_docx(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
+    document = Document(str(output_path))
+    EquipmentTableInjector(document, conn, project_id=project_id).inject_all()
+    PersonnelTableInjector(document, conn, project_id=project_id).inject_all()
     overrides = load_tender_requirement_overrides(conn, project_id=project_id)
     if overrides["content_requirements"] or overrides["format_requirements"]:
-        document = Document(str(output_path))
         document.add_page_break()
         document.add_heading("招标文件解析要求优先响应", level=1)
         document.add_paragraph("以下内容由招标文件解析结果生成，内容与格式要求优先于模板默认内容；如有冲突，按本节要求执行。")
@@ -209,7 +251,7 @@ def render_docx(
             document.add_heading("格式要求", level=2)
             for req in overrides["format_requirements"]:
                 document.add_paragraph(str(req.get("requirement_text") or req.get("source_text") or req.get("title") or ""))
-        document.save(str(output_path))
+    document.save(str(output_path))
 
     logger.info("docx_rendered", project_id=str(project_id), output=str(output_path))
     return output_path

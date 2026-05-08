@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../../../components/ui/Icon";
 import { Card } from "../../../components/ui/Card";
 import { ClayButton } from "../../../components/ui/ClayButton";
+import { CompanyAssetSection } from "./CompanyAssetSection";
 import type {
   AssetTaxonomyDomain,
   CompanyContractPerformance,
@@ -14,6 +15,7 @@ import {
   companyContractPerformanceExportUrl,
   createCompanyContractPerformance,
   createLibraryCompany,
+  deleteLibraryCompany,
   deleteCompanyContractPerformance,
   evidenceAssetDownloadUrl,
   fetchAssetTaxonomy,
@@ -134,6 +136,7 @@ export function CompanyLibraryWorkbench() {
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyType, setNewCompanyType] = useState("");
   const [creating, setCreating] = useState(false);
+  const [deletingLibraryId, setDeletingLibraryId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadDomain, setUploadDomain] = useState("company_qualification");
   const [uploadCategory, setUploadCategory] = useState("business_license");
@@ -260,6 +263,26 @@ export function CompanyLibraryWorkbench() {
       setError(err instanceof Error ? err.message : "上传资料失败");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDeleteLibrary = async (library: LibraryCompany) => {
+    const confirmed = window.confirm(`确认删除公司库“${library.company_name}”？关联的公司资料、资产和业绩会一并删除。`);
+    if (!confirmed) return;
+    setDeletingLibraryId(library.id);
+    try {
+      await deleteLibraryCompany(library.id);
+      const rows = await fetchLibraryCompanies();
+      setLibraries(rows);
+      setSelectedLibraryId((current) => {
+        if (current !== library.id) return current || rows[0]?.id || "";
+        return rows[0]?.id || "";
+      });
+      setError("");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "删除公司资料库失败");
+    } finally {
+      setDeletingLibraryId("");
     }
   };
 
@@ -511,15 +534,28 @@ export function CompanyLibraryWorkbench() {
           ) : (
             <div className="stack-sm">
               {libraries.map((row) => (
-                <button
-                  key={row.id}
-                  type="button"
-                  className={`template-list__item ${selectedLibraryId === row.id ? "is-active" : ""}`}
-                  onClick={() => setSelectedLibraryId(row.id)}
-                >
-                  <span className="template-list__title">{row.company_name}</span>
-                  <span className="template-list__meta">{row.company_type || row.company_key}</span>
-                </button>
+                <div key={row.id} className={`template-list__item ${selectedLibraryId === row.id ? "is-active" : ""}`}>
+                  <div className="template-list__split">
+                    <button
+                      type="button"
+                      className="template-list__content-button"
+                      onClick={() => setSelectedLibraryId(row.id)}
+                    >
+                      <span className="template-list__title">{row.company_name}</span>
+                      <span className="template-list__meta">{row.company_type || row.company_key}</span>
+                    </button>
+                    <ClayButton
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      onClick={() => void handleDeleteLibrary(row)}
+                      disabled={deletingLibraryId === row.id}
+                      aria-label={`删除公司库 ${row.company_name}`}
+                    >
+                      {deletingLibraryId === row.id ? "删除中..." : "删除"}
+                    </ClayButton>
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -585,6 +621,14 @@ export function CompanyLibraryWorkbench() {
               </div>
             </div>
           </Card>
+
+          {selectedLibraryId ? (
+            <CompanyAssetSection
+              libraryCompanyId={selectedLibraryId}
+              companyName={selectedLibrary?.company_name || "当前公司库"}
+              onError={setError}
+            />
+          ) : null}
 
           <Card>
             <div className="template-panel__header">
@@ -680,22 +724,24 @@ export function CompanyLibraryWorkbench() {
                         aria-label={field.label}
                         onChange={(event) => handleContractFileChange(field.key, event.target.files?.[0] ?? null)}
                       />
-                      <ClayButton
-                        type="button"
-                        variant="outline"
-                        onClick={() => void uploadContractAttachment(field.key)}
-                        disabled={!selectedLibraryId || !state.file || state.uploading}
-                      >
-                        {state.uploading ? "上传中..." : hasLinkedAsset ? "替换 PDF" : "上传 PDF"}
-                      </ClayButton>
-                      <ClayButton
-                        type="button"
-                        variant="ghost"
-                        onClick={() => clearContractAttachment(field.key)}
-                        disabled={state.uploading || (!state.file && !hasLinkedAsset && !state.cleared)}
-                      >
-                        清空附件
-                      </ClayButton>
+                      <div className="company-contract-upload-card__actions">
+                        <ClayButton
+                          type="button"
+                          variant="outline"
+                          onClick={() => void uploadContractAttachment(field.key)}
+                          disabled={!selectedLibraryId || !state.file || state.uploading}
+                        >
+                          {state.uploading ? "上传中..." : hasLinkedAsset ? "替换 PDF" : "上传 PDF"}
+                        </ClayButton>
+                        <ClayButton
+                          type="button"
+                          variant="ghost"
+                          onClick={() => clearContractAttachment(field.key)}
+                          disabled={state.uploading || (!state.file && !hasLinkedAsset && !state.cleared)}
+                        >
+                          清空附件
+                        </ClayButton>
+                      </div>
                     </div>
                   );
                 })}

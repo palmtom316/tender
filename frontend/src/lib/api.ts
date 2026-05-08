@@ -1394,6 +1394,36 @@ export interface CompanyProfile {
   updated_at: string;
 }
 
+export type CompanyAssetType = "vehicle" | "machine" | "tool" | "safety";
+export type CompanyAssetOwnership = "self" | "leased" | "third_party";
+export type CompanyAssetStatus = "active" | "maintenance" | "retired";
+
+export interface CompanyAsset {
+  id: string;
+  library_company_id: string;
+  asset_type: CompanyAssetType;
+  name: string;
+  spec_model: string | null;
+  serial_no: string | null;
+  manufacturer: string | null;
+  quantity: string;
+  unit: string;
+  ownership: CompanyAssetOwnership;
+  acquired_at: string | null;
+  expires_at: string | null;
+  technical_condition: string | null;
+  status: CompanyAssetStatus;
+  location: string | null;
+  extras: Record<string, unknown>;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyAssetWithAttachments extends CompanyAsset {
+  attachments: EvidenceAsset[];
+}
+
 export interface PersonProfile {
   id: string;
   library_company_id: string | null;
@@ -1412,6 +1442,28 @@ export interface PersonProfile {
   created_at: string;
   updated_at: string;
 }
+
+export interface PersonProfileWithAttachments extends PersonProfile {
+  attachments: EvidenceAsset[];
+}
+
+export interface PersonProfilePayload {
+  library_company_id?: string | null;
+  full_name: string;
+  gender?: string | null;
+  age?: number | null;
+  education?: string | null;
+  title?: string | null;
+  role_name?: string | null;
+  specialty?: string | null;
+  years_experience?: number | null;
+  phone?: string | null;
+  email?: string | null;
+  resume_text?: string | null;
+  profile_json?: Record<string, unknown>;
+}
+
+export type PersonProfileUpdatePayload = Partial<PersonProfilePayload>;
 
 export interface EvidenceAsset {
   id: string;
@@ -1519,6 +1571,56 @@ export interface LibraryCompanyCreatePayload {
   metadata_json?: Record<string, unknown>;
 }
 
+export interface CompanyAssetPayload {
+  asset_type: CompanyAssetType;
+  name: string;
+  spec_model?: string | null;
+  serial_no?: string | null;
+  manufacturer?: string | null;
+  quantity?: string | number;
+  unit: string;
+  ownership: CompanyAssetOwnership;
+  acquired_at?: string | null;
+  expires_at?: string | null;
+  technical_condition?: string | null;
+  status?: CompanyAssetStatus;
+  location?: string | null;
+  extras?: Record<string, unknown>;
+  notes?: string | null;
+}
+
+export interface EquipmentSelection {
+  id: string;
+  project_id: string;
+  asset_id: string;
+  asset_type: CompanyAssetType;
+  intended_role: string | null;
+  snapshot_json: Record<string, unknown> | null;
+  display_order: number;
+  confirmed: boolean;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type EquipmentPreviewRow = Record<string, string>;
+export type EquipmentPreview = Record<CompanyAssetType, EquipmentPreviewRow[]>;
+
+export interface PersonnelSelection {
+  id: string;
+  project_id: string;
+  person_id: string;
+  intended_role: string | null;
+  snapshot_json: Record<string, unknown> | null;
+  display_order: number;
+  confirmed: boolean;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PersonnelPreviewRow = Record<string, string>;
+
 export interface EvidenceAssetUploadPayload {
   library_company_id?: string;
   owner_type: string;
@@ -1551,6 +1653,12 @@ export function createLibraryCompany(data: LibraryCompanyCreatePayload): Promise
   });
 }
 
+export function deleteLibraryCompany(recordId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/master-data/library-companies/${recordId}`, {
+    method: "DELETE",
+  });
+}
+
 export function fetchAssetTaxonomy(options?: {
   signal?: AbortSignal;
 }): Promise<AssetTaxonomyResponse> {
@@ -1571,6 +1679,214 @@ export function fetchCompanyProfiles(options?: {
   });
 }
 
+export function fetchCompanyAssets(options: {
+  signal?: AbortSignal;
+  libraryCompanyId: string;
+  assetType?: CompanyAssetType;
+  status?: CompanyAssetStatus | "";
+  q?: string;
+}): Promise<CompanyAsset[]> {
+  const params = new URLSearchParams();
+  if (options.assetType) params.set("asset_type", options.assetType);
+  if (options.status) params.set("status", options.status);
+  if (options.q?.trim()) params.set("q", options.q.trim());
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<CompanyAsset[]>(
+    `/master-data/library-companies/${options.libraryCompanyId}/assets${suffix}`,
+    { signal: options.signal },
+  );
+}
+
+export function createCompanyAsset(
+  libraryCompanyId: string,
+  data: CompanyAssetPayload,
+): Promise<CompanyAsset> {
+  return request<CompanyAsset>(`/master-data/library-companies/${libraryCompanyId}/assets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateCompanyAsset(
+  recordId: string,
+  data: Partial<CompanyAssetPayload>,
+): Promise<CompanyAsset> {
+  return request<CompanyAsset>(`/master-data/assets/${recordId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteCompanyAsset(recordId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/master-data/assets/${recordId}`, {
+    method: "DELETE",
+  });
+}
+
+export function retireCompanyAsset(recordId: string): Promise<CompanyAsset> {
+  return request<CompanyAsset>(`/master-data/assets/${recordId}/retire`, {
+    method: "POST",
+  });
+}
+
+export function fetchProjectEquipmentAssets(options: {
+  projectId: string;
+  assetType?: CompanyAssetType;
+  q?: string;
+  status?: CompanyAssetStatus | "";
+  validOnly?: boolean;
+  signal?: AbortSignal;
+}): Promise<CompanyAsset[]> {
+  const params = new URLSearchParams();
+  if (options.assetType) params.set("asset_type", options.assetType);
+  if (options.q?.trim()) params.set("q", options.q.trim());
+  if (options.status) params.set("status", options.status);
+  if (options.validOnly) params.set("valid_only", "true");
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<CompanyAsset[]>(`/projects/${options.projectId}/equipment/assets${suffix}`, {
+    signal: options.signal,
+  });
+}
+
+export function fetchProjectEquipmentSelections(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<EquipmentSelection[]> {
+  return request<EquipmentSelection[]>(`/projects/${projectId}/equipment/selections`, {
+    signal: options?.signal,
+  });
+}
+
+export function createProjectEquipmentSelection(
+  projectId: string,
+  data: { asset_id: string },
+): Promise<EquipmentSelection> {
+  return request<EquipmentSelection>(`/projects/${projectId}/equipment/selections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateProjectEquipmentSelection(
+  projectId: string,
+  selectionId: string,
+  data: { intended_role?: string | null; display_order?: number },
+): Promise<EquipmentSelection> {
+  return request<EquipmentSelection>(`/projects/${projectId}/equipment/selections/${selectionId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProjectEquipmentSelection(
+  projectId: string,
+  selectionId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/projects/${projectId}/equipment/selections/${selectionId}`, {
+    method: "DELETE",
+  });
+}
+
+export function confirmProjectEquipmentSelections(projectId: string): Promise<EquipmentSelection[]> {
+  return request<EquipmentSelection[]>(`/projects/${projectId}/equipment/selections/confirm`, {
+    method: "POST",
+  });
+}
+
+export function fetchProjectEquipmentPreview(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<EquipmentPreview> {
+  return request<EquipmentPreview>(`/projects/${projectId}/equipment/preview`, {
+    signal: options?.signal,
+  });
+}
+
+export async function downloadProjectEquipmentXlsx(projectId: string): Promise<Blob> {
+  const res = await fetch(buildApiUrl(`/projects/${projectId}/equipment/attachment-xlsx`), {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res));
+  }
+  return res.blob();
+}
+
+export function fetchProjectPersonnelPeople(options: {
+  projectId: string;
+  libraryCompanyId?: string;
+  q?: string;
+  signal?: AbortSignal;
+}): Promise<PersonProfile[]> {
+  const params = new URLSearchParams();
+  if (options.libraryCompanyId) params.set("library_company_id", options.libraryCompanyId);
+  if (options.q?.trim()) params.set("q", options.q.trim());
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<PersonProfile[]>(`/projects/${options.projectId}/personnel/people${suffix}`, {
+    signal: options.signal,
+  });
+}
+
+export function fetchProjectPersonnelSelections(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PersonnelSelection[]> {
+  return request<PersonnelSelection[]>(`/projects/${projectId}/personnel/selections`, {
+    signal: options?.signal,
+  });
+}
+
+export function createProjectPersonnelSelection(
+  projectId: string,
+  data: { person_id: string },
+): Promise<PersonnelSelection> {
+  return request<PersonnelSelection>(`/projects/${projectId}/personnel/selections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateProjectPersonnelSelection(
+  projectId: string,
+  selectionId: string,
+  data: { intended_role?: string | null; display_order?: number },
+): Promise<PersonnelSelection> {
+  return request<PersonnelSelection>(`/projects/${projectId}/personnel/selections/${selectionId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteProjectPersonnelSelection(
+  projectId: string,
+  selectionId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/projects/${projectId}/personnel/selections/${selectionId}`, {
+    method: "DELETE",
+  });
+}
+
+export function confirmProjectPersonnelSelections(projectId: string): Promise<PersonnelSelection[]> {
+  return request<PersonnelSelection[]>(`/projects/${projectId}/personnel/selections/confirm`, {
+    method: "POST",
+  });
+}
+
+export function fetchProjectPersonnelPreview(
+  projectId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PersonnelPreviewRow[]> {
+  return request<PersonnelPreviewRow[]>(`/projects/${projectId}/personnel/preview`, {
+    signal: options?.signal,
+  });
+}
+
 export function fetchPeople(options?: {
   signal?: AbortSignal;
   libraryCompanyId?: string;
@@ -1580,6 +1896,28 @@ export function fetchPeople(options?: {
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return request<PersonProfile[]>(`/master-data/people${suffix}`, {
     signal: options?.signal,
+  });
+}
+
+export function createPerson(data: PersonProfilePayload): Promise<PersonProfile> {
+  return request<PersonProfile>("/master-data/people", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updatePerson(recordId: string, data: PersonProfileUpdatePayload): Promise<PersonProfile> {
+  return request<PersonProfile>(`/master-data/people/${recordId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function deletePerson(recordId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/master-data/people/${recordId}`, {
+    method: "DELETE",
   });
 }
 
@@ -1615,6 +1953,21 @@ export function uploadEvidenceAsset(data: EvidenceAssetUploadPayload): Promise<E
   return request<EvidenceAsset>("/master-data/evidence-assets/upload", {
     method: "POST",
     body: form,
+  });
+}
+
+export function replaceEvidenceAssetFile(assetId: string, file: File): Promise<EvidenceAsset> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<EvidenceAsset>(`/master-data/evidence-assets/${assetId}/replace-file`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+export function deleteEvidenceAsset(assetId: string): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/master-data/evidence-assets/${assetId}`, {
+    method: "DELETE",
   });
 }
 
