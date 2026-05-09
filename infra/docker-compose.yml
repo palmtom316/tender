@@ -110,7 +110,10 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       OPENSEARCH_URL: http://opensearch:9200
       AI_GATEWAY_URL: http://ai-gateway:8100
+      CHART_AI_GATEWAY_TIMEOUT_SECONDS: ${CHART_AI_GATEWAY_TIMEOUT_SECONDS:-8}
       AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
+      MERMAID_RENDER_URL: ${MERMAID_RENDER_URL:-http://mermaid-render:3000}
+      MERMAID_RENDER_TIMEOUT_SECONDS: ${MERMAID_RENDER_TIMEOUT_SECONDS:-20}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     volumes:
@@ -123,6 +126,8 @@ services:
       minio:
         condition: service_started
       opensearch:
+        condition: service_started
+      mermaid-render:
         condition: service_started
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -145,6 +150,20 @@ services:
     ports:
       - "${AI_GATEWAY_PORT:-8100}:8100"
 
+  mermaid-render:
+    build:
+      context: ./mermaid-render
+    image: tender-mermaid-render:dev
+    container_name: tender-mermaid-render
+    profiles: ["app"]
+    environment:
+      PORT: 3000
+      MAX_BODY_BYTES: ${MERMAID_MAX_BODY_BYTES:-262144}
+      RENDER_TIMEOUT_MS: ${MERMAID_RENDER_TIMEOUT_MS:-20000}
+    ports:
+      - "${MERMAID_RENDER_PORT:-8130}:3000"
+    restart: unless-stopped
+
   worker-io:
     image: tender-backend:dev
     container_name: tender-worker-io
@@ -156,6 +175,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-tender}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-tender}
       CELERY_BROKER_URL: redis://redis:6379/0
       AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
+      MERMAID_RENDER_URL: ${MERMAID_RENDER_URL:-http://mermaid-render:3000}
+      MERMAID_RENDER_TIMEOUT_SECONDS: ${MERMAID_RENDER_TIMEOUT_SECONDS:-20}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     volumes:
       - ../backend:/workspace/backend
@@ -180,6 +201,8 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       AI_GATEWAY_URL: http://ai-gateway:8100
       AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
+      MERMAID_RENDER_URL: ${MERMAID_RENDER_URL:-http://mermaid-render:3000}
+      MERMAID_RENDER_TIMEOUT_SECONDS: ${MERMAID_RENDER_TIMEOUT_SECONDS:-20}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     volumes:
@@ -188,6 +211,8 @@ services:
       backend:
         condition: service_started
       ai-gateway:
+        condition: service_started
+      mermaid-render:
         condition: service_started
       redis:
         condition: service_started

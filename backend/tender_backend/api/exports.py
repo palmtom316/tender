@@ -166,11 +166,14 @@ async def check_export_gates(
     """Check all three export gates."""
     require_project_access(conn, project_id=project_id, user=user)
     from tender_backend.db.repositories.requirement_repo import RequirementRepository
+    from tender_backend.db.repositories.chart_asset_repo import ChartAssetRepository
     from tender_backend.services.review_service.review_engine import get_blocking_issues
 
     req_repo = RequirementRepository()
     unconfirmed_veto = req_repo.unconfirmed_veto_count(conn, project_id=project_id)
     blocking_issues = get_blocking_issues(conn, project_id=project_id)
+    chart_assets = ChartAssetRepository().list_by_project(conn, project_id=project_id)
+    unapproved_chart_count = len([asset for asset in chart_assets if asset.status != "approved"])
 
     return {
         "project_id": str(project_id),
@@ -179,9 +182,11 @@ async def check_export_gates(
             "unconfirmed_veto_count": unconfirmed_veto,
             "review_passed": len(blocking_issues) == 0,
             "blocking_issue_count": len(blocking_issues),
+            "charts_approved": unapproved_chart_count == 0,
+            "unapproved_chart_count": unapproved_chart_count,
             "format_passed": True,  # Phase 1: format check is a warning
         },
-        "can_export": unconfirmed_veto == 0 and len(blocking_issues) == 0,
+        "can_export": unconfirmed_veto == 0 and len(blocking_issues) == 0 and unapproved_chart_count == 0,
     }
 
 

@@ -40,7 +40,11 @@ class Settings(BaseSettings):
     vl_repair_page_dpi: int = 200
     vl_repair_page_delay_ms: int = 0
     vl_repair_ai_gateway_timeout_seconds: float = 300.0
+    ai_gateway_url: str = "http://localhost:8100"
+    chart_ai_gateway_timeout_seconds: float = 8.0
     ai_gateway_shared_secret: str = ""
+    mermaid_render_url: str | None = None
+    mermaid_render_timeout_seconds: float = 20.0
     template_import_roots: str = ""
     version: str = "1.0.0"
 

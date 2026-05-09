@@ -18,6 +18,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from tender_backend.services.export_service.doc_converter import convert_docx_to_doc
+from tender_backend.services.export_service.chart_asset_injector import ChartAssetInjector
 from tender_backend.services.export_service.equipment_table_injector import EquipmentTableInjector
 from tender_backend.services.export_service.personnel_table_injector import PersonnelTableInjector
 from tender_backend.services.tender_requirement_priority import load_tender_requirement_overrides
@@ -178,6 +179,7 @@ def _render_plain_docx(
         EquipmentTableInjector(document, conn, project_id=project_id).inject_all()
     if _should_include_personnel_table(volume_type):
         PersonnelTableInjector(document, conn, project_id=project_id).inject_all()
+    ChartAssetInjector(document, conn, project_id=project_id, formal=True).inject_all()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.save(str(output_path))
@@ -238,6 +240,7 @@ def render_docx(
     document = Document(str(output_path))
     EquipmentTableInjector(document, conn, project_id=project_id).inject_all()
     PersonnelTableInjector(document, conn, project_id=project_id).inject_all()
+    ChartAssetInjector(document, conn, project_id=project_id, formal=True).inject_all()
     overrides = load_tender_requirement_overrides(conn, project_id=project_id)
     if overrides["content_requirements"] or overrides["format_requirements"]:
         document.add_page_break()

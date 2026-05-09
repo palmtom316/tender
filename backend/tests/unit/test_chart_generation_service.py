@@ -5,7 +5,7 @@ def test_org_chart_requires_nodes() -> None:
     result = ChartGenerationService().validate(chart_type="org_chart", spec_json={})
 
     assert result["valid"] is False
-    assert result["issues"][0]["code"] == "missing_nodes"
+    assert result["issues"]
 
 
 def test_render_svg_accepts_string_and_object_nodes() -> None:

@@ -808,9 +808,15 @@ export interface ChartAsset {
   title: string;
   spec_json: Record<string, unknown>;
   rendered_svg?: string | null;
+  rendered_path?: string | null;
+  rendered_png_path?: string | null;
+  placeholder_key?: string | null;
+  mermaid_source?: string | null;
   status: string;
+  version?: number;
   metadata_json?: Record<string, unknown>;
   created_at: string;
+  updated_at?: string;
 }
 
 export function generateBidOutline(projectId: string): Promise<BidOutline> {
@@ -886,6 +892,25 @@ export function createChartAsset(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
+  });
+}
+
+export function generateChartAsset(
+  projectId: string,
+  data: { chart_type: string; title: string; placeholder_key?: string | null; outline_node_id?: string | null },
+): Promise<ChartAsset> {
+  return request<ChartAsset>(`/projects/${projectId}/chart-assets/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function approveChartAsset(assetId: string): Promise<ChartAsset> {
+  return request<ChartAsset>(`/chart-assets/${assetId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
   });
 }
 

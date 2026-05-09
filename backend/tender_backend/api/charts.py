@@ -26,6 +26,18 @@ class ChartAssetBody(BaseModel):
     outline_node_id: UUID | None = None
 
 
+class ChartApprovalBody(BaseModel):
+    approved_by: str | None = None
+
+
+class ChartGenerateBody(BaseModel):
+    chart_type: str
+    title: str
+    placeholder_key: str | None = None
+    outline_node_id: UUID | None = None
+    context: dict[str, Any] | None = None
+
+
 @router.get("/projects/{project_id}/chart-assets")
 async def list_chart_assets(
     project_id: UUID,
@@ -55,6 +67,59 @@ async def create_chart_asset(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/chart-assets/generate")
+async def generate_chart_asset(
+    project_id: UUID,
+    payload: ChartGenerateBody,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    spec = _service.generate_spec(
+        chart_type=payload.chart_type,
+        title=payload.title,
+        placeholder_key=payload.placeholder_key,
+        context=payload.context,
+    )
+    try:
+        return _service.create_or_update(
+            conn,
+            project_id=project_id,
+            chart_type=payload.chart_type,
+            title=payload.title,
+            spec_json=spec,
+            outline_node_id=payload.outline_node_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/chart-assets/{asset_id}/approve")
+async def approve_chart_asset(
+    asset_id: UUID,
+    payload: ChartApprovalBody | None = None,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    from tender_backend.core.project_access import require_resource_project_access
+
+    require_resource_project_access(
+        conn,
+        resource_id=asset_id,
+        query="SELECT project_id FROM chart_asset WHERE id = %s",
+        not_found_detail="chart asset not found",
+        user=user,
+    )
+    try:
+        return _service.approve(
+            conn,
+            asset_id=asset_id,
+            approved_by=(payload.approved_by if payload and payload.approved_by else user.display_name),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/chart-assets/supported-types")

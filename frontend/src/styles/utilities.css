@@ -676,6 +676,91 @@
   border: 1px solid var(--color-border-light);
 }
 
+.chart-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+  width: min(100%, 860px);
+}
+
+.chart-asset-card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.chart-asset-card__header,
+.chart-asset-card__meta {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.chart-asset-card__header strong {
+  display: block;
+  font-size: var(--text-base);
+}
+
+.chart-asset-card__header span {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.chart-asset-card__preview {
+  display: grid;
+  place-items: center;
+  min-height: 140px;
+  max-height: 220px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-border-light));
+}
+
+.chart-asset-card__preview img {
+  max-width: 100%;
+  max-height: 210px;
+}
+
+.chart-asset-card__meta {
+  align-items: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.chart-asset-card__meta code {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text);
+}
+
+.status-pill {
+  white-space: nowrap;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-border-light);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.status-pill--approved {
+  border-color: color-mix(in srgb, var(--color-success) 40%, var(--color-border-light));
+  background: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
+  color: var(--color-success);
+}
+
+.status-pill--needs_review {
+  border-color: color-mix(in srgb, var(--color-danger) 35%, var(--color-border-light));
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+  color: var(--color-danger);
+}
+
 /* Editor layout */
 .editor-layout {
   display: grid;

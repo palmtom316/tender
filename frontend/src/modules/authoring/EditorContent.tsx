@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  approveChartAsset,
   assembleBusinessBid,
   confirmBidOutline,
   createChartAsset,
@@ -150,6 +151,13 @@ export function EditorContent() {
     },
   });
 
+  const approveChart = useMutation({
+    mutationFn: (assetId: string) => approveChartAsset(assetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-assets", projectId] });
+    },
+  });
+
   if (!projectId) {
     return (
       <div className="empty-state">
@@ -225,6 +233,48 @@ export function EditorContent() {
             <span>章节：{businessAssembly.data.chapters.length}</span>
             <span>缺失资料：{businessAssembly.data.missing_materials.length}</span>
             <span>响应矩阵：{businessAssembly.data.response_matrix.length}</span>
+          </div>
+        </section>
+      )}
+
+      {chartAssets.length > 0 && (
+        <section className="workflow-gate-panel">
+          <div>
+            <strong>图表资产</strong>
+            <p>模板中使用占位符插入图表，正式导出只使用已审批图表。</p>
+          </div>
+          <div className="chart-asset-grid">
+            {chartAssets.map((asset) => (
+              <article key={asset.id} className="chart-asset-card">
+                <div className="chart-asset-card__header">
+                  <div>
+                    <strong>{asset.title}</strong>
+                    <span>{asset.chart_type}</span>
+                  </div>
+                  <span className={`status-pill status-pill--${asset.status}`}>{asset.status}</span>
+                </div>
+                {asset.rendered_svg && (
+                  <div className="chart-asset-card__preview">
+                    <img
+                      src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(asset.rendered_svg)}`}
+                      alt={asset.title}
+                    />
+                  </div>
+                )}
+                <div className="chart-asset-card__meta">
+                  <code>{`{{chart:${asset.placeholder_key || asset.chart_type}}}`}</code>
+                  <span>v{asset.version ?? 1}</span>
+                </div>
+                <ClayButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => approveChart.mutate(asset.id)}
+                  disabled={asset.status === "approved" || approveChart.isPending}
+                >
+                  {asset.status === "approved" ? "已审批" : "审批图表"}
+                </ClayButton>
+              </article>
+            ))}
           </div>
         </section>
       )}
