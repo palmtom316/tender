@@ -1,0 +1,113 @@
+.deviation-table-editor {
+  padding: 1rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.deviation-table-editor__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.deviation-table-editor__header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.deviation-table-editor__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.deviation-table-editor__status {
+  margin-bottom: 1rem;
+}
+
+.deviation-table-editor__status label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.deviation-table-editor__status input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+}
+
+.deviation-table-editor__no-deviation {
+  padding: 2rem;
+  text-align: center;
+  background: #f9fafb;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.deviation-table-editor__no-deviation p {
+  margin: 0.5rem 0;
+}
+
+.deviation-table-editor__no-deviation .text-muted {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.deviation-table-editor__table {
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+.deviation-table-editor__table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.deviation-table-editor__table th,
+.deviation-table-editor__table td {
+  padding: 0.5rem;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.deviation-table-editor__table th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+.deviation-table-editor__table .form-input {
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.deviation-table-editor__table .form-input--sm {
+  font-size: 0.8125rem;
+}
+
+.deviation-table-editor__table textarea.form-input {
+  resize: vertical;
+  min-height: 2.5rem;
+}
+
+.deviation-table-editor__footer {
+  padding: 1rem;
+  background: #f9fafb;
+  border-radius: 4px;
+}
+
+.deviation-table-editor__footer .text-muted {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}

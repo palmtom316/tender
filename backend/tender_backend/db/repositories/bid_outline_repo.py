@@ -182,6 +182,12 @@ class BidOutlineRepository:
         result["chapters"] = chapter_rows
         return result
 
+    def get_chapter_by_id(self, conn: Connection, *, chapter_id: UUID) -> dict | None:
+        """Get a single chapter by ID."""
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute("SELECT * FROM bid_chapter WHERE id = %s", (chapter_id,)).fetchone()
+        return dict(row) if row else None
+
     def update_chapter(self, conn: Connection, *, chapter_id: UUID, fields: dict[str, Any]) -> dict | None:
         allowed = {"chapter_code", "chapter_title", "volume_type", "sort_order", "outline_md", "metadata_json"}
         updates = {key: value for key, value in fields.items() if key in allowed}

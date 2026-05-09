@@ -2591,3 +2591,39 @@ export function fetchStandardStatus(
     { signal: options?.signal },
   );
 }
+
+// ── Deviation Table ──
+
+export interface DeviationItem {
+  seq_number: number;
+  procurement_clause_number: string;
+  procurement_clause: string;
+  response_clause: string;
+  deviation_note: string;
+}
+
+export interface DeviationTableData {
+  has_deviation: boolean;
+  items: DeviationItem[];
+}
+
+export function fetchDeviationTable(
+  chapterId: string,
+  options?: { signal?: AbortSignal },
+): Promise<DeviationTableData> {
+  return request<DeviationTableData>(
+    `/bid-outline/chapters/${chapterId}/deviation-table`,
+    { signal: options?.signal },
+  );
+}
+
+export function updateDeviationTable(
+  chapterId: string,
+  data: DeviationTableData,
+): Promise<{ id: string; metadata_json: Record<string, unknown> }> {
+  return request(`/bid-outline/chapters/${chapterId}/deviation-table`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}

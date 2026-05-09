@@ -62,6 +62,92 @@ def _add_markdown_content(document: Document, content: str) -> None:
             document.add_paragraph(line)
 
 
+def _add_deviation_table(document: Document, chapter_title: str, deviation_data: dict) -> None:
+    """Add deviation table (商务偏差表/技术偏差表) to document."""
+    # Add table title
+    title = chapter_title if chapter_title else "偏差表"
+    title_para = document.add_paragraph(title)
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_para.runs[0]
+    title_run.font.size = Pt(16)
+    title_run.font.bold = True
+    title_run.font.name = "宋体"
+
+    has_deviation = deviation_data.get("has_deviation", False)
+    items = deviation_data.get("items", [])
+
+    # Create table with 5 columns
+    # Add extra rows: 1 header + 1 default row + 1 "以下无正文" + 8 empty rows
+    num_rows = 1 + 1 + 1 + 8 + len(items) if has_deviation else 1 + 1 + 1 + 8
+    table = document.add_table(rows=num_rows, cols=5)
+    table.style = "Table Grid"
+
+    # Set column headers
+    headers = ["序号", "采购文件条目号", "采购文件条款", "应答文件条款", "偏差说明"]
+    header_cells = table.rows[0].cells
+    for i, header in enumerate(headers):
+        cell = header_cells[i]
+        cell.text = header
+        # Center align and bold
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in paragraph.runs:
+                run.font.bold = True
+                run.font.name = "宋体"
+                run.font.size = Pt(10.5)
+
+    # Add default row (no deviation)
+    default_row = table.rows[1]
+    default_row.cells[0].text = "1"
+    default_row.cells[1].text = "采购文件全部条目号"
+    default_row.cells[2].text = "采购文件全部条款"
+    default_row.cells[3].text = "应答文件全部条款"
+    default_row.cells[4].text = "无偏差"
+    for cell in default_row.cells:
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in paragraph.runs:
+                run.font.name = "宋体"
+                run.font.size = Pt(10.5)
+
+    # Add "以下无正文" row
+    no_content_row = table.rows[2]
+    no_content_row.cells[0].merge(no_content_row.cells[4])
+    no_content_row.cells[0].text = "以下无正文"
+    for paragraph in no_content_row.cells[0].paragraphs:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for run in paragraph.runs:
+            run.font.name = "宋体"
+            run.font.size = Pt(10.5)
+
+    # Add deviation items if any
+    if has_deviation and items:
+        for idx, item in enumerate(items):
+            row_idx = 3 + idx
+            row = table.rows[row_idx]
+            row.cells[0].text = str(item.get("seq_number", idx + 2))
+            row.cells[1].text = item.get("procurement_clause_number", "")
+            row.cells[2].text = item.get("procurement_clause", "")
+            row.cells[3].text = item.get("response_clause", "")
+            row.cells[4].text = item.get("deviation_note", "")
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.name = "宋体"
+                        run.font.size = Pt(10.5)
+
+    # Add declaration text below table
+    declaration_text = (
+        "应答人声明：针对本采购标的，除本表已列明偏差外，"
+        "我们接受采购文件规定的其余全部技术条件，"
+        "并承诺按照采购文件规定的技术条件提供对应产品和服务。"
+    )
+    declaration_para = document.add_paragraph(declaration_text)
+    for run in declaration_para.runs:
+        run.font.name = "宋体"
+        run.font.size = Pt(10.5)
+
+
 def _load_project_name(conn: Connection, project_id: UUID) -> str:
     with conn.cursor() as cur:
         row = cur.execute("SELECT name FROM project WHERE id = %s", (project_id,)).fetchone()
@@ -93,6 +179,55 @@ def _apply_basic_style(document: Document) -> None:
         run._r.append(fld_char_end)
         footer.add_run(" 页")
         footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+def _convert_to_chinese_number(num: int) -> str:
+    """Convert Arabic number to Chinese number (1->一, 2->二, etc.)"""
+    chinese_nums = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+                    "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+                    "二十一", "二十二", "二十三", "二十四", "二十五", "二十六", "二十七", "二十八", "二十九", "三十"]
+    if 1 <= num < len(chinese_nums):
+        return chinese_nums[num]
+    return str(num)
+
+
+def _add_chapter_divider_page(document: Document, chapter_code: str, chapter_title: str) -> None:
+    """Add a centered chapter divider page with title and subtitle."""
+    # Try to extract the numeric part from chapter_code
+    try:
+        # Handle codes like "1", "2", "3" etc.
+        if "." not in chapter_code:
+            chapter_num = int(chapter_code)
+            chinese_num = _convert_to_chinese_number(chapter_num)
+            formatted_title = f"{chinese_num}、{chapter_title}"
+        else:
+            # For sub-chapters like "1.1", "2.3", don't add divider page
+            return
+    except (ValueError, TypeError):
+        # If we can't parse the number, use the original format
+        formatted_title = f"{chapter_code}、{chapter_title}"
+
+    # Add multiple empty paragraphs to push content to vertical center
+    for _ in range(10):
+        document.add_paragraph()
+
+    # Add the main title (centered)
+    title_para = document.add_paragraph(formatted_title)
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_para.runs[0]
+    title_run.font.size = Pt(22)
+    title_run.font.bold = True
+    title_run.font.name = "宋体"
+
+    # Add the subtitle (centered)
+    subtitle_para = document.add_paragraph("（本页不编辑正文）")
+    subtitle_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    subtitle_run = subtitle_para.runs[0]
+    subtitle_run.font.size = Pt(14)
+    subtitle_run.font.name = "宋体"
+
+    # Add page break after the divider page
+    document.add_page_break()
 
 
 def _should_include_equipment_tables(volume_type: str | None) -> bool:
@@ -127,7 +262,7 @@ def _render_plain_docx(
         if volume_type:
             drafts = cur.execute(
                 """
-                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order
+                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order, bc.metadata_json
                 FROM chapter_draft cd
                 LEFT JOIN bid_chapter bc
                   ON bc.project_id = cd.project_id
@@ -141,7 +276,7 @@ def _render_plain_docx(
         else:
             drafts = cur.execute(
                 """
-                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order
+                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order, bc.metadata_json
                 FROM chapter_draft cd
                 LEFT JOIN bid_chapter bc
                   ON bc.project_id = cd.project_id
@@ -176,10 +311,26 @@ def _render_plain_docx(
     document.add_paragraph("投标人盖章：____________")
     document.add_paragraph("法定代表人或授权代表签字：____________")
     document.add_page_break()
+
+    # Track previous chapter to detect top-level chapters
+    prev_chapter_code = None
     for index, draft in enumerate(drafts):
-        if index:
+        chapter_code = draft.get("chapter_code", "")
+        chapter_title = draft.get("chapter_title", "")
+        metadata_json = draft.get("metadata_json") or {}
+
+        # Add divider page for top-level chapters (no dot in chapter_code)
+        if chapter_code and "." not in str(chapter_code):
+            _add_chapter_divider_page(document, str(chapter_code), str(chapter_title))
+        elif index:
             document.add_page_break()
-        _add_markdown_content(document, draft["content_md"])
+
+        # Check if this chapter has deviation table data
+        deviation_data = metadata_json.get("deviation_table")
+        if deviation_data:
+            _add_deviation_table(document, str(chapter_title), deviation_data)
+        else:
+            _add_markdown_content(document, draft["content_md"])
 
     if _should_include_equipment_tables(volume_type):
         EquipmentTableInjector(document, conn, project_id=project_id).inject_all()
