@@ -37,8 +37,11 @@ def test_plan_bid_outline_creates_required_volumes_and_chapters() -> None:
     assert volume_types == {"qualification", "business", "technical"}
     assert outline["metadata_json"]["priority_policy"] == "tender_extracted_requirements_override_template"
     assert any(chapter["chapter_code"] == "1.1" for chapter in outline["chapters"])
-    assert any(chapter["chapter_code"] == "2.2" for chapter in outline["chapters"])
-    assert any(chapter["chapter_code"] == "3.1" for chapter in outline["chapters"])
+    assert any(chapter["chapter_code"] == "1" and chapter["chapter_title"] == "商务偏差表" for chapter in outline["chapters"])
+    assert any(chapter["chapter_code"] == "24.8" and chapter["chapter_title"] == "其他" for chapter in outline["chapters"])
+    assert any(chapter["chapter_code"] == "8.1" and chapter["chapter_title"] == "施工组织设计" for chapter in outline["chapters"])
+    assert outline["metadata_json"]["business_outline_template_key"] == "sgcc_distribution_business_v1"
+    assert outline["metadata_json"]["technical_outline_template_key"] == "sgcc_distribution_technical_v1"
 
 
 def test_plan_bid_outline_maps_hard_scoring_and_special_requirements() -> None:
@@ -53,16 +56,16 @@ def test_plan_bid_outline_maps_hard_scoring_and_special_requirements() -> None:
         requirements=[veto, scoring, special, hard, ignored],
     )
 
-    mappings_by_code = {
-        chapter["chapter_code"]: {mapping["requirement_id"] for mapping in chapter["requirement_mappings"]}
+    mappings_by_key = {
+        (chapter["volume_type"], chapter["chapter_code"]): {mapping["requirement_id"] for mapping in chapter["requirement_mappings"]}
         for chapter in outline["chapters"]
     }
-    all_mapped_ids = set().union(*mappings_by_code.values())
+    all_mapped_ids = set().union(*mappings_by_key.values())
 
-    assert veto["id"] in mappings_by_code["3.3"]
-    assert scoring["id"] in mappings_by_code["3.2"]
-    assert special["id"] in mappings_by_code["3.4"]
-    assert hard["id"] in mappings_by_code["3.3"]
+    assert veto["id"] in mappings_by_key[("technical", "1")]
+    assert scoring["id"] in mappings_by_key[("technical", "12")]
+    assert special["id"] in mappings_by_key[("technical", "15")]
+    assert hard["id"] in mappings_by_key[("technical", "1")]
     assert ignored["id"] not in all_mapped_ids
     assert outline["metadata_json"]["unmapped_hard_requirement_ids"] == []
 
@@ -75,3 +78,25 @@ def test_chapter_outline_lists_input_requirements() -> None:
 
     assert "项目经理须提供证书" in chapter["outline_md"]
     assert "招标文件 AI 解析结果为最高优先级" in chapter["outline_md"]
+
+
+def test_sgcc_distribution_business_outline_preserves_parent_codes() -> None:
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[])
+
+    chapter = next(item for item in outline["chapters"] if item["chapter_code"] == "8.1.1")
+
+    assert chapter["chapter_title"] == "资产负债表2023"
+    assert chapter["parent_code"] == "8.1"
+    assert chapter["metadata_json"]["template_key"] == "sgcc_distribution_business_v1"
+    assert chapter["metadata_json"]["source_sample"] == "docs/samples/国网公司配网工程商务标目录.md"
+
+
+def test_sgcc_distribution_technical_outline_uses_sample_numbering() -> None:
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[])
+
+    chapter = next(item for item in outline["chapters"] if item["volume_type"] == "technical" and item["chapter_code"] == "10.3")
+
+    assert chapter["chapter_title"] == "工程进度计划及保证措施"
+    assert chapter["parent_code"] == "10"
+    assert chapter["metadata_json"]["template_key"] == "sgcc_distribution_technical_v1"
+    assert chapter["metadata_json"]["source_sample"] == "docs/samples/国网公司配网工程技术标目录.md"

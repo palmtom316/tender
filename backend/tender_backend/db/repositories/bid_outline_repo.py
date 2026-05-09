@@ -61,7 +61,10 @@ class BidOutlineRepository:
                     volume_rows[volume_type] = dict(volume_row)
 
             chapters: list[dict[str, Any]] = []
+            chapter_ids_by_key: dict[tuple[str, str], UUID] = {}
             for chapter in outline.get("chapters") or []:
+                parent_code = chapter.get("parent_code") or (chapter.get("metadata_json") or {}).get("parent_code")
+                volume_type = chapter["volume_type"]
                 chapter_row = cur.execute(
                     """
                     INSERT INTO bid_chapter (
@@ -75,11 +78,11 @@ class BidOutlineRepository:
                         uuid4(),
                         outline_row["id"],
                         project_id,
-                        chapter.get("parent_id"),
+                        chapter_ids_by_key.get((volume_type, parent_code)) or chapter.get("parent_id"),
                         chapter["chapter_code"],
                         chapter["chapter_title"],
-                        chapter["volume_type"],
-                        volume_rows.get(chapter["volume_type"], {}).get("id"),
+                        volume_type,
+                        volume_rows.get(volume_type, {}).get("id"),
                         chapter.get("sort_order", 0),
                         chapter.get("outline_md") or "",
                         Jsonb(chapter.get("metadata_json") or {}),
@@ -88,6 +91,7 @@ class BidOutlineRepository:
                 if chapter_row is None:
                     continue
                 chapter_dict = dict(chapter_row)
+                chapter_ids_by_key[(chapter_dict["volume_type"], chapter_dict["chapter_code"])] = chapter_dict["id"]
                 mappings: list[dict[str, Any]] = []
                 for mapping in chapter.get("requirement_mappings") or []:
                     mapping_row = cur.execute(

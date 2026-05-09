@@ -10,84 +10,29 @@ from psycopg import Connection
 
 from tender_backend.db.repositories.bid_outline_repo import BidOutlineRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
-
-
-PRIORITY_POLICY = "tender_extracted_requirements_override_template"
-
-
-BASE_CHAPTERS = [
-    {
-        "chapter_code": "1.1",
-        "chapter_title": "法定资格与资质响应",
-        "volume_type": "qualification",
-    },
-    {
-        "chapter_code": "1.2",
-        "chapter_title": "企业业绩响应",
-        "volume_type": "qualification",
-    },
-    {
-        "chapter_code": "1.3",
-        "chapter_title": "项目管理团队响应",
-        "volume_type": "qualification",
-    },
-    {
-        "chapter_code": "2.1",
-        "chapter_title": "投标函及项目基础信息",
-        "volume_type": "business",
-    },
-    {
-        "chapter_code": "2.2",
-        "chapter_title": "报价与商务响应",
-        "volume_type": "business",
-    },
-    {
-        "chapter_code": "2.3",
-        "chapter_title": "合同条款与进度响应",
-        "volume_type": "business",
-    },
-    {
-        "chapter_code": "2.4",
-        "chapter_title": "投标文件格式响应",
-        "volume_type": "business",
-    },
-    {
-        "chapter_code": "3.1",
-        "chapter_title": "技术方案总述",
-        "volume_type": "technical",
-    },
-    {
-        "chapter_code": "3.2",
-        "chapter_title": "评分项逐项响应",
-        "volume_type": "technical",
-    },
-    {
-        "chapter_code": "3.3",
-        "chapter_title": "否决项和硬性要求响应",
-        "volume_type": "technical",
-    },
-    {
-        "chapter_code": "3.4",
-        "chapter_title": "特殊要求响应",
-        "volume_type": "technical",
-    },
-]
+from tender_backend.services.bid_outline_templates import (
+    PRIORITY_POLICY,
+    SGCC_DISTRIBUTION_BUSINESS_TEMPLATE_KEY,
+    SGCC_DISTRIBUTION_TECHNICAL_TEMPLATE_KEY,
+    base_bid_chapters,
+)
 
 
 CATEGORY_CHAPTER = {
-    "qualification": "1.1",
-    "performance": "1.2",
-    "project_team": "1.3",
-    "project_info": "2.1",
-    "business": "2.2",
-    "pricing": "2.2",
-    "contract": "2.3",
-    "schedule": "2.3",
-    "format": "2.4",
-    "technical": "3.1",
-    "scoring": "3.2",
-    "veto": "3.3",
-    "special": "3.4",
+    "qualification": ("qualification", "1.1"),
+    "performance": ("qualification", "1.2"),
+    "project_team": ("qualification", "1.3"),
+    "personnel": ("technical", "6"),
+    "project_info": ("business", "5"),
+    "business": ("business", "24.6"),
+    "pricing": ("business", "23"),
+    "contract": ("business", "24.6"),
+    "schedule": ("technical", "3"),
+    "format": ("business", "24.6"),
+    "technical": ("technical", "8.1"),
+    "scoring": ("technical", "12"),
+    "veto": ("technical", "1"),
+    "special": ("technical", "15"),
 }
 
 
@@ -103,9 +48,9 @@ def _requirement_summary(requirement: dict[str, Any]) -> str:
     return f"[{requirement.get('category')}] {title}"
 
 
-def _mapping_reason(requirement: dict[str, Any], chapter_code: str) -> str:
+def _mapping_reason(requirement: dict[str, Any], volume_type: str, chapter_code: str) -> str:
     category = requirement.get("category")
-    if chapter_code == "3.3" and (requirement.get("is_veto") or requirement.get("is_hard_constraint")):
+    if volume_type == "technical" and chapter_code == "1" and (requirement.get("is_veto") or requirement.get("is_hard_constraint")):
         return "否决项或硬约束必须设置专门响应章节"
     if category == "scoring":
         return "评分项必须逐项响应"
@@ -114,8 +59,8 @@ def _mapping_reason(requirement: dict[str, Any], chapter_code: str) -> str:
     return "按招标文件解析出的约束类别映射"
 
 
-def _priority_level(requirement: dict[str, Any], chapter_code: str) -> str:
-    if chapter_code == "3.3" or requirement.get("is_veto") or requirement.get("is_hard_constraint"):
+def _priority_level(requirement: dict[str, Any], volume_type: str, chapter_code: str) -> str:
+    if (volume_type == "technical" and chapter_code == "1") or requirement.get("is_veto") or requirement.get("is_hard_constraint"):
         return "hard"
     if requirement.get("category") == "scoring":
         return "scoring"
@@ -124,16 +69,16 @@ def _priority_level(requirement: dict[str, Any], chapter_code: str) -> str:
     return "normal"
 
 
-def _chapter_codes_for_requirement(requirement: dict[str, Any]) -> list[str]:
+def _chapter_keys_for_requirement(requirement: dict[str, Any]) -> list[tuple[str, str]]:
     category = requirement.get("category")
-    codes = [CATEGORY_CHAPTER.get(category, "3.1")]
+    keys = [CATEGORY_CHAPTER.get(category, ("technical", "8.1"))]
     if requirement.get("is_veto") or requirement.get("is_hard_constraint"):
-        codes.append("3.3")
+        keys.append(("technical", "1"))
     if category == "scoring":
-        codes.append("3.2")
+        keys.append(("technical", "12"))
     if category == "special":
-        codes.append("3.4")
-    return list(dict.fromkeys(codes))
+        keys.append(("technical", "15"))
+    return list(dict.fromkeys(keys))
 
 
 def _build_outline_md(chapter: dict[str, Any], requirements: list[dict[str, Any]]) -> str:
@@ -166,19 +111,20 @@ def plan_bid_outline_from_requirements(
         for row in requirements
         if not row.get("ignored_for_pricing") and row.get("review_status") != "rejected"
     ]
-    requirements_by_chapter: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    requirements_by_chapter: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for requirement in active_requirements:
-        for chapter_code in _chapter_codes_for_requirement(requirement):
-            requirements_by_chapter[chapter_code].append(requirement)
+        for chapter_key in _chapter_keys_for_requirement(requirement):
+            requirements_by_chapter[chapter_key].append(requirement)
 
     chapters: list[dict[str, Any]] = []
-    for index, chapter in enumerate(BASE_CHAPTERS, start=1):
-        chapter_requirements = requirements_by_chapter.get(chapter["chapter_code"], [])
+    for index, chapter in enumerate(base_bid_chapters(), start=1):
+        chapter_key = (chapter["volume_type"], chapter["chapter_code"])
+        chapter_requirements = requirements_by_chapter.get(chapter_key, [])
         mappings = [
             {
                 "requirement_id": requirement["id"],
-                "mapping_reason": _mapping_reason(requirement, chapter["chapter_code"]),
-                "priority_level": _priority_level(requirement, chapter["chapter_code"]),
+                "mapping_reason": _mapping_reason(requirement, chapter["volume_type"], chapter["chapter_code"]),
+                "priority_level": _priority_level(requirement, chapter["volume_type"], chapter["chapter_code"]),
             }
             for requirement in chapter_requirements
         ]
@@ -191,9 +137,11 @@ def plan_bid_outline_from_requirements(
                 "requirement_ids": [mapping["requirement_id"] for mapping in mappings],
                 "requirement_mappings": mappings,
                 "metadata_json": {
+                    **dict(chapter.get("metadata_json") or {}),
                     "requirement_count": len(chapter_requirements),
                     "priority_policy": PRIORITY_POLICY,
                 },
+                "parent_code": chapter.get("parent_code"),
             }
         )
 
@@ -218,6 +166,8 @@ def plan_bid_outline_from_requirements(
             "hard_requirement_count": len(hard_requirement_ids),
             "unmapped_hard_requirement_ids": sorted(hard_requirement_ids - mapped_requirement_ids),
             "volume_types": ["qualification", "business", "technical"],
+            "business_outline_template_key": SGCC_DISTRIBUTION_BUSINESS_TEMPLATE_KEY,
+            "technical_outline_template_key": SGCC_DISTRIBUTION_TECHNICAL_TEMPLATE_KEY,
         },
         "chapters": chapters,
     }

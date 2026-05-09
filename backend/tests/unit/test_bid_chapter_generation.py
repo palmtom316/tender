@@ -27,8 +27,9 @@ class _Cursor:
             self.conn.saved = {
                 "id": uuid4(),
                 "project_id": params[1],
-                "chapter_code": params[2],
-                "content_md": params[3],
+                "volume_type": params[2],
+                "chapter_code": params[3],
+                "content_md": params[4],
             }
             self.result = [self.conn.saved]
         else:
@@ -44,7 +45,7 @@ class _Cursor:
 
 class _Conn:
     def __init__(self):
-        self.chapter = {"id": uuid4(), "chapter_code": "3.3", "chapter_title": "否决项响应"}
+        self.chapter = {"id": uuid4(), "chapter_code": "1", "chapter_title": "技术偏差表", "volume_type": "technical"}
         self.requirements = [
             {
                 "id": uuid4(),
@@ -71,6 +72,7 @@ def test_generate_bid_chapter_draft_excludes_pricing_body() -> None:
     conn = _Conn()
     row = generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
 
-    assert row["chapter_code"] == "3.3"
+    assert row["chapter_code"] == "1"
+    assert row["volume_type"] == "technical"
     assert "该项涉及报价信息" in row["content_md"]
     assert "硬约束处理" in row["content_md"]

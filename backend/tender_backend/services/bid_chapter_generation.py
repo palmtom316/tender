@@ -134,13 +134,13 @@ def generate_bid_chapter_draft(
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """
-            INSERT INTO chapter_draft (id, project_id, chapter_code, content_md)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (project_id, chapter_code)
+            INSERT INTO chapter_draft (id, project_id, volume_type, chapter_code, content_md)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (project_id, volume_type, chapter_code)
             DO UPDATE SET content_md = EXCLUDED.content_md, updated_at = now()
             RETURNING *
             """,
-            (uuid4(), project_id, chapter["chapter_code"], content_md),
+            (uuid4(), project_id, chapter.get("volume_type") or "technical", chapter["chapter_code"], content_md),
         ).fetchone()
     conn.commit()
     assert row is not None

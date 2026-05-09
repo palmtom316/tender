@@ -127,10 +127,13 @@ def _render_plain_docx(
         if volume_type:
             drafts = cur.execute(
                 """
-                SELECT cd.chapter_code, cd.content_md, bc.chapter_title, bc.volume_type, bc.sort_order
+                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order
                 FROM chapter_draft cd
-                LEFT JOIN bid_chapter bc ON bc.project_id = cd.project_id AND bc.chapter_code = cd.chapter_code
-                WHERE cd.project_id = %s AND bc.volume_type = %s
+                LEFT JOIN bid_chapter bc
+                  ON bc.project_id = cd.project_id
+                 AND bc.volume_type = cd.volume_type
+                 AND bc.chapter_code = cd.chapter_code
+                WHERE cd.project_id = %s AND cd.volume_type = %s
                 ORDER BY bc.sort_order NULLS LAST, cd.chapter_code
                 """,
                 (project_id, volume_type),
@@ -138,11 +141,14 @@ def _render_plain_docx(
         else:
             drafts = cur.execute(
                 """
-                SELECT cd.chapter_code, cd.content_md, bc.chapter_title, bc.volume_type, bc.sort_order
+                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order
                 FROM chapter_draft cd
-                LEFT JOIN bid_chapter bc ON bc.project_id = cd.project_id AND bc.chapter_code = cd.chapter_code
+                LEFT JOIN bid_chapter bc
+                  ON bc.project_id = cd.project_id
+                 AND bc.volume_type = cd.volume_type
+                 AND bc.chapter_code = cd.chapter_code
                 WHERE cd.project_id = %s
-                ORDER BY bc.sort_order NULLS LAST, cd.chapter_code
+                ORDER BY cd.volume_type, bc.sort_order NULLS LAST, cd.chapter_code
                 """,
                 (project_id,),
             ).fetchall()
@@ -212,7 +218,7 @@ def render_docx(
     # Load all chapter drafts
     with conn.cursor(row_factory=dict_row) as cur:
         drafts = cur.execute(
-            "SELECT chapter_code, content_md FROM chapter_draft WHERE project_id = %s",
+            "SELECT volume_type, chapter_code, content_md FROM chapter_draft WHERE project_id = %s",
             (project_id,),
         ).fetchall()
 
@@ -220,9 +226,13 @@ def render_docx(
     context: dict[str, str] = {}
     for d in drafts:
         code = d["chapter_code"]
+        volume = d.get("volume_type") or ""
         content = d["content_md"]
         context[f"SECTION_{code}"] = content
         context[code] = content
+        if volume:
+            context[f"SECTION_{volume}_{code}"] = content
+            context[f"{volume}_{code}"] = content
 
     # Load project facts as additional context
     with conn.cursor(row_factory=dict_row) as cur:
@@ -284,11 +294,14 @@ def _load_chapter_drafts(conn: Connection, project_id: UUID) -> list[dict]:
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
             """
-            SELECT cd.chapter_code, cd.content_md, bc.chapter_title, bc.volume_type, bc.sort_order
+            SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order
             FROM chapter_draft cd
-            LEFT JOIN bid_chapter bc ON bc.project_id = cd.project_id AND bc.chapter_code = cd.chapter_code
+            LEFT JOIN bid_chapter bc
+              ON bc.project_id = cd.project_id
+             AND bc.volume_type = cd.volume_type
+             AND bc.chapter_code = cd.chapter_code
             WHERE cd.project_id = %s
-            ORDER BY bc.sort_order NULLS LAST, cd.chapter_code
+            ORDER BY cd.volume_type, bc.sort_order NULLS LAST, cd.chapter_code
             """,
             (project_id,),
         ).fetchall()

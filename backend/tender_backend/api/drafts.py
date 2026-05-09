@@ -26,7 +26,7 @@ async def list_drafts(
     require_project_access(conn, project_id=project_id, user=user)
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
-            "SELECT * FROM chapter_draft WHERE project_id = %s ORDER BY chapter_code",
+            "SELECT * FROM chapter_draft WHERE project_id = %s ORDER BY volume_type, chapter_code",
             (project_id,),
         ).fetchall()
     return rows
