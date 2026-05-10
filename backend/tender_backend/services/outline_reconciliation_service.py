@@ -21,9 +21,23 @@ class OutlineReconciliationService:
         unresolved = self._unresolved_critical_requirements(conn, project_id=project_id)
         diffs = []
         for chapter in outline.get("chapters", []):
-            op = "keep" if chapter.get("requirement_ids") else "mark_manual_required"
-            if chapter.get("volume_type") == "pricing":
-                op = "mark_external_attached"
+            conflict = self._confirmed_template_conflict(chapter)
+            if conflict:
+                diffs.append(
+                    {
+                        "chapter_id": str(chapter["id"]),
+                        "chapter_code": chapter["chapter_code"],
+                        "chapter_title": chapter["chapter_title"],
+                        "volume_type": chapter["volume_type"],
+                        "operation": "tender_conflict_override",
+                        "requirement_count": len(chapter.get("requirement_ids") or []),
+                        "reason": conflict.get("reason") or "招标文件存在已确认目录冲突，按招标文件覆盖模板",
+                        "source_locator": conflict.get("source_locator"),
+                        "proposed_action": conflict.get("proposed_action"),
+                    }
+                )
+                continue
+            op = "keep_mapped" if chapter.get("requirement_ids") else "keep_template"
             diffs.append(
                 {
                     "chapter_id": str(chapter["id"]),
@@ -32,7 +46,7 @@ class OutlineReconciliationService:
                     "volume_type": chapter["volume_type"],
                     "operation": op,
                     "requirement_count": len(chapter.get("requirement_ids") or []),
-                    "reason": "按已解析条款映射" if op == "keep" else "当前章节缺少明确约束，需人工确认保留或补充",
+                    "reason": "按已确认约束映射到目录模板章节" if op == "keep_mapped" else "无招标文件目录冲突，按用户提供的目录模板保留",
                 }
             )
         return {
@@ -118,6 +132,19 @@ class OutlineReconciliationService:
                 (project_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def _confirmed_template_conflict(self, chapter: dict[str, Any]) -> dict[str, Any] | None:
+        metadata = chapter.get("metadata_json") or {}
+        if not isinstance(metadata, dict):
+            return None
+        conflict = metadata.get("template_conflict")
+        if not isinstance(conflict, dict):
+            return None
+        if conflict.get("policy") != "tender_conflict_override":
+            return None
+        if conflict.get("status") != "confirmed":
+            return None
+        return conflict
 
 
 __all__ = ["OutlineReconciliationService"]
