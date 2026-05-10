@@ -74,3 +74,37 @@ def test_pricing_only_clause_is_ignored():
     package = result["packages"][0]
     assert package["confirmation_level"] == "ignored"
     assert package["lane"] == "ignored"
+
+
+def test_technical_constraints_are_grouped_by_bid_writing_subtype():
+    result = build_requirement_workbench(
+        "project-1",
+        [
+            _req(
+                id="quality",
+                requirement_text="质量目标：工程质量合格率100%，满足国家电网公司验收要求。",
+                source_metadata={"constraint_subtype": "quality_target"},
+            ),
+            _req(
+                id="schedule",
+                requirement_text="计划工期90日历天，须编制进度保证措施。",
+                source_metadata={"constraint_subtype": "schedule_target"},
+            ),
+            _req(
+                id="safety",
+                requirement_text="须落实安全文明施工、绿色施工和风险管控措施。",
+                source_metadata={"constraint_subtype": "safety_civilized"},
+            ),
+            _req(
+                id="personnel",
+                category="project_team",
+                requirement_text="项目经理1名，须具备机电工程一级注册建造师资格。",
+                source_metadata={"constraint_subtype": "personnel_count"},
+            ),
+        ],
+    )
+
+    topics = {package["topic"] for package in result["packages"]}
+
+    assert topics == {"quality_target", "schedule_target", "safety_civilized", "personnel_count"}
+    assert result["stats"]["package_count"] == 4

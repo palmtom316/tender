@@ -34,6 +34,8 @@ from tender_backend.services.extract_service.requirements_extractor import (
     HARD_CONSTRAINT_CATEGORIES,
     HUMAN_CONFIRM_CATEGORIES,
     REQUIREMENT_CATEGORIES,
+    SCOPE_POLICY_VERSION,
+    infer_constraint_subtype,
 )
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -56,10 +58,13 @@ _RULES_BLOCK = """\
 任务：从 source_chunks 数组中抽取投标文件编写约束。
 
 判定规则：
-- 抽取所有对投标人提出明确要求、限制、禁止、必须、应当提交的条款。
-- 重点覆盖资格、业绩、人员、技术、商务、格式、合同、特殊要求、否决条款。
+- 只抽取投标文件编写需要的约束。
+- 商务标重点覆盖资格、业绩、公司证照、法律有效性、证明材料、签章/盖章/格式/递交要求。
+- 技术标重点覆盖管理人员数量及资质、质量目标、进度目标、安全文明施工、国网工程施工技术要求、评分响应、必交技术文件。
+- 否决项和文件格式要求必须保留。
 - 招标人的内部说明、目录、纯页眉页脚、纯背景介绍不抽取。
-- 报价/定价类信息标 ignored_for_pricing=true，仍可输出。
+- tender 系统不涉及报价。纯报价、价格、最高限价、控制价、清单计价、单价、总价、报价明细等内容不要输出 requirement。
+- 同一 chunk 同时包含报价和非报价硬约束时，只输出非报价约束。
 - 凡含否决、废标、无效投标、不予受理、实质性不响应、投标无效的，is_veto=true。
 - 输出条款的 source_chunk_id 必须来自输入数组，严禁虚构。
 - 同一 chunk 可对应 0 到多条 requirement，但同一条款不要重复输出。
@@ -131,14 +136,12 @@ _PREFILTER_SIGNAL_KEYWORDS = (
     "无效投标",
     "技术要求",
     "技术规范",
-    "保证金",
     "工期",
     "服务期",
     "合同",
     "格式",
     "盖章",
     "签章",
-    "报价",
 )
 _PREFILTER_NEGATIVE_TITLE_KEYWORDS = ("目录", "封面", "前言", "说明", "概述", "声明")
 _QUALITY_POLICY_MAX_TOKENS = {
@@ -274,7 +277,6 @@ def _prefilter_score(chunk: dict[str, Any]) -> int:
         "business_scoring",
         "scoring",
         "scoring_sheet",
-        "pricing_reference",
         "bid_submission_requirement",
     }:
         score += 3
@@ -646,6 +648,8 @@ def _normalize_requirement(
         item.get("is_hard_constraint", is_veto or category in HARD_CONSTRAINT_CATEGORIES)
     )
     ignored_for_pricing = bool(item.get("ignored_for_pricing", False))
+    if ignored_for_pricing:
+        return None
     confidence_raw = item.get("confidence")
     try:
         confidence = float(confidence_raw) if confidence_raw is not None else 0.85
@@ -656,6 +660,16 @@ def _normalize_requirement(
     requires_human_confirm = (
         is_veto or category in HUMAN_CONFIRM_CATEGORIES or confidence < 0.8
     )
+    subtype_text = " ".join(
+        part
+        for part in (
+            str(source_chunk.get("section_title") or ""),
+            str(source_chunk.get("title") or ""),
+            requirement_text,
+        )
+        if part
+    )
+    constraint_subtype = infer_constraint_subtype(category, subtype_text)
 
     return AiExtractedRequirement(
         category=category,
@@ -680,6 +694,8 @@ def _normalize_requirement(
             "ai_input_tokens": item.get("_input_tokens"),
             "ai_output_tokens": item.get("_output_tokens"),
             "chunk_type": source_chunk.get("chunk_type"),
+            "scope_policy": SCOPE_POLICY_VERSION,
+            "constraint_subtype": constraint_subtype,
         },
     )
 

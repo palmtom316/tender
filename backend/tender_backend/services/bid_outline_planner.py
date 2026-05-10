@@ -10,6 +10,7 @@ from psycopg import Connection
 
 from tender_backend.db.repositories.bid_outline_repo import BidOutlineRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
+from tender_backend.services.tender_constraint_service import TenderConstraintService
 from tender_backend.services.bid_outline_templates import (
     PRIORITY_POLICY,
     SGCC_DISTRIBUTION_BUSINESS_TEMPLATE_KEY,
@@ -35,6 +36,23 @@ CATEGORY_CHAPTER = {
     "special": ("technical", "15"),
 }
 
+SUBTYPE_CHAPTER = {
+    "personnel_count": ("technical", "6"),
+    "personnel_certificate": ("technical", "6"),
+    "quality_target": ("technical", "10.1"),
+    "schedule_target": ("technical", "10.3"),
+    "safety_civilized": ("technical", "10.2"),
+    "sgcc_standard_compliance": ("technical", "13"),
+    "construction_method": ("technical", "8.1"),
+    "technical_scoring_response": ("technical", "12"),
+    "submission_format": ("business", "24.6"),
+    "signature_seal": ("business", "24.6"),
+    "veto_rejection": ("technical", "1"),
+    "qualification_certificate": ("qualification", "1.1"),
+    "performance_threshold": ("qualification", "1.2"),
+    "mandatory_attachment": ("business", "24.6"),
+}
+
 
 def _clean_text(value: Any) -> str:
     return str(value or "").strip()
@@ -50,8 +68,11 @@ def _requirement_summary(requirement: dict[str, Any]) -> str:
 
 def _mapping_reason(requirement: dict[str, Any], volume_type: str, chapter_code: str) -> str:
     category = requirement.get("category")
+    subtype = _constraint_subtype(requirement)
     if volume_type == "technical" and chapter_code == "1" and (requirement.get("is_veto") or requirement.get("is_hard_constraint")):
         return "否决项或硬约束必须设置专门响应章节"
+    if subtype:
+        return "按确认后的招标约束子类型映射到模板章节"
     if category == "scoring":
         return "评分项必须逐项响应"
     if category == "special":
@@ -69,9 +90,17 @@ def _priority_level(requirement: dict[str, Any], volume_type: str, chapter_code:
     return "normal"
 
 
+def _constraint_subtype(requirement: dict[str, Any]) -> str | None:
+    metadata = requirement.get("source_metadata") or requirement.get("metadata_json") or {}
+    if not isinstance(metadata, dict):
+        return None
+    return str(metadata.get("constraint_subtype") or "").strip() or None
+
+
 def _chapter_keys_for_requirement(requirement: dict[str, Any]) -> list[tuple[str, str]]:
     category = requirement.get("category")
-    keys = [CATEGORY_CHAPTER.get(category, ("technical", "8.1"))]
+    subtype = _constraint_subtype(requirement)
+    keys = [SUBTYPE_CHAPTER.get(subtype) or CATEGORY_CHAPTER.get(category, ("technical", "8.1"))]
     if requirement.get("is_veto") or requirement.get("is_hard_constraint"):
         keys.append(("technical", "1"))
     if category == "scoring":
@@ -79,6 +108,34 @@ def _chapter_keys_for_requirement(requirement: dict[str, Any]) -> list[tuple[str
     if category == "special":
         keys.append(("technical", "15"))
     return list(dict.fromkeys(keys))
+
+
+def _requirements_from_constraint_set(constraint_set: dict[str, Any]) -> list[dict[str, Any]]:
+    requirements: list[dict[str, Any]] = []
+    for item in constraint_set.get("items") or []:
+        if item.get("status") not in {"accepted", "confirmed"}:
+            continue
+        requirement_id = item.get("requirement_id") or item.get("id")
+        requirements.append(
+            {
+                "id": requirement_id,
+                "category": item.get("category"),
+                "title": item.get("title"),
+                "requirement_text": item.get("constraint_text") or "",
+                "source_text": item.get("constraint_text") or "",
+                "source_locator": item.get("source_locator"),
+                "source_file": item.get("source_file"),
+                "review_status": "accepted",
+                "ignored_for_pricing": False,
+                "is_veto": item.get("category") == "veto",
+                "is_hard_constraint": item.get("confirmation_level") == "critical",
+                "source_metadata": {
+                    **dict(item.get("metadata_json") or {}),
+                    "source_constraint_id": str(item.get("id")),
+                },
+            }
+        )
+    return requirements
 
 
 def _build_outline_md(chapter: dict[str, Any], requirements: list[dict[str, Any]]) -> str:
@@ -123,6 +180,7 @@ def plan_bid_outline_from_requirements(
         mappings = [
             {
                 "requirement_id": requirement["id"],
+                "source_constraint_id": (requirement.get("source_metadata") or {}).get("source_constraint_id"),
                 "mapping_reason": _mapping_reason(requirement, chapter["volume_type"], chapter["chapter_code"]),
                 "priority_level": _priority_level(requirement, chapter["volume_type"], chapter["chapter_code"]),
             }
@@ -173,11 +231,34 @@ def plan_bid_outline_from_requirements(
     }
 
 
+def plan_bid_outline_from_confirmed_constraints(
+    *,
+    project_id: UUID | str,
+    constraint_set: dict[str, Any],
+    outline_name: str = "投标文件目录草案",
+) -> dict[str, Any]:
+    requirements = _requirements_from_constraint_set(constraint_set)
+    outline = plan_bid_outline_from_requirements(
+        project_id=project_id,
+        requirements=requirements,
+        outline_name=outline_name,
+    )
+    outline["metadata_json"]["source_constraint_set_id"] = str(constraint_set.get("id"))
+    outline["metadata_json"]["source_constraint_set_version"] = constraint_set.get("version")
+    outline["metadata_json"]["constraint_source_of_truth"] = "confirmed_constraint_set"
+    return outline
+
+
 def build_bid_outline(conn: Connection, *, project_id: UUID) -> dict[str, Any]:
     """Load project requirements, plan the outline, and persist it."""
 
     requirement_repo = RequirementRepository()
+    constraint_service = TenderConstraintService()
     outline_repo = BidOutlineRepository()
-    requirements = requirement_repo.list_by_project(conn, project_id=project_id)
-    outline = plan_bid_outline_from_requirements(project_id=project_id, requirements=requirements)
+    constraint_set = constraint_service.latest_confirmed(conn, project_id=project_id)
+    if constraint_set:
+        outline = plan_bid_outline_from_confirmed_constraints(project_id=project_id, constraint_set=constraint_set)
+    else:
+        requirements = requirement_repo.list_by_project(conn, project_id=project_id)
+        outline = plan_bid_outline_from_requirements(project_id=project_id, requirements=requirements)
     return outline_repo.replace_for_project(conn, project_id=project_id, outline=outline)

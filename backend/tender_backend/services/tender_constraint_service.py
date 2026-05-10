@@ -49,6 +49,15 @@ class TenderConstraintService:
             for requirement in requirements:
                 package = packages_by_requirement.get(str(requirement["id"]), {})
                 status = "accepted" if package.get("confirmation_level") == "auto_accept" else "needs_review" if package.get("confirmation_level") == "review" else "draft"
+                requirement_metadata = requirement.get("source_metadata") or {}
+                item_metadata = {
+                    "package_id": package.get("id"),
+                    "has_conflict": package.get("has_conflict", False),
+                }
+                if isinstance(requirement_metadata, dict):
+                    for key in ("scope_policy", "constraint_subtype", "pricing_keywords", "matched_keywords"):
+                        if key in requirement_metadata:
+                            item_metadata[key] = requirement_metadata[key]
                 row = cur.execute(
                     """
                     INSERT INTO tender_constraint_item (
@@ -70,7 +79,7 @@ class TenderConstraintService:
                         requirement.get("requirement_text") or requirement.get("source_text") or "",
                         requirement.get("source_file"),
                         requirement.get("source_locator"),
-                        Jsonb({"package_id": package.get("id"), "has_conflict": package.get("has_conflict", False)}),
+                        Jsonb(item_metadata),
                     ),
                 ).fetchone()
                 if row:
@@ -90,6 +99,33 @@ class TenderConstraintService:
                 return None
             items = cur.execute(
                 "SELECT * FROM tender_constraint_item WHERE constraint_set_id = %s ORDER BY category, created_at",
+                (constraint_set["id"],),
+            ).fetchall()
+        result = dict(constraint_set)
+        result["items"] = [dict(row) for row in items]
+        return result
+
+    def latest_confirmed(self, conn: Connection, *, project_id: UUID) -> dict[str, Any] | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            constraint_set = cur.execute(
+                """
+                SELECT * FROM tender_constraint_set
+                WHERE project_id = %s
+                  AND status IN ('confirmed', 'accepted')
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                (project_id,),
+            ).fetchone()
+            if constraint_set is None:
+                return None
+            items = cur.execute(
+                """
+                SELECT * FROM tender_constraint_item
+                WHERE constraint_set_id = %s
+                  AND status IN ('accepted', 'confirmed')
+                ORDER BY category, created_at
+                """,
                 (constraint_set["id"],),
             ).fetchall()
         result = dict(constraint_set)

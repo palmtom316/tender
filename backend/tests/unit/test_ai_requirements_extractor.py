@@ -214,6 +214,87 @@ def test_dedupes_same_chunk_same_category(monkeypatch, fake_conn) -> None:
     assert len(summary.requirements) == 1
 
 
+def test_drops_pricing_only_ai_requirements(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    chunk = _chunk(text="投标报价不得超过最高限价100万元，报价明细表按清单填报。")
+    ai_items = [
+        {
+            "source_chunk_id": str(chunk["id"]),
+            "category": "business",
+            "title": "最高限价",
+            "requirement_text": "投标报价不得超过最高限价100万元，报价明细表按清单填报。",
+            "ignored_for_pricing": True,
+            "confidence": 0.91,
+        }
+    ]
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response(ai_items)
+
+    _patch_call_ai(monkeypatch, _handler)
+    summary = asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
+
+    assert summary.requirements == []
+    assert summary.batches[0].dropped_invalid == 1
+
+
+def test_keeps_non_pricing_requirement_from_mixed_ai_chunk(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    chunk = _chunk(text="投标人须具备电力工程施工总承包二级及以上资质，报价不得超过最高限价。")
+    ai_items = [
+        {
+            "source_chunk_id": str(chunk["id"]),
+            "category": "qualification",
+            "title": "电力工程施工总承包二级及以上资质",
+            "requirement_text": "投标人须具备电力工程施工总承包二级及以上资质。",
+            "ignored_for_pricing": False,
+            "confidence": 0.94,
+        },
+        {
+            "source_chunk_id": str(chunk["id"]),
+            "category": "business",
+            "title": "最高限价",
+            "requirement_text": "报价不得超过最高限价。",
+            "ignored_for_pricing": True,
+            "confidence": 0.9,
+        },
+    ]
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response(ai_items)
+
+    _patch_call_ai(monkeypatch, _handler)
+    summary = asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
+
+    assert [req.category for req in summary.requirements] == ["qualification"]
+    assert summary.requirements[0].ignored_for_pricing is False
+    assert summary.batches[0].dropped_invalid == 1
+
+
+def test_ai_requirements_include_bid_writing_constraint_subtype(monkeypatch, fake_conn) -> None:
+    _patch_agent_config(monkeypatch)
+    chunk = _chunk(text="质量目标：满足国家电网公司优质工程验收要求，工程质量合格率100%。")
+    ai_items = [
+        {
+            "source_chunk_id": str(chunk["id"]),
+            "category": "technical",
+            "title": "质量目标",
+            "requirement_text": "质量目标：满足国家电网公司优质工程验收要求，工程质量合格率100%。",
+            "ignored_for_pricing": False,
+            "confidence": 0.93,
+        }
+    ]
+
+    async def _handler(prompt, primary, fallback):
+        return _ai_response(ai_items)
+
+    _patch_call_ai(monkeypatch, _handler)
+    summary = asyncio.run(mod.extract_requirements_with_ai([chunk], conn=fake_conn))
+
+    assert summary.requirements[0].source_metadata["scope_policy"] == "bid_writing_v1"
+    assert summary.requirements[0].source_metadata["constraint_subtype"] == "quality_target"
+
+
 def test_drops_invalid_category(monkeypatch, fake_conn) -> None:
     _patch_agent_config(monkeypatch)
     chunk = _chunk(text="项目工期 30 天。")

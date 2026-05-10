@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from tender_backend.services.bid_outline_planner import plan_bid_outline_from_requirements
+from tender_backend.services.bid_outline_planner import (
+    build_bid_outline,
+    plan_bid_outline_from_confirmed_constraints,
+    plan_bid_outline_from_requirements,
+)
 
 
 def _requirement(category: str, **overrides):
@@ -100,3 +104,80 @@ def test_sgcc_distribution_technical_outline_uses_sample_numbering() -> None:
     assert chapter["parent_code"] == "10"
     assert chapter["metadata_json"]["template_key"] == "sgcc_distribution_technical_v1"
     assert chapter["metadata_json"]["source_sample"] == "docs/samples/国网公司配网工程技术标目录.md"
+
+
+def test_plan_bid_outline_from_confirmed_constraints_uses_constraint_items() -> None:
+    project_id = uuid4()
+    requirement_id = uuid4()
+    constraint_id = uuid4()
+    outline = plan_bid_outline_from_confirmed_constraints(
+        project_id=project_id,
+        constraint_set={
+            "id": uuid4(),
+            "version": 2,
+            "status": "confirmed",
+            "items": [
+                {
+                    "id": constraint_id,
+                    "requirement_id": requirement_id,
+                    "category": "technical",
+                    "status": "accepted",
+                    "title": "质量目标",
+                    "constraint_text": "质量目标：工程质量合格率100%。",
+                    "source_locator": "p10",
+                    "metadata_json": {"constraint_subtype": "quality_target"},
+                }
+            ],
+        },
+    )
+
+    chapter = next(item for item in outline["chapters"] if item["volume_type"] == "technical" and item["chapter_code"] == "10.1")
+
+    assert chapter["requirement_ids"] == [requirement_id]
+    assert chapter["requirement_mappings"][0]["source_constraint_id"] == str(constraint_id)
+    assert outline["metadata_json"]["source_constraint_set_version"] == 2
+    assert outline["metadata_json"]["source_requirement_count"] == 1
+
+
+def test_build_bid_outline_prefers_latest_confirmed_constraint_set(monkeypatch) -> None:
+    project_id = uuid4()
+    requirement_id = uuid4()
+    constraint_id = uuid4()
+    persisted = {}
+
+    class _RequirementRepo:
+        def list_by_project(self, conn, *, project_id):
+            raise AssertionError("raw requirements should not be loaded when a confirmed constraint set exists")
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {
+                "id": uuid4(),
+                "version": 4,
+                "status": "confirmed",
+                "items": [
+                    {
+                        "id": constraint_id,
+                        "requirement_id": requirement_id,
+                        "category": "technical",
+                        "status": "accepted",
+                        "title": "质量目标",
+                        "constraint_text": "质量目标：工程质量合格率100%。",
+                        "metadata_json": {"constraint_subtype": "quality_target"},
+                    }
+                ],
+            }
+
+    class _OutlineRepo:
+        def replace_for_project(self, conn, *, project_id, outline):
+            persisted["outline"] = outline
+            return outline
+
+    monkeypatch.setattr("tender_backend.services.bid_outline_planner.RequirementRepository", _RequirementRepo)
+    monkeypatch.setattr("tender_backend.services.bid_outline_planner.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.bid_outline_planner.BidOutlineRepository", _OutlineRepo)
+
+    outline = build_bid_outline(object(), project_id=project_id)
+
+    assert outline is persisted["outline"]
+    assert outline["metadata_json"]["constraint_source_of_truth"] == "confirmed_constraint_set"

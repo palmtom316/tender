@@ -22,6 +22,10 @@ LANE_LABELS = {
 }
 
 TOPIC_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("quality_target", ("质量目标", "质量标准", "优质工程", "合格率", "验收")),
+    ("schedule_target", ("计划工期", "工期", "进度计划", "进度保证", "履约期限")),
+    ("safety_civilized", ("安全文明施工", "文明施工", "绿色施工", "风险管控", "安全")),
+    ("personnel_count", ("项目经理", "技术负责人", "安全员", "施工员", "资料员", "人员配置")),
     ("bid_bond", ("保证金", "投标担保", "保函")),
     ("deadline", ("截止", "开标", "递交", "上传", "解密")),
     ("signature", ("签章", "盖章", "签字", "电子签名", "CA")),
@@ -33,6 +37,23 @@ TOPIC_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("scoring", ("评分", "分值", "评审")),
     ("technical", ("技术", "施工方案", "质量", "安全", "进度")),
 ]
+
+CONSTRAINT_SUBTYPE_TOPICS = {
+    "qualification_certificate",
+    "performance_threshold",
+    "personnel_count",
+    "personnel_certificate",
+    "quality_target",
+    "schedule_target",
+    "safety_civilized",
+    "sgcc_standard_compliance",
+    "construction_method",
+    "technical_scoring_response",
+    "submission_format",
+    "signature_seal",
+    "veto_rejection",
+    "mandatory_attachment",
+}
 
 KEY_FIELD_PATTERNS: dict[str, re.Pattern[str]] = {
     "date": re.compile(r"\d{4}[年/-]\d{1,2}[月/-]\d{1,2}日?|\d{1,2}月\d{1,2}日|\d{1,2}:\d{2}"),
@@ -46,6 +67,14 @@ KEY_FIELD_PATTERNS: dict[str, re.Pattern[str]] = {
 
 def _text(row: dict[str, Any]) -> str:
     return str(row.get("requirement_text") or row.get("source_text") or row.get("title") or "")
+
+
+def _constraint_subtype(row: dict[str, Any]) -> str | None:
+    metadata = row.get("source_metadata") or {}
+    if not isinstance(metadata, dict):
+        return None
+    subtype = str(metadata.get("constraint_subtype") or "").strip()
+    return subtype if subtype in CONSTRAINT_SUBTYPE_TOPICS else None
 
 
 def _compact(value: str) -> str:
@@ -128,6 +157,9 @@ def _lane_for(level: str, category: str, topic: str | None) -> str:
 
 def _group_key(row: dict[str, Any]) -> str:
     category = str(row.get("category") or "uncategorized")
+    subtype = _constraint_subtype(row)
+    if subtype:
+        return f"{category}:{subtype}"
     text = _text(row)
     topic = _topic(text)
     if topic:
@@ -174,7 +206,7 @@ def build_requirement_workbench(project_id: str, requirements: list[dict[str, An
         has_conflict = bool(conflict_fields)
         level = "critical" if has_conflict or "critical" in levels else "review" if "review" in levels else levels[0]
         category = Counter(str(row.get("category") or "uncategorized") for row in rows).most_common(1)[0][0]
-        topic = _topic(" ".join(_text(row) for row in rows))
+        topic = _constraint_subtype(rows[0]) or _topic(" ".join(_text(row) for row in rows))
         lane = _lane_for(level, category, topic)
         confirmed_count = sum(1 for row in rows if row.get("human_confirmed"))
         confidence_values = [float(row["confidence"]) for row in rows if row.get("confidence") is not None]

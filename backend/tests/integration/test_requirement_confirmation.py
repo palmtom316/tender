@@ -87,7 +87,8 @@ def test_extract_core_constraints_from_source_chunks():
     assert any(item.is_veto and item.requires_human_confirm for item in results)
     assert any(item.category == "veto" and item.is_hard_constraint for item in results)
     assert any(item.category == "performance" and item.is_hard_constraint for item in results)
-    assert any(item.ignored_for_pricing for item in results)
+    assert all(not item.ignored_for_pricing for item in results)
+    assert all("最高限价" not in item.requirement_text for item in results)
     assert all(item.source_file and item.source_locator for item in results)
 
 
