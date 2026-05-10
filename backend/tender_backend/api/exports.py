@@ -1,6 +1,7 @@
 """API routes for export operations."""
 
 from __future__ import annotations
+import re
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -44,6 +45,8 @@ _MODE_TO_DOWNLOAD_SUFFIX = {
     EXPORT_MODE_MULTI_DOCX_ZIP: (".zip", "application/zip"),
     EXPORT_MODE_MULTI_DOC_ZIP: (".zip", "application/zip"),
 }
+
+_CHART_PLACEHOLDER_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
 
 
 class CreateExportBody(BaseModel):
@@ -157,6 +160,33 @@ def _template_name_to_mode(template_name: str | None) -> str:
     return EXPORT_MODE_SINGLE_DOCX
 
 
+def _referenced_chart_placeholders(conn: Connection, *, project_id: UUID) -> set[str]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            """
+            SELECT content_md
+            FROM chapter_draft
+            WHERE project_id = %s
+            """,
+            (project_id,),
+        ).fetchall()
+    placeholders: set[str] = set()
+    for row in rows:
+        placeholders.update(_CHART_PLACEHOLDER_RE.findall(str(row.get("content_md") or "")))
+    return placeholders
+
+
+def _unapproved_referenced_chart_count(chart_assets: list, referenced_placeholders: set[str]) -> int:
+    if not referenced_placeholders:
+        return 0
+    count = 0
+    for asset in chart_assets:
+        key = asset.placeholder_key or asset.chart_type
+        if key in referenced_placeholders and asset.status != "approved":
+            count += 1
+    return count
+
+
 @router.get("/projects/{project_id}/export-gates")
 async def check_export_gates(
     project_id: UUID,
@@ -173,7 +203,8 @@ async def check_export_gates(
     unconfirmed_veto = req_repo.unconfirmed_veto_count(conn, project_id=project_id)
     blocking_issues = get_blocking_issues(conn, project_id=project_id)
     chart_assets = ChartAssetRepository().list_by_project(conn, project_id=project_id)
-    unapproved_chart_count = len([asset for asset in chart_assets if asset.status != "approved"])
+    referenced_chart_placeholders = _referenced_chart_placeholders(conn, project_id=project_id)
+    unapproved_chart_count = _unapproved_referenced_chart_count(chart_assets, referenced_chart_placeholders)
 
     return {
         "project_id": str(project_id),
@@ -184,6 +215,7 @@ async def check_export_gates(
             "blocking_issue_count": len(blocking_issues),
             "charts_approved": unapproved_chart_count == 0,
             "unapproved_chart_count": unapproved_chart_count,
+            "referenced_chart_count": len(referenced_chart_placeholders),
             "format_passed": True,  # Phase 1: format check is a warning
         },
         "can_export": unconfirmed_veto == 0 and len(blocking_issues) == 0 and unapproved_chart_count == 0,

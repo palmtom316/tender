@@ -979,6 +979,9 @@ export interface ExportGates {
     unconfirmed_veto_count: number;
     review_passed: boolean;
     blocking_issue_count: number;
+    charts_approved: boolean;
+    unapproved_chart_count: number;
+    referenced_chart_count: number;
     format_passed: boolean;
   };
   can_export: boolean;

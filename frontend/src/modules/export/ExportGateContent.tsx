@@ -109,6 +109,15 @@ export function ExportGateContent() {
             detail={gates.review_passed ? "无阻断问题" : `${gates.blocking_issue_count} 条 P0/P1 问题`}
           />
           <GateIndicator
+            passed={gates.charts_approved}
+            label="图表审批"
+            detail={
+              gates.charts_approved
+                ? `${gates.referenced_chart_count} 个引用图表均已审批`
+                : `${gates.unapproved_chart_count} 个引用图表未审批`
+            }
+          />
+          <GateIndicator
             passed={gates.format_passed}
             label="格式校验"
             detail={gates.format_passed ? "格式合规" : "格式不合规"}
