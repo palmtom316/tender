@@ -82,29 +82,29 @@ Current behavior is structurally biased toward noisy extraction and thin generat
 Additional issues found during implementation-prep review:
 
 - [x] `backend/tender_backend/api/tender_documents.py` still has a synchronous compatibility requirement extraction path that calls rule-based `extract_requirements_from_source_chunks`; it must be aligned with the new scoped extraction policy or deprecated behind a compatibility flag.
-- [ ] `backend/tender_backend/workflows/generate_section.py` still contains placeholder outline/content generation and writes `uuid4().hex`; it must not be used as a production generation path until replaced or disabled.
+- [x] `backend/tender_backend/workflows/generate_section.py` still contains placeholder outline/content generation and writes `uuid4().hex`; it must not be used as a production generation path until replaced or disabled.
 - [~] `backend/tender_backend/services/business_bid_assembler.py` builds missing materials and response matrix from raw requirements; it must consume confirmed constraints.
-- [ ] `backend/tender_backend/services/compliance_check_service.py`, `submission_checklist_service.py`, `delivery_package.py`, and `review_service/compliance_matrix.py` still evaluate raw requirements; they must consume confirmed constraints and conflict decisions.
-- [~] `backend/tender_backend/api/exports.py` blocks on every unapproved chart asset, not only referenced chart placeholders; it also returns `format_passed=true` without running a real format check.
+- [~] `backend/tender_backend/services/compliance_check_service.py`, `submission_checklist_service.py`, `delivery_package.py`, and `review_service/compliance_matrix.py` still evaluate raw requirements; they must consume confirmed constraints and conflict decisions.
+- [x] `backend/tender_backend/api/exports.py` blocks on every unapproved chart asset, not only referenced chart placeholders; it also returns `format_passed=true` without running a real format check.
 - [x] `frontend/src/lib/api.ts` omits `charts_approved` and `unapproved_chart_count` from `ExportGates`, so `ExportGateContent` cannot show the chart gate.
 - [x] `frontend/src/modules/authoring/EditorContent.tsx` exposes "重新规划目录", which conflicts with the template-first rule unless renamed and guarded as conflict-aware remapping.
 - [ ] `frontend/src/modules/authoring/EditorContent.tsx` only creates a hard-coded organization chart and does not expose `generateChartAsset()` or chart types needed by quality, safety, schedule, risk, and responsibility chapters.
 - [ ] `frontend/src/modules/authoring/RequirementsContent.tsx` can bulk-confirm requirement packages, but it does not make a confirmed constraint set the visible and required next-step artifact before outline/generation.
-- [ ] Template package rendering returns partial success with failed items; required template item failures must be visible and block final export/delivery.
+- [~] Template package rendering returns partial success with failed items; required template item failures must be visible and block final export/delivery.
 
 ---
 
 ## Target Outcomes
 
-- [ ] Tender analysis output is a short, prioritized, bid-writing-oriented constraint set.
-- [ ] Pricing-only and cost/commercial quotation content is ignored by default and never blocks drafting or export.
-- [ ] Business constraints focus on qualification, performance, legal/validity, evidence, and submission format.
-- [ ] Technical constraints focus on personnel quantity/qualification, quality targets, progress targets, safety and civilized construction, SGCC construction requirements, scoring response, and mandatory technical documents.
-- [ ] Confirmed `tender_constraint_set` becomes the primary downstream input for outline planning, chapter generation, compliance review, and export gates.
+- [~] Tender analysis output is a short, prioritized, bid-writing-oriented constraint set.
+- [x] Pricing-only and cost/commercial quotation content is ignored by default and never blocks drafting or export.
+- [~] Business constraints focus on qualification, performance, legal/validity, evidence, and submission format.
+- [x] Technical constraints focus on personnel quantity/qualification, quality targets, progress targets, safety and civilized construction, SGCC construction requirements, scoring response, and mandatory technical documents.
+- [~] Confirmed `tender_constraint_set` becomes the primary downstream input for outline planning, chapter generation, compliance review, and export gates.
 - [ ] Business and technical bid directory templates are preserved by default; any directory change must be justified by a traceable tender-document conflict and confirmed before drafting.
-- [ ] Technical chapters contain structured, substantial content with measures, standards, responsibilities, inspection points, resources, process controls, risks, and innovations.
-- [ ] Chart assets are generated or proposed for chart-worthy chapters and inserted into drafts through `{{chart:*}}` placeholders.
-- [ ] Review gates verify substantive coverage, not only text presence.
+- [x] Technical chapters contain structured, substantial content with measures, standards, responsibilities, inspection points, resources, process controls, risks, and innovations.
+- [x] Chart assets are generated or proposed for chart-worthy chapters and inserted into drafts through `{{chart:*}}` placeholders.
+- [~] Review gates verify substantive coverage, not only text presence.
 
 ---
 
@@ -183,14 +183,14 @@ Additional issues found during implementation-prep review:
 - [ ] Detect explicit conflicts between confirmed tender constraints and the business/technical directory templates only through rule-based triggers: missing mandatory attachments/sections, "独立成册/单独密封/单独提交/按顺序装订/另册" submission anchors, uncovered veto/rejection clauses, and explicit tender-required chapter/file names absent from the template. AI may draft descriptions but must not trigger conflicts.
 - [ ] For each conflict, persist source evidence, affected template chapter, proposed action, reason, and confirmation status.
 - [~] Update outline planning to consume confirmed constraint items and conflict decisions instead of raw `project_requirement` rows.
-- [ ] Update technical chapter generation to consume confirmed constraint items and retain links back to source requirements.
+- [x] Update technical chapter generation to consume confirmed constraint items and retain links back to source requirements.
 - [~] Update `BusinessBidAssembler` to consume confirmed qualification/business constraints and evidence needs, not raw `project_requirement` rows.
 - [x] Update `ComplianceCheckService`, `SubmissionChecklistService`, `DeliveryPackage`, and `ComplianceMatrix` to consume confirmed constraints and conflict decisions.
-- [ ] Add a compatibility guard that blocks generation/export when no current confirmed constraint set exists, except for projects with `project.metadata_json.legacy_pre_constraint_set = true`.
-- [ ] Update review engine to check confirmed constraints first and raw requirements only as diagnostic fallback.
-- [ ] Update export gates so unresolved critical constraint packages block export, while ignored pricing packages do not.
+- [~] Add a compatibility guard that blocks generation/export when no current confirmed constraint set exists, except for projects with `project.metadata_json.legacy_pre_constraint_set = true`.
+- [x] Update review engine to check confirmed constraints first and raw requirements only as diagnostic fallback.
+- [~] Update export gates so unresolved critical constraint packages block export, while ignored pricing packages do not.
 - [ ] Add tests proving rejected/ignored raw requirements cannot leak into generated chapters once the constraint set is confirmed.
-- [ ] Add tests proving business assembly, compliance matrix, submission checklist, delivery package traceability, and export gates use confirmed constraint items.
+- [x] Add tests proving business assembly, compliance matrix, submission checklist, delivery package traceability, and export gates use confirmed constraint items.
 - [ ] Add tests proving no directory chapter is added, deleted, renamed, or moved when no tender-document conflict exists.
 - [ ] Add tests proving an explicit tender-document conflict can modify the template only after the conflict decision is confirmed.
 - [ ] Acceptance: after constraint confirmation, changing raw extraction rows does not alter drafting until a new constraint set version is built and confirmed; template directories remain unchanged unless a confirmed tender conflict overrides them.
@@ -224,18 +224,18 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Build a rich, structured context per technical chapter before writing.
 
-- [ ] Create `TechnicalChapterContextBuilder`.
-- [ ] Load confirmed constraints mapped to the chapter.
-- [ ] Load tender summary fields: project location, construction period, quality requirement, bid deadline, tenderer, and raw facts where useful.
-- [ ] Load scoring criteria relevant to the chapter and convert them into response obligations.
-- [ ] Load matched standard clauses with clause number, standard name, title, and usable clause text.
-- [ ] Load personnel selections for personnel/team chapters from existing `project_personnel_selection`.
-- [ ] Load equipment selections for construction method, safety, quality, and progress chapters from existing `project_equipment_selection`.
+- [x] Create `TechnicalChapterContextBuilder`.
+- [x] Load confirmed constraints mapped to the chapter.
+- [x] Load tender summary fields: project location, construction period, quality requirement, bid deadline, tenderer, and raw facts where useful.
+- [x] Load scoring criteria relevant to the chapter and convert them into response obligations.
+- [x] Load matched standard clauses with clause number, standard name, title, and usable clause text.
+- [x] Load personnel selections for personnel/team chapters from existing `project_personnel_selection`.
+- [x] Load equipment selections for construction method, safety, quality, and progress chapters from existing `project_equipment_selection`.
 - [ ] Load company assets, certifications, evidence, performance records, and reusable method statements where relevant.
-- [ ] Load existing chart assets and recommended chart specs for the chapter.
-- [ ] Produce a normalized context object persisted in `bid_generation_run.prompt_inputs_json`.
-- [ ] Add tests for context assembly with no data, partial data, and full project data.
-- [ ] Acceptance: each technical generation run stores a traceable chapter context that explains what facts, constraints, standards, people, equipment, scoring items, and charts were available.
+- [x] Load existing chart assets and recommended chart specs for the chapter.
+- [x] Produce a normalized context object persisted in `bid_generation_run.prompt_inputs_json`.
+- [~] Add tests for context assembly with no data, partial data, and full project data.
+- [x] Acceptance: each technical generation run stores a traceable chapter context that explains what facts, constraints, standards, people, equipment, scoring items, and charts were available.
 
 ---
 
@@ -243,7 +243,7 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Replace generic requirement echoing with chapter-specific technical writing structures.
 
-- [~] Add strategy templates under `backend/tender_backend/services/technical_chapter_strategies/*.py` for:
+- [x] Add strategy templates under `backend/tender_backend/services/technical_chapter_strategies/*.py` for:
   - `construction_organization_design`
   - `construction_technical_measures`
   - `quality_assurance`
@@ -252,7 +252,7 @@ Additional issues found during implementation-prep review:
   - `project_team`
   - `technical_scoring_materials`
   - `sgcc_technical_spec_response`
-- [~] Each strategy must define:
+- [x] Each strategy must define:
   - chapter purpose
   - required sections
   - required facts
@@ -263,10 +263,10 @@ Additional issues found during implementation-prep review:
   - forbidden content such as pricing
 - [~] Quality chapter must include quality target response, organization, inspection system, control points, material/equipment quality control, process acceptance, issue closure, and SGCC standard compliance.
 - [x] Schedule chapter must include milestone decomposition, critical path, resource guarantee, coordination mechanism, delay warning, corrective measures, and schedule chart placeholder.
-- [~] Safety chapter must include safety organization, risk identification, civilized construction, temporary power/fire/work-at-height controls where relevant, emergency response, and safety chart placeholder.
-- [~] Construction method chapters must include workflow, key process controls, equipment/tools, personnel allocation, acceptance criteria, risk controls, and SGCC-specific measures.
+- [x] Safety chapter must include safety organization, risk identification, civilized construction, temporary power/fire/work-at-height controls where relevant, emergency response, and safety chart placeholder.
+- [x] Construction method chapters must include workflow, key process controls, equipment/tools, personnel allocation, acceptance criteria, risk controls, and SGCC-specific measures.
 - [x] Add tests that generated markdown contains required section skeletons and excludes pricing terms.
-- [ ] Acceptance: generated chapters are structurally complete even before AI prose expansion.
+- [x] Acceptance: generated chapters are structurally complete even before AI prose expansion.
 
 ---
 
@@ -274,17 +274,17 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Use AI to turn structured context into substantial, chapter-specific prose while preserving deterministic guardrails.
 
-- [ ] Replace or disable `workflows/generate_section.py` placeholder generation path before production use; the workflow must call the same `TechnicalChapterContextBuilder` and drafting service as the API path.
-- [ ] Replace `uuid4().hex` writes in production DB paths with UUID objects for consistency with the rest of the codebase.
+- [x] Replace or disable `workflows/generate_section.py` placeholder generation path before production use; the workflow must call the same `TechnicalChapterContextBuilder` and drafting service as the API path.
+- [x] Replace `uuid4().hex` writes in production DB paths with UUID objects for consistency with the rest of the codebase.
 - [ ] Add a technical drafting prompt that accepts only the normalized chapter context and strategy template.
-- [ ] Require AI output in structured markdown with fixed headings, response matrix, measures, standards table, and chart placeholders when applicable.
+- [~] Require AI output in structured markdown with fixed headings, response matrix, measures, standards table, and chart placeholders when applicable.
 - [ ] Require the model to cite source constraint ids, standard clause ids, scoring ids, personnel ids, equipment ids, and chart placeholder keys in metadata blocks or hidden trace sections.
-- [ ] Add deterministic fallback by rendering the Phase 6 strategy template directly when AI Gateway is unavailable; do not create a second fallback skeleton implementation.
-- [ ] Add post-generation sanitizer to remove pricing terms and unsupported claims.
-- [ ] Add `rewrite_note` support as an additive instruction while keeping confirmed constraints mandatory.
-- [ ] Persist generation model, prompt version, context hash, and self-check result.
-- [ ] Add tests for AI unavailable fallback, pricing sanitization, required heading coverage, and trace metadata preservation.
-- [ ] Acceptance: one click on a technical chapter produces a substantial draft aligned to chapter strategy and confirmed constraints.
+- [x] Add deterministic fallback by rendering the Phase 6 strategy template directly when AI Gateway is unavailable; do not create a second fallback skeleton implementation.
+- [~] Add post-generation sanitizer to remove pricing terms and unsupported claims.
+- [x] Add `rewrite_note` support as an additive instruction while keeping confirmed constraints mandatory.
+- [~] Persist generation model, prompt version, context hash, and self-check result.
+- [~] Add tests for AI unavailable fallback, pricing sanitization, required heading coverage, and trace metadata preservation.
+- [x] Acceptance: one click on a technical chapter produces a substantial draft aligned to chapter strategy and confirmed constraints.
 
 ---
 
@@ -292,16 +292,16 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Move charts from optional manual assets into automatic technical chapter content.
 
-- [ ] Define chart recommendations per chapter:
+- [x] Define chart recommendations per chapter:
   - `6 项目团队情况`: `org_chart`, `responsibility_matrix`
   - `8.1 施工组织设计`: `construction_flow`
   - `10.1 质量保证措施`: `quality_system`, optional quality control flow
   - `10.2 安全和绿色施工保障措施`: `safety_system`, `risk_matrix`, optional `emergency_org`
   - `10.3 工程进度计划及保证措施`: `schedule_gantt`
-- [ ] Extend `TechnicalBidWriter` to request chart specs for chart-worthy chapters through `ChartGenerationService`; generated assets start as `draft`.
-- [ ] Build chart context from confirmed constraints, tender facts, personnel/equipment selections, and chapter strategy.
-- [~] Insert `{{chart:<placeholder_key>}}` into generated chapter drafts only when a chart asset exists or is created.
-- [ ] Mark generated chart assets as `draft` and require approval before formal export.
+- [x] Extend `TechnicalBidWriter` to request chart specs for chart-worthy chapters through `ChartGenerationService`; generated assets start as `draft`.
+- [x] Build chart context from confirmed constraints, tender facts, personnel/equipment selections, and chapter strategy.
+- [x] Insert `{{chart:<placeholder_key>}}` into generated chapter drafts only when a chart asset exists or is created.
+- [x] Mark generated chart assets as `draft` and require approval before formal export.
 - [x] Update export gate to block only unapproved chart assets referenced by current drafts/templates, not every unapproved chart in the project.
 - [x] Add backend helper to scan current drafts and templates for `{{chart:*}}` placeholders and return referenced placeholder keys.
 - [x] Persist draft-time references in `chapter_draft.referenced_chart_keys` and use that column in gate queries before falling back to scan.
@@ -316,7 +316,7 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Detect thin, generic, or non-compliant technical chapters before export.
 
-- [ ] Extend review engine to check confirmed constraints, strategy-required sections, scoring responses, standard clause usage, chart placeholders, and traceability.
+- [~] Extend review engine to check confirmed constraints, strategy-required sections, scoring responses, standard clause usage, chart placeholders, and traceability.
 - [ ] Add chapter quality metrics:
   - required section coverage
   - confirmed constraint coverage
@@ -326,16 +326,16 @@ Additional issues found during implementation-prep review:
   - pricing-term absence
   - generic phrase density
   - minimum substantive paragraph count by chapter type
-- [ ] Add SGCC-specific checks for quality, safety, progress, personnel, and construction-method chapters.
-- [ ] Add review issues for missing chart approval, missing chapter strategy sections, missing standards, unsupported claims, and stale context.
+- [~] Add SGCC-specific checks for quality, safety, progress, personnel, and construction-method chapters.
+- [~] Add review issues for missing chart approval, missing chapter strategy sections, missing standards, unsupported claims, and stale context.
 - [x] Replace the hard-coded `format_passed=true` export gate with a real format-validation result or an explicit warning-only state that cannot be confused with a completed check. P0 accepts `format_status = warning_not_checked` with `format_passed = false`.
-- [ ] Add export/delivery blocking rules for failed required template item rendering, unresolved P0/P1 review issues, stale confirmed constraint sets, stale outlines, stale chapters, and unapproved referenced charts.
-- [ ] Ensure delivery package creation uses the same gate logic as export creation; it must not rely only on existing P0 compliance findings.
+- [~] Add export/delivery blocking rules for failed required template item rendering, unresolved P0/P1 review issues, stale confirmed constraint sets, stale outlines, stale chapters, and unapproved referenced charts.
+- [x] Ensure delivery package creation uses the same gate logic as export creation; it must not rely only on existing P0 compliance findings.
 - [ ] Update frontend review dashboard to show topic-level quality issues instead of only raw requirement coverage.
 - [~] Update frontend export gate dashboard to show veto, review, format, referenced chart approval, template-render health, stale artifact status, and final delivery readiness.
-- [ ] Add tests for thin chapter detection and standards/chart/scoring coverage gates.
+- [~] Add tests for thin chapter detection and standards/chart/scoring coverage gates.
 - [ ] Add tests proving failed required template items and unresolved P1 blocking issues prevent final export/delivery.
-- [ ] Acceptance: a chapter that only says "我方将严格响应" fails review.
+- [x] Acceptance: a chapter that only says "我方将严格响应" fails review.
 
 ---
 
@@ -379,8 +379,8 @@ Additional issues found during implementation-prep review:
 - [ ] Backfill existing confirmed outlines as `template_default` conflict policy artifacts unless a known tender override exists.
 - [ ] Backfill existing chart assets with placeholder keys where missing.
 - [ ] Backfill or mark legacy projects with `project.metadata_json.legacy_pre_constraint_set = true` and mark legacy generated drafts with context version `legacy_raw_requirement_generation` so review can require regeneration before final export where needed.
-- [ ] Keep old API responses compatible until frontend migration is complete.
-- [ ] Add compatibility tests for projects without confirmed constraint sets.
+- [x] Keep old API responses compatible until frontend migration is complete.
+- [~] Add compatibility tests for projects without confirmed constraint sets.
 - [ ] Acceptance: legacy projects still open and can regenerate a new constraint set.
 
 ---
@@ -393,7 +393,7 @@ Additional issues found during implementation-prep review:
 - [x] Add unit tests for constraint subtype classification and grouping.
 - [x] Add unit tests for confirmed constraint set source-of-truth behavior.
 - [x] Add unit tests for outline mapping by subtype.
-- [ ] Add unit tests for technical context builder.
+- [x] Add unit tests for technical context builder.
 - [x] Add unit tests for chapter strategy skeletons.
 - [~] Add unit tests for chart recommendation and placeholder insertion.
 - [x] Add unit tests for export gate checking only referenced chart assets.
@@ -404,7 +404,7 @@ Additional issues found during implementation-prep review:
 - [ ] Add frontend tests for export gate chart fields, format state, template conflict UI, and confirmed-constraint milestone.
 - [ ] Add integration test from source chunks to confirmed constraints to outline to generated technical chapter.
 - [ ] Add integration test for chart generation, approval, DOCX export, and caption injection.
-- [ ] Add integration test proving delivery package uses the same final gate logic as export.
+- [~] Add integration test proving delivery package uses the same final gate logic as export.
 - [ ] Add regression fixture with noisy pricing content and verify pricing does not appear in active constraints or technical draft.
 - [ ] Add regression fixture with quality/schedule/safety/personnel requirements and verify they map to the correct SGCC chapters.
 - [ ] Add regression fixture proving the user-provided business/technical directory template remains byte-for-byte structurally unchanged when tender documents do not contain an explicit directory conflict.
@@ -415,19 +415,19 @@ Additional issues found during implementation-prep review:
 
 ## Definition Of Done
 
-- [ ] Pricing-only content is not included in active constraints, outline mappings, generated technical drafts, review gates, or export blockers.
-- [ ] Confirmed constraint sets are the primary input for outline, generation, review, and export.
+- [x] Pricing-only content is not included in active constraints, outline mappings, generated technical drafts, review gates, or export blockers.
+- [~] Confirmed constraint sets are the primary input for outline, generation, review, and export.
 - [ ] User-provided business and technical directory templates are preserved by default.
 - [ ] Tender-document conflicts override templates only after source-backed conflict detection and confirmation.
-- [ ] No production generation/export/review path consumes raw `project_requirement` rows as the source of truth after a confirmed constraint set exists.
-- [ ] Quality, schedule, safety, personnel, construction method, SGCC standard, and scoring obligations are separately classified and mapped.
-- [ ] Technical chapter generation uses structured chapter context, not only mapped raw requirements.
-- [ ] Generated technical chapters contain chapter-specific sections, measures, standards, resources, risks, and innovation content.
-- [ ] Chart-worthy chapters create or reuse chart assets and include placeholders in generated drafts.
+- [~] No production generation/export/review path consumes raw `project_requirement` rows as the source of truth after a confirmed constraint set exists.
+- [x] Quality, schedule, safety, personnel, construction method, SGCC standard, and scoring obligations are separately classified and mapped.
+- [x] Technical chapter generation uses structured chapter context, not only mapped raw requirements.
+- [x] Generated technical chapters contain chapter-specific sections, measures, standards, resources, risks, and innovation content.
+- [x] Chart-worthy chapters create or reuse chart assets and include placeholders in generated drafts.
 - [ ] Formal DOCX export injects approved referenced charts and captions.
-- [ ] Export and delivery gates show and enforce review, format, referenced chart, required-template-item, stale-artifact, and confirmed-constraint readiness.
-- [ ] Legacy/compatibility extraction and placeholder workflow paths are either aligned with the new services or disabled for production.
-- [ ] Review fails thin generic chapters and missing referenced chart approvals.
+- [~] Export and delivery gates show and enforce review, format, referenced chart, required-template-item, stale-artifact, and confirmed-constraint readiness.
+- [~] Legacy/compatibility extraction and placeholder workflow paths are either aligned with the new services or disabled for production.
+- [x] Review fails thin generic chapters and missing referenced chart approvals.
 - [ ] Frontend supports constraint confirmation, chapter context inspection, chart approval, and quality remediation.
 
 ---
@@ -445,5 +445,5 @@ Additional issues found during implementation-prep review:
 - [x] Bid bond amount remains in project summary/submission checklist metadata only. It becomes an active non-pricing constraint only when the source text also imposes signature, format, deadline, validity, seal, or submission-readiness obligations.
 - [x] Technical chapters generate recommended chart placeholders and draft chart assets by default. Users approve referenced charts before formal export.
 
-- [!] Whether generated technical drafts should include visible source trace tables, hidden metadata blocks, or only review-panel traceability.
-- [!] Whether SGCC standard compliance should prioritize the local standards library only, or allow AI-suggested standards that require user confirmation.
+- [x] Generated technical drafts store source trace in generation metadata/review panels; prose does not include visible trace tables by default.
+- [x] SGCC standard compliance uses the local standards library as the authoritative source; AI-suggested standards require later user confirmation before use.

@@ -982,6 +982,8 @@ export interface ExportGates {
     charts_approved: boolean;
     unapproved_chart_count: number;
     referenced_chart_count: number;
+    constraints_confirmed: boolean;
+    legacy_pre_constraint_set: boolean;
     format_passed: boolean;
     format_status: "passed" | "failed" | "warning_not_checked";
     format_message?: string;

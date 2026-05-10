@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any
 from uuid import UUID, uuid4
@@ -11,6 +13,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from tender_backend.services.bid_chapter_generation import generate_bid_chapter_draft
+from tender_backend.services.chart_generation_service import ChartGenerationService
+from tender_backend.services.technical_chapter_context import TechnicalChapterContextBuilder
 
 
 class TechnicalBidWriter:
@@ -48,7 +52,11 @@ class TechnicalBidWriter:
         chapter = self._chapter(conn, project_id=project_id, chapter_id=chapter_id)
         if chapter is None or chapter["volume_type"] != "technical":
             raise ValueError("technical chapter not found")
-        draft = generate_bid_chapter_draft(conn, project_id=project_id, chapter_id=chapter_id, rewrite_note=rewrite_note)
+        context = TechnicalChapterContextBuilder().build(conn, project_id=project_id, chapter_id=chapter_id)
+        self._ensure_recommended_charts(conn, project_id=project_id, chapter=chapter, context=context)
+        context = TechnicalChapterContextBuilder().build(conn, project_id=project_id, chapter_id=chapter_id)
+        draft = generate_bid_chapter_draft(conn, project_id=project_id, chapter_id=chapter_id, context=context, rewrite_note=rewrite_note)
+        self_check = self._self_check(draft.get("content_md") or "")
         run = self._create_run(
             conn,
             project_id=project_id,
@@ -56,9 +64,48 @@ class TechnicalBidWriter:
             chapter_id=chapter_id,
             status="completed",
             created_by=created_by,
-            metadata={"chapter_code": chapter["chapter_code"], "self_check": self._self_check(draft.get("content_md") or "")},
+            prompt_inputs=context,
+            metadata={
+                "chapter_code": chapter["chapter_code"],
+                "self_check": self_check,
+                "context_hash": _context_hash(context),
+                "prompt_version": "technical_chapter_context_v1",
+                "generation_mode": "deterministic_strategy_fallback",
+            },
         )
         return {"project_id": str(project_id), "chapter": chapter, "draft": draft, "run": run}
+
+    def _ensure_recommended_charts(
+        self,
+        conn: Connection,
+        *,
+        project_id: UUID,
+        chapter: dict[str, Any],
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        existing = {asset.get("placeholder_key") or asset.get("chart_type") for asset in context.get("chart_assets") or []}
+        created: list[dict[str, Any]] = []
+        service = ChartGenerationService()
+        for chart_type in context.get("recommended_charts") or []:
+            if chart_type in existing:
+                continue
+            spec = service.generate_spec(
+                chart_type=chart_type,
+                title=_chart_title(chart_type, chapter),
+                placeholder_key=chart_type,
+                context=context,
+            )
+            created.append(
+                service.create_or_update(
+                    conn,
+                    project_id=project_id,
+                    chart_type=chart_type,
+                    title=_chart_title(chart_type, chapter),
+                    spec_json=spec,
+                    outline_node_id=chapter.get("id"),
+                )
+            )
+        return created
 
     def _confirmed_outline(self, conn: Connection, *, project_id: UUID) -> dict[str, Any] | None:
         with conn.cursor(row_factory=dict_row) as cur:
@@ -132,6 +179,7 @@ class TechnicalBidWriter:
         status: str,
         created_by: str | None,
         metadata: dict[str, Any],
+        prompt_inputs: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
@@ -149,7 +197,7 @@ class TechnicalBidWriter:
                     outline_id,
                     chapter_id,
                     status,
-                    Jsonb({"source": "confirmed_outline_and_mapped_requirements"}),
+                    Jsonb(prompt_inputs or {"source": "confirmed_outline_and_mapped_requirements"}),
                     Jsonb(metadata),
                     created_by,
                 ),
@@ -159,3 +207,22 @@ class TechnicalBidWriter:
 
 
 __all__ = ["TechnicalBidWriter"]
+
+
+def _context_hash(context: dict[str, Any]) -> str:
+    payload = json.dumps(context, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _chart_title(chart_type: str, chapter: dict[str, Any]) -> str:
+    names = {
+        "org_chart": "项目组织机构图",
+        "responsibility_matrix": "岗位职责矩阵",
+        "construction_flow": "施工流程图",
+        "quality_system": "质量管理体系图",
+        "safety_system": "安全管理体系图",
+        "risk_matrix": "风险分级管控矩阵",
+        "emergency_org": "应急组织架构图",
+        "schedule_gantt": "施工进度计划图",
+    }
+    return names.get(chart_type, f"{chapter.get('chapter_title') or '技术章节'}图表")

@@ -20,6 +20,7 @@ from tender_backend.services.review_service.compliance_matrix import build_compl
 from tender_backend.services.review_service.review_engine import build_project_review
 from tender_backend.services.submission_checklist_service import SubmissionChecklistService
 from tender_backend.services.tender_constraint_service import TenderConstraintService
+from tender_backend.services.export_gate_service import build_export_gate_state
 
 __all__ = [
     "build_delivery_package",
@@ -133,6 +134,9 @@ def _load_missing_items(conn: Connection, project_id: UUID) -> list[dict]:
 
 
 def build_delivery_package(conn: Connection, *, project_id: UUID, created_by: str | None = None) -> dict[str, Any]:
+    gate_state = build_export_gate_state(conn, project_id=project_id)
+    if not gate_state.get("can_export"):
+        raise ValueError(f"export gates block delivery package: {gate_state.get('gates')}")
     blocking_compliance = ComplianceCheckService().blocking_findings(conn, project_id=project_id)
     if blocking_compliance:
         raise ValueError(f"unresolved P0 compliance findings block delivery package: {len(blocking_compliance)}")

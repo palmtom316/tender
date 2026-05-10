@@ -5,6 +5,8 @@ import zipfile
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+
 from tender_backend.services import delivery_package
 
 
@@ -93,6 +95,7 @@ def test_build_delivery_package_records_degraded_warnings(tmp_path: Path, monkey
     monkeypatch.setattr(delivery_package, "render_docx", fake_render_docx)
     monkeypatch.setattr(delivery_package, "render_volume_docx", fake_render_volume_docx)
     monkeypatch.setattr(delivery_package, "convert_docx_to_doc", lambda _path: None)
+    monkeypatch.setattr(delivery_package, "build_export_gate_state", lambda _conn, *, project_id: {"can_export": True, "gates": {}})
     monkeypatch.setattr(
         delivery_package,
         "EquipmentTableRenderer",
@@ -123,3 +126,17 @@ def test_delivery_package_json_outputs_are_valid(tmp_path: Path, monkeypatch) ->
     path = delivery_package._write_json(tmp_path / "nested" / "out.json", {"value": "中文"})
 
     assert json.loads(path.read_text(encoding="utf-8")) == {"value": "中文"}
+
+
+def test_delivery_package_blocks_when_final_gate_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        delivery_package,
+        "build_export_gate_state",
+        lambda conn, *, project_id: {
+            "can_export": False,
+            "gates": {"review_passed": False, "blocking_issue_count": 1},
+        },
+    )
+
+    with pytest.raises(ValueError, match="export gates block delivery package"):
+        delivery_package.build_delivery_package(_Conn(), project_id=uuid4(), created_by="Tester")

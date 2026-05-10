@@ -568,6 +568,7 @@ def render_template_package_bundle(
     item_results: list[dict[str, object]] = []
     rendered_count = 0
     failed_count = 0
+    required_failed_count = 0
 
     for item in items:
         try:
@@ -590,6 +591,7 @@ def render_template_package_bundle(
                     "filename": item.filename,
                     "relative_path": item.relative_path,
                     "render_mode": item.render_mode,
+                    "required": item.is_required,
                     "status": "rendered",
                     "output_path": rendered["output_path"],
                     "copied_asset_count": rendered.get("copied_asset_count", 0),
@@ -605,11 +607,14 @@ def render_template_package_bundle(
                     "filename": item.filename,
                     "relative_path": item.relative_path,
                     "render_mode": item.render_mode,
+                    "required": item.is_required,
                     "status": "failed",
                     "error": str(exc),
                 }
             )
             failed_count += 1
+            if item.is_required:
+                required_failed_count += 1
 
     zip_path = str(_create_zip_archive(bundle_dir)) if include_zip else None
     return {
@@ -621,6 +626,7 @@ def render_template_package_bundle(
         "total_item_count": len(items),
         "rendered_count": rendered_count,
         "failed_count": failed_count,
+        "required_failed_count": required_failed_count,
         "zip_path": zip_path,
         "items": item_results,
     }

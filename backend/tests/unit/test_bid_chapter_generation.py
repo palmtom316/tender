@@ -112,6 +112,40 @@ def test_generate_quality_chapter_uses_substantial_strategy_sections() -> None:
     assert "{{chart:quality_system}}" in row["content_md"]
 
 
+def test_generate_quality_chapter_expands_measures_responsibilities_standards_and_innovation() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "10.1",
+        "chapter_title": "质量保证措施",
+        "volume_type": "technical",
+    }
+    conn.requirements = [
+        {
+            "id": uuid4(),
+            "title": "质量目标",
+            "requirement_text": "质量目标：工程质量合格率100%，满足国家电网公司优质工程验收要求。",
+            "source_file": "招标文件.pdf",
+            "source_locator": "page:18",
+            "priority_level": "normal",
+            "is_veto": False,
+            "is_hard_constraint": False,
+            "source_metadata": {"constraint_subtype": "quality_target"},
+        }
+    ]
+
+    row = generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    content = row["content_md"]
+    assert "### 管控措施" in content
+    assert "### 责任分工" in content
+    assert "### 标准与验收" in content
+    assert "### 风险预控" in content
+    assert "### 创新提升" in content
+    assert "质量问题销项看板" in content
+    assert "首件样板引路" in content
+
+
 def test_generate_schedule_chapter_uses_progress_strategy_and_chart_placeholder() -> None:
     conn = _Conn()
     conn.chapter = {
@@ -159,3 +193,44 @@ def test_generate_bid_chapter_draft_persists_referenced_chart_keys() -> None:
     assert "referenced_chart_keys" in insert_query
     assert insert_params[-1] == ["quality_system"]
     assert conn.saved["referenced_chart_keys"] == ["quality_system"]
+
+
+def test_generate_bid_chapter_draft_can_render_from_normalized_context() -> None:
+    conn = _Conn()
+    context = {
+        "chapter": {
+            "id": conn.chapter["id"],
+            "chapter_code": "10.2",
+            "chapter_title": "安全和绿色施工保障措施",
+            "volume_type": "technical",
+        },
+        "constraints": [
+            {
+                "id": uuid4(),
+                "requirement_id": uuid4(),
+                "title": "安全文明施工",
+                "constraint_text": "须落实安全文明施工和绿色施工措施。",
+                "source_file": "招标文件.pdf",
+                "source_locator": "p21",
+                "category": "technical",
+                "constraint_subtype": "safety_civilized",
+            }
+        ],
+        "standard_clauses": [
+            {
+                "requirement_id": None,
+                "match_status": "matched",
+                "matched_title": "安全管理",
+                "standard_name": "国家电网安全施工标准",
+            }
+        ],
+        "recommended_charts": ["safety_system", "risk_matrix"],
+    }
+
+    row = generate_bid_chapter_draft(conn, project_id=uuid4(), context=context)
+
+    assert "## 安全文明施工目标" in row["content_md"]
+    assert "安全文明施工和绿色施工措施" in row["content_md"]
+    assert "{{chart:safety_system}}" in row["content_md"]
+    assert "{{chart:risk_matrix}}" in row["content_md"]
+    assert conn.saved["referenced_chart_keys"] == ["risk_matrix", "safety_system"]

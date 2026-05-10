@@ -114,7 +114,18 @@ export function ExportGateContent() {
             detail={
               gates.charts_approved
                 ? `${gates.referenced_chart_count} 个引用图表均已审批`
-                : `${gates.unapproved_chart_count} 个引用图表未审批`
+              : `${gates.unapproved_chart_count} 个引用图表未审批`
+            }
+          />
+          <GateIndicator
+            passed={gates.constraints_confirmed}
+            label="约束确认"
+            detail={
+              gates.constraints_confirmed
+                ? gates.legacy_pre_constraint_set
+                  ? "旧项目兼容放行"
+                  : "已确认约束集"
+                : "请先确认约束集"
             }
           />
           <GateIndicator

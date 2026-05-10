@@ -5,6 +5,7 @@ Produces review_issue records with severity P0/P1/P2/P3.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
@@ -13,6 +14,9 @@ import structlog
 from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+
+from tender_backend.services.technical_chapter_strategies import strategy_for_chapter
+from tender_backend.services.tender_constraint_service import TenderConstraintService
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -67,6 +71,36 @@ def review_draft(
             detail=f"章节 {chapter_code} 内容仅 {len(content)} 字符，建议至少 200 字",
             chapter_code=chapter_code,
         ))
+
+    generic_phrases = ("严格响应", "完全响应", "按招标文件执行", "满足招标要求")
+    if any(phrase in content for phrase in generic_phrases) and len(content) < 500:
+        issues.append(ReviewIssue(
+            severity="P1",
+            title="章节内容泛化",
+            detail="章节以泛化承诺替代具体措施，需补充组织、流程、责任、标准、检查和闭环内容。",
+            chapter_code=chapter_code,
+        ))
+
+    strategy = strategy_for_chapter(chapter_code)
+    if strategy is not None:
+        missing_sections = [heading for heading, _body in strategy.sections if f"## {heading}" not in content]
+        if missing_sections:
+            issues.append(ReviewIssue(
+                severity="P1",
+                title="缺少策略必备章节",
+                detail="缺少章节：" + "、".join(missing_sections),
+                chapter_code=chapter_code,
+                metadata_json={"missing_sections": missing_sections, "strategy": strategy.key},
+            ))
+        missing_charts = [key for key in strategy.required_charts if f"{{{{chart:{key}}}}}" not in content]
+        if missing_charts:
+            issues.append(ReviewIssue(
+                severity="P2",
+                title="缺少必备图表占位符",
+                detail="缺少图表：" + "、".join(missing_charts),
+                chapter_code=chapter_code,
+                metadata_json={"missing_charts": missing_charts, "strategy": strategy.key},
+            ))
 
     logger.info("review_completed", chapter_code=chapter_code, issue_count=len(issues))
     return issues
@@ -132,19 +166,23 @@ def _contains_requirement(content: str, requirement: dict[str, Any]) -> bool:
 
 def build_project_review(conn: Connection, *, project_id: UUID) -> list[ReviewIssue]:
     """Review the full bid draft against requirements, matches, and outline."""
+    constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
     with conn.cursor(row_factory=dict_row) as cur:
-        requirements = cur.execute(
-            """
-            SELECT *
-            FROM project_requirement
-            WHERE project_id = %s
-              AND COALESCE(ignored_for_pricing, false) = false
-              AND COALESCE(is_stale, false) = false
-              AND COALESCE(review_status, 'pending') <> 'rejected'
-            ORDER BY category, created_at
-            """,
-            (project_id,),
-        ).fetchall()
+        if constraint_set:
+            requirements = _requirements_from_constraint_set(constraint_set)
+        else:
+            requirements = cur.execute(
+                """
+                SELECT *
+                FROM project_requirement
+                WHERE project_id = %s
+                  AND COALESCE(ignored_for_pricing, false) = false
+                  AND COALESCE(is_stale, false) = false
+                  AND COALESCE(review_status, 'pending') <> 'rejected'
+                ORDER BY category, created_at
+                """,
+                (project_id,),
+            ).fetchall()
         drafts = cur.execute(
             "SELECT chapter_code, content_md FROM chapter_draft WHERE project_id = %s",
             (project_id,),
@@ -153,21 +191,33 @@ def build_project_review(conn: Connection, *, project_id: UUID) -> list[ReviewIs
             "SELECT chapter_code, chapter_title, volume_type, sort_order FROM bid_chapter WHERE project_id = %s ORDER BY sort_order",
             (project_id,),
         ).fetchall()
-        mapped = cur.execute(
+        if constraint_set:
+            mapped = _mapped_rows_from_constraints(requirements)
+            matches = []
+        else:
+            mapped = cur.execute(
+                """
+                SELECT bcr.requirement_id, bc.chapter_code
+                FROM bid_chapter_requirement bcr
+                JOIN bid_chapter bc ON bc.id = bcr.bid_chapter_id
+                WHERE bc.project_id = %s
+                """,
+                (project_id,),
+            ).fetchall()
+            matches = cur.execute(
+                """
+                SELECT rm.*, pr.category, pr.title AS requirement_title
+                FROM requirement_match rm
+                JOIN project_requirement pr ON pr.id = rm.requirement_id
+                WHERE pr.project_id = %s
+                """,
+                (project_id,),
+            ).fetchall()
+        chart_assets = cur.execute(
             """
-            SELECT bcr.requirement_id, bc.chapter_code
-            FROM bid_chapter_requirement bcr
-            JOIN bid_chapter bc ON bc.id = bcr.bid_chapter_id
-            WHERE bc.project_id = %s
-            """,
-            (project_id,),
-        ).fetchall()
-        matches = cur.execute(
-            """
-            SELECT rm.*, pr.category, pr.title AS requirement_title
-            FROM requirement_match rm
-            JOIN project_requirement pr ON pr.id = rm.requirement_id
-            WHERE pr.project_id = %s
+            SELECT placeholder_key, chart_type, status
+            FROM chart_asset
+            WHERE project_id = %s
             """,
             (project_id,),
         ).fetchall()
@@ -243,8 +293,53 @@ def build_project_review(conn: Connection, *, project_id: UUID) -> list[ReviewIs
     if any(term in all_content for term in ("投标报价", "最高限价", "单价", "总价")):
         issues.append(ReviewIssue(severity="P1", title="正文包含报价相关内容", detail="投标正文中出现报价关键词，需移至报价文件或删除。"))
 
+    referenced_charts = set(re.findall(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}", all_content))
+    asset_status = {row.get("placeholder_key") or row.get("chart_type"): row.get("status") for row in chart_assets}
+    for key in sorted(referenced_charts):
+        if asset_status.get(key) != "approved":
+            issues.append(
+                ReviewIssue(
+                    severity="P1",
+                    title="引用图表未审批",
+                    detail=f"正文引用图表 {key}，但图表尚未审批。",
+                    metadata_json={"placeholder_key": key, "status": asset_status.get(key)},
+                )
+            )
+
     logger.info("project_review_built", project_id=str(project_id), issue_count=len(issues))
     return issues
+
+
+def _requirements_from_constraint_set(constraint_set: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in constraint_set.get("items") or []:
+        metadata = item.get("metadata_json") or {}
+        rows.append(
+            {
+                "id": item.get("id"),
+                "category": item.get("category"),
+                "constraint_subtype": item.get("constraint_subtype") or metadata.get("constraint_subtype"),
+                "title": item.get("title"),
+                "requirement_text": item.get("constraint_text") or "",
+                "source_text": item.get("constraint_text") or "",
+                "is_veto": item.get("category") == "veto",
+                "is_hard_constraint": item.get("confirmation_level") == "critical",
+                "source_metadata": metadata,
+            }
+        )
+    return rows
+
+
+def _mapped_rows_from_constraints(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for requirement in requirements:
+        metadata = requirement.get("source_metadata") or {}
+        codes = list(metadata.get("mapped_chapter_codes") or [])
+        if metadata.get("mapped_chapter_code"):
+            codes.append(metadata["mapped_chapter_code"])
+        for code in dict.fromkeys(str(value) for value in codes if value):
+            rows.append({"requirement_id": requirement["id"], "chapter_code": code})
+    return rows
 
 
 def get_blocking_issues(conn: Connection, *, project_id: UUID) -> list[dict]:

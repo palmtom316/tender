@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import tender_backend.workflows.export_bid as export_bid_module
 from tender_backend.api import exports as exports_api
@@ -41,6 +41,10 @@ def test_render_docx_step_uses_export_mode(monkeypatch) -> None:
         "tender_backend.services.export_service.docx_exporter.render_export",
         fake_render_export,
     )
+    monkeypatch.setattr(
+        "tender_backend.services.export_gate_service.build_export_gate_state",
+        lambda conn, *, project_id: {"can_export": True, "gates": {}},
+    )
 
     step = export_bid_module.RenderDocx()
     ctx = _make_ctx(EXPORT_MODE_MULTI_DOCX_ZIP)
@@ -61,6 +65,28 @@ def test_render_docx_step_rejects_unknown_mode() -> None:
 
     assert result.state == StepState.FAILED
     assert "unsupported export mode" in result.message
+
+
+def test_render_docx_step_uses_shared_final_export_gate(monkeypatch) -> None:
+    def fake_gate(conn, *, project_id):
+        return {"can_export": False, "gates": {"constraints_confirmed": False}}
+
+    monkeypatch.setattr(
+        "tender_backend.services.export_gate_service.build_export_gate_state",
+        fake_gate,
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.export_service.docx_exporter.render_export",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("render_export should not run")),
+    )
+
+    step = export_bid_module.RenderDocx()
+    ctx = _make_ctx(EXPORT_MODE_SINGLE_DOCX)
+
+    result = asyncio.run(step.execute(ctx))
+
+    assert result.state == StepState.FAILED
+    assert "Export blocked by final gate" in result.message
 
 
 def test_convert_to_pdf_step_skips_for_zip_modes() -> None:
@@ -88,6 +114,28 @@ def test_convert_to_pdf_step_runs_for_single_mode(monkeypatch) -> None:
 
     assert result.state == StepState.COMPLETED
     assert ctx.data["pdf_path"] == "/tmp/doc.pdf"
+
+
+def test_save_export_record_uses_uuid_objects() -> None:
+    captured: dict[str, object] = {}
+
+    class _Conn:
+        def execute(self, query, params):
+            captured["params"] = params
+
+        def commit(self):
+            captured["committed"] = True
+
+    project_id = uuid4()
+    ctx = WorkflowContext(project_id=str(project_id), data={"_db_conn": _Conn(), "docx_path": "/tmp/out.docx"})
+
+    result = asyncio.run(export_bid_module.SaveExportRecord().execute(ctx))
+
+    assert result.state == StepState.COMPLETED
+    params = captured["params"]
+    assert isinstance(params[0], UUID)
+    assert params[1] == project_id
+    assert captured["committed"] is True
 
 
 def test_template_name_to_mode_round_trip() -> None:

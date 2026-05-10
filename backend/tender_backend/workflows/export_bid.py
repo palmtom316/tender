@@ -85,6 +85,7 @@ class RenderDocx(WorkflowStep):
         conn = ctx.data.get("_db_conn")
         if conn is None:
             return StepResult(state=StepState.FAILED, message="No DB connection")
+        from tender_backend.services.export_gate_service import build_export_gate_state
         from tender_backend.services.export_service.docx_exporter import (
             EXPORT_MODE_SINGLE_DOCX,
             EXPORT_MODES,
@@ -94,6 +95,12 @@ class RenderDocx(WorkflowStep):
         mode = ctx.data.get("export_mode", EXPORT_MODE_SINGLE_DOCX)
         if mode not in EXPORT_MODES:
             return StepResult(state=StepState.FAILED, message=f"unsupported export mode: {mode}")
+        gate_state = build_export_gate_state(conn, project_id=UUID(ctx.project_id))
+        if not gate_state.get("can_export"):
+            return StepResult(
+                state=StepState.FAILED,
+                message=f"Export blocked by final gate: {gate_state.get('gates')}",
+            )
         try:
             output = render_export(
                 conn,
@@ -145,7 +152,7 @@ class SaveExportRecord(WorkflowStep):
             INSERT INTO export_record (id, project_id, status, template_name, export_key)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (uuid4().hex, ctx.project_id, "completed", template_name, export_key),
+            (uuid4(), UUID(ctx.project_id), "completed", template_name, export_key),
         )
         conn.commit()
         return StepResult(state=StepState.COMPLETED, message="Export record saved")

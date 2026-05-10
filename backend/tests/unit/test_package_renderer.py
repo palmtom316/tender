@@ -92,6 +92,7 @@ def test_render_template_package_bundle_writes_relative_files_and_zip(
     bundle_dir = Path(result["output_dir"])
     assert result["rendered_count"] == 1
     assert result["failed_count"] == 0
+    assert result["required_failed_count"] == 0
     assert (bundle_dir / "sections" / "5.1.基本情况表.docx").exists()
     assert result["zip_path"] is not None
     assert Path(result["zip_path"]).exists()
@@ -289,3 +290,51 @@ def test_preflight_template_package_bundle_reports_attachment_issues(monkeypatch
     assert result["items"][0]["asset_count"] == 1
     assert result["items"][0]["invalid_asset_count"] == 1
     assert result["items"][0]["issues"][0]["code"] == "invalid_evidence_asset"
+
+
+def test_render_template_package_bundle_counts_required_failures(monkeypatch, tmp_path: Path) -> None:
+    package_id = uuid4()
+    item = BidTemplateItemRow(
+        id=uuid4(),
+        package_id=package_id,
+        item_code="7.1",
+        item_name="资质证书证明材料",
+        filename="7.1.资质证书证明材料.docx",
+        relative_path="sections/7.1.资质证书证明材料.docx",
+        source_kind="docx",
+        item_type="table",
+        render_mode="templated",
+        is_required=True,
+        sort_order=1,
+        created_at=datetime.now(),
+    )
+    package = BidTemplatePackageRow(
+        id=package_id,
+        package_key="pkg-key",
+        display_name="商务文件",
+        package_type="business",
+        category_code=None,
+        source_root="/tmp/source",
+        source_manifest={},
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+
+    class _Repo:
+        def get_by_id(self, conn, *, package_id):
+            return package
+
+        def list_items(self, conn, *, package_id):
+            return [item]
+
+    monkeypatch.setattr("tender_backend.services.template_service.package_renderer.BidTemplatePackageRepository", lambda: _Repo())
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.package_renderer.render_template_item_docx",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("render failed")),
+    )
+
+    result = render_template_package_bundle(None, package_id=package_id, output_root=tmp_path)
+
+    assert result["failed_count"] == 1
+    assert result["required_failed_count"] == 1
+    assert result["items"][0]["required"] is True

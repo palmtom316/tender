@@ -9,69 +9,11 @@ from uuid import UUID, uuid4
 from psycopg import Connection
 from psycopg.rows import dict_row
 
+from tender_backend.services.technical_chapter_strategies import strategy_for_chapter
+
 
 PRICING_TERMS = ("报价", "投标报价", "价格", "最高限价", "单价", "总价")
 CHART_PLACEHOLDER_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
-
-TECHNICAL_CHAPTER_STRATEGIES: dict[str, dict[str, Any]] = {
-    "6": {
-        "sections": [
-            ("项目组织架构", "建立项目经理负责制，明确技术、质量、安全、进度、资料等岗位职责和接口关系。"),
-            ("关键岗位配置", "围绕招标文件人员数量、资格、社保和到岗要求配置管理人员，确保人证岗匹配。"),
-            ("职责分工与协同机制", "通过责任矩阵、例会、交底和闭环跟踪机制保障项目团队高效履约。"),
-        ],
-        "charts": ["{{chart:org_chart}}", "{{chart:responsibility_matrix}}"],
-    },
-    "8.1": {
-        "sections": [
-            ("施工总体部署", "结合工程范围、现场条件和国网工程管理要求进行施工区段、工序和资源部署。"),
-            ("关键施工流程", "按准备、实施、验收、移交的主线组织工序，明确关键控制点和交接标准。"),
-            ("资源投入与现场协调", "统筹人员、机械、材料、停电窗口和外部协调，降低交叉作业风险。"),
-        ],
-        "charts": ["{{chart:construction_flow}}"],
-    },
-    "10.1": {
-        "sections": [
-            ("质量目标响应", "逐项响应招标文件质量目标，确保工程质量、资料质量和验收结果满足国网工程要求。"),
-            ("质量管理组织", "建立项目经理牵头、技术负责人主控、专业人员分级负责的质量管理体系。"),
-            ("过程质量控制措施", "覆盖材料设备进场、工序交接、隐蔽工程、关键节点验收和资料同步归档。"),
-            ("质量检查与闭环改进", "通过自检、互检、专检、问题整改、复验销项形成质量闭环。"),
-        ],
-        "charts": ["{{chart:quality_system}}"],
-    },
-    "10.2": {
-        "sections": [
-            ("安全文明施工目标", "响应安全文明施工和绿色施工要求，落实国网工程安全管理标准。"),
-            ("风险识别与分级管控", "识别临电、吊装、高处、交叉作业、消防和交通等风险，形成预控清单。"),
-            ("现场文明与绿色施工措施", "控制扬尘、噪声、废弃物、材料堆放和现场标识，保持作业面有序。"),
-            ("应急响应与持续改进", "建立应急组织、预案演练、事件报告和复盘改进机制。"),
-        ],
-        "charts": ["{{chart:safety_system}}", "{{chart:risk_matrix}}"],
-    },
-    "10.3": {
-        "sections": [
-            ("里程碑计划", "将总工期分解为准备、施工、调试、验收、移交等里程碑并明确完成标准。"),
-            ("关键路径与资源保障", "围绕关键工序配置人员、设备、材料和协调资源，保障连续施工。"),
-            ("进度预警与纠偏机制", "建立日跟踪、周分析、节点预警和资源加倍投入等纠偏措施。"),
-        ],
-        "charts": ["{{chart:schedule_gantt}}"],
-    },
-    "12": {
-        "sections": [
-            ("评分点响应索引", "逐项识别技术评分标准并建立章节、资料、证明材料对应关系。"),
-            ("支撑材料组织", "按评分维度组织业绩、人员、方案、标准和创新措施证明材料。"),
-        ],
-        "charts": [],
-    },
-    "13": {
-        "sections": [
-            ("技术规范响应范围", "对技术规范书要求逐条确认响应范围、实施措施和验收依据。"),
-            ("国网标准符合性措施", "将国网工程施工、质量、安全、资料和验收要求嵌入实施过程。"),
-        ],
-        "charts": [],
-    },
-}
-
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
@@ -137,6 +79,33 @@ def _load_chapter_context(conn: Connection, *, project_id: UUID, chapter_id: UUI
     }
 
 
+def _legacy_context_from_normalized(context: dict[str, Any]) -> dict[str, Any]:
+    requirements: list[dict[str, Any]] = []
+    for item in context.get("constraints") or []:
+        requirement_id = item.get("requirement_id") or item.get("id")
+        requirements.append(
+            {
+                "id": requirement_id,
+                "title": item.get("title"),
+                "requirement_text": item.get("constraint_text") or "",
+                "source_text": item.get("constraint_text") or "",
+                "source_file": item.get("source_file"),
+                "source_locator": item.get("source_locator"),
+                "priority_level": item.get("priority_level") or "normal",
+                "category": item.get("category"),
+                "is_veto": item.get("category") == "veto",
+                "is_hard_constraint": item.get("confirmation_level") == "critical",
+            }
+        )
+    matches = [dict(row) for row in context.get("standard_clauses") or []]
+    return {
+        "chapter": dict(context["chapter"]),
+        "requirements": requirements,
+        "matches": matches,
+        "recommended_charts": list(context.get("recommended_charts") or []),
+    }
+
+
 def _match_lines(requirement_id: UUID, matches: list[dict[str, Any]]) -> list[str]:
     rows = [row for row in matches if row.get("requirement_id") == requirement_id]
     if not rows:
@@ -150,8 +119,17 @@ def _match_lines(requirement_id: UUID, matches: list[dict[str, Any]]) -> list[st
 
 
 def _strategy_for_chapter(chapter: dict[str, Any]) -> dict[str, Any] | None:
-    code = str(chapter.get("chapter_code") or "")
-    return TECHNICAL_CHAPTER_STRATEGIES.get(code)
+    strategy = strategy_for_chapter(str(chapter.get("chapter_code") or ""))
+    if strategy is None:
+        return None
+    return {
+        "sections": list(strategy.sections),
+        "charts": [f"{{{{chart:{key}}}}}" for key in strategy.required_charts],
+        "required_facts": list(strategy.required_facts),
+        "required_standards": list(strategy.required_standards),
+        "innovation_slots": list(strategy.innovation_slots),
+        "self_check_rules": list(strategy.self_check_rules),
+    }
 
 
 def _requirement_lines(requirements: list[dict[str, Any]], matches: list[dict[str, Any]]) -> list[str]:
@@ -177,7 +155,39 @@ def _requirement_lines(requirements: list[dict[str, Any]], matches: list[dict[st
     return lines
 
 
-def _strategy_lines(chapter: dict[str, Any], requirements: list[dict[str, Any]], matches: list[dict[str, Any]]) -> list[str]:
+def _substantial_strategy_lines(
+    *,
+    heading: str,
+    requirements: list[dict[str, Any]],
+    strategy: dict[str, Any],
+) -> list[str]:
+    requirement_titles = "、".join(_text(row.get("title")) for row in requirements if _text(row.get("title"))) or "本章节招标约束"
+    standards = "、".join(strategy.get("required_standards") or []) or "招标文件、国家电网工程管理制度及现行验收规范"
+    innovations = "、".join(strategy.get("innovation_slots") or []) or "过程数字化留痕、问题闭环看板"
+    checks = "；".join(strategy.get("self_check_rules") or []) or "章节内容需覆盖目标、措施、责任、验收和闭环"
+    return [
+        "### 管控措施",
+        f"- 围绕{requirement_titles}设置目标分解、过程交底、节点检查、问题整改和复验销项措施，确保措施可执行、可检查、可追溯。",
+        "### 责任分工",
+        f"- 由项目经理统筹，技术负责人牵头制定{heading}实施要求，专业负责人落实班组交底、过程记录和资料同步，质量、安全、进度岗位按职责复核。",
+        "### 标准与验收",
+        f"- 执行依据包括{standards}；每项措施均明确验收口径、记录表单、责任岗位和复核频次。",
+        "### 风险预控",
+        "- 对人员不到位、材料设备滞后、交叉作业、关键节点遗漏、资料不同步等风险建立预警清单，触发纠偏后形成整改、复验、销项闭环。",
+        "### 创新提升",
+        f"- 引入{innovations}，提升现场响应速度、专家可读性和履约过程透明度。",
+        "### 自检规则",
+        f"- {checks}。",
+    ]
+
+
+def _strategy_lines(
+    chapter: dict[str, Any],
+    requirements: list[dict[str, Any]],
+    matches: list[dict[str, Any]],
+    *,
+    recommended_charts: list[str] | None = None,
+) -> list[str]:
     strategy = _strategy_for_chapter(chapter)
     if not strategy:
         return _requirement_lines(requirements, matches)
@@ -187,8 +197,9 @@ def _strategy_lines(chapter: dict[str, Any], requirements: list[dict[str, Any]],
         lines.extend([f"## {heading}", default_body])
         if heading.endswith("响应") or heading in {"里程碑计划", "风险识别与分级管控", "关键岗位配置", "评分点响应索引"}:
             lines.extend(_requirement_lines(requirements, matches))
+        lines.extend(_substantial_strategy_lines(heading=heading, requirements=requirements, strategy=strategy))
         lines.append("")
-    charts = list(strategy.get("charts") or [])
+    charts = [f"{{{{chart:{key}}}}}" for key in recommended_charts] if recommended_charts is not None else list(strategy.get("charts") or [])
     if charts:
         lines.extend(["## 图表配置", *charts, ""])
     return lines
@@ -200,12 +211,14 @@ def generate_bid_chapter_draft(
     project_id: UUID,
     chapter_id: UUID | None = None,
     chapter_code: str | None = None,
+    context: dict[str, Any] | None = None,
     rewrite_note: str | None = None,
 ) -> dict[str, Any]:
-    context = _load_chapter_context(conn, project_id=project_id, chapter_id=chapter_id, chapter_code=chapter_code)
-    chapter = context["chapter"]
-    requirements = context["requirements"]
-    matches = context["matches"]
+    loaded_context = _legacy_context_from_normalized(context) if context is not None else _load_chapter_context(conn, project_id=project_id, chapter_id=chapter_id, chapter_code=chapter_code)
+    chapter = loaded_context["chapter"]
+    requirements = loaded_context["requirements"]
+    matches = loaded_context["matches"]
+    recommended_charts = loaded_context.get("recommended_charts")
 
     lines = [
         f"# {chapter['chapter_code']} {chapter['chapter_title']}",
@@ -215,10 +228,10 @@ def generate_bid_chapter_draft(
         "",
     ]
     if _strategy_for_chapter(chapter):
-        lines.extend(_strategy_lines(chapter, requirements, matches))
+        lines.extend(_strategy_lines(chapter, requirements, matches, recommended_charts=recommended_charts))
     else:
         lines.append("## 响应内容")
-        lines.extend(_strategy_lines(chapter, requirements, matches))
+        lines.extend(_strategy_lines(chapter, requirements, matches, recommended_charts=recommended_charts))
     if rewrite_note:
         lines.extend(["", "## 人工重写要求", rewrite_note])
 

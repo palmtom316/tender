@@ -1,7 +1,6 @@
 """API routes for export operations."""
 
 from __future__ import annotations
-import re
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -18,6 +17,7 @@ from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.external_attachment_repo import ExternalAttachmentRepository
 from tender_backend.services.delivery_package import build_delivery_package, get_delivery_package, list_delivery_packages
 from tender_backend.services.submission_checklist_service import SubmissionChecklistService
+from tender_backend.services.export_gate_service import build_export_gate_state
 from tender_backend.services.export_service.docx_exporter import (
     EXPORT_MODES,
     EXPORT_MODE_MULTI_DOC_ZIP,
@@ -45,9 +45,6 @@ _MODE_TO_DOWNLOAD_SUFFIX = {
     EXPORT_MODE_MULTI_DOCX_ZIP: (".zip", "application/zip"),
     EXPORT_MODE_MULTI_DOC_ZIP: (".zip", "application/zip"),
 }
-
-_CHART_PLACEHOLDER_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
-
 
 class CreateExportBody(BaseModel):
     mode: ExportMode = EXPORT_MODE_SINGLE_DOCX
@@ -93,6 +90,9 @@ async def create_export(
     mode = (body.mode if body else EXPORT_MODE_SINGLE_DOCX)
     if mode not in EXPORT_MODES:
         raise HTTPException(status_code=400, detail=f"unsupported export mode: {mode}")
+    gate_state = build_export_gate_state(conn, project_id=project_id)
+    if not gate_state.get("can_export"):
+        raise HTTPException(status_code=409, detail=f"export gates block export: {gate_state.get('gates')}")
     try:
         output = render_export(conn, project_id=project_id, mode=mode)
     except ValueError as exc:
@@ -160,45 +160,6 @@ def _template_name_to_mode(template_name: str | None) -> str:
     return EXPORT_MODE_SINGLE_DOCX
 
 
-def _referenced_chart_placeholders(conn: Connection, *, project_id: UUID) -> set[str]:
-    with conn.cursor(row_factory=dict_row) as cur:
-        rows = cur.execute(
-            """
-            SELECT content_md, referenced_chart_keys
-            FROM chapter_draft
-            WHERE project_id = %s
-            """,
-            (project_id,),
-        ).fetchall()
-    placeholders: set[str] = set()
-    for row in rows:
-        persisted = row.get("referenced_chart_keys") or []
-        if persisted:
-            placeholders.update(str(key) for key in persisted if key)
-        else:
-            placeholders.update(_CHART_PLACEHOLDER_RE.findall(str(row.get("content_md") or "")))
-    return placeholders
-
-
-def _unapproved_referenced_chart_count(chart_assets: list, referenced_placeholders: set[str]) -> int:
-    if not referenced_placeholders:
-        return 0
-    count = 0
-    for asset in chart_assets:
-        key = asset.placeholder_key or asset.chart_type
-        if key in referenced_placeholders and asset.status != "approved":
-            count += 1
-    return count
-
-
-def _format_gate_state() -> dict[str, str | bool]:
-    return {
-        "format_passed": False,
-        "format_status": "warning_not_checked",
-        "format_message": "格式校验尚未接入自动检查，导出前需人工复核。",
-    }
-
-
 @router.get("/projects/{project_id}/export-gates")
 async def check_export_gates(
     project_id: UUID,
@@ -207,32 +168,7 @@ async def check_export_gates(
 ) -> dict:
     """Check all three export gates."""
     require_project_access(conn, project_id=project_id, user=user)
-    from tender_backend.db.repositories.requirement_repo import RequirementRepository
-    from tender_backend.db.repositories.chart_asset_repo import ChartAssetRepository
-    from tender_backend.services.review_service.review_engine import get_blocking_issues
-
-    req_repo = RequirementRepository()
-    unconfirmed_veto = req_repo.unconfirmed_veto_count(conn, project_id=project_id)
-    blocking_issues = get_blocking_issues(conn, project_id=project_id)
-    chart_assets = ChartAssetRepository().list_by_project(conn, project_id=project_id)
-    referenced_chart_placeholders = _referenced_chart_placeholders(conn, project_id=project_id)
-    unapproved_chart_count = _unapproved_referenced_chart_count(chart_assets, referenced_chart_placeholders)
-    format_gate = _format_gate_state()
-
-    return {
-        "project_id": str(project_id),
-        "gates": {
-            "veto_confirmed": unconfirmed_veto == 0,
-            "unconfirmed_veto_count": unconfirmed_veto,
-            "review_passed": len(blocking_issues) == 0,
-            "blocking_issue_count": len(blocking_issues),
-            "charts_approved": unapproved_chart_count == 0,
-            "unapproved_chart_count": unapproved_chart_count,
-            "referenced_chart_count": len(referenced_chart_placeholders),
-            **format_gate,
-        },
-        "can_export": unconfirmed_veto == 0 and len(blocking_issues) == 0 and unapproved_chart_count == 0,
-    }
+    return build_export_gate_state(conn, project_id=project_id)
 
 
 @router.post("/projects/{project_id}/external-attachments")
