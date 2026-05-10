@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -95,9 +96,29 @@ class TechnicalBidWriter:
         return dict(row) if row else None
 
     def _self_check(self, content: str) -> dict[str, Any]:
+        strategy_headings = (
+            "质量目标响应",
+            "质量管理组织",
+            "过程质量控制措施",
+            "质量检查与闭环改进",
+            "安全文明施工目标",
+            "风险识别与分级管控",
+            "里程碑计划",
+            "关键路径与资源保障",
+            "进度预警与纠偏机制",
+            "项目组织架构",
+            "关键岗位配置",
+            "职责分工与协同机制",
+            "施工总体部署",
+            "关键施工流程",
+        )
+        strategy_section_count = sum(1 for heading in strategy_headings if f"## {heading}" in content)
         return {
             "has_principle_section": "编制原则" in content,
-            "has_response_section": "响应内容" in content,
+            "has_response_section": "响应内容" in content or strategy_section_count > 0,
+            "has_strategy_sections": strategy_section_count > 0,
+            "strategy_section_count": strategy_section_count,
+            "chart_placeholder_count": len(re.findall(r"\{\{chart:[^}]+}}", content)),
             "contains_pricing_terms": any(term in content for term in ("投标报价", "单价", "总价")),
         }
 
