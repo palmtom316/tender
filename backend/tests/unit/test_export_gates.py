@@ -1,7 +1,11 @@
 from datetime import datetime
 from uuid import uuid4
 
-from tender_backend.api.exports import _referenced_chart_placeholders, _unapproved_referenced_chart_count
+from tender_backend.api.exports import (
+    _format_gate_state,
+    _referenced_chart_placeholders,
+    _unapproved_referenced_chart_count,
+)
 from tender_backend.db.repositories.chart_asset_repo import ChartAssetRow
 
 
@@ -72,6 +76,23 @@ def test_referenced_chart_placeholders_are_scanned_from_current_drafts():
     assert conn.cursor_obj.params == (project_id,)
 
 
+def test_referenced_chart_placeholders_prefers_persisted_reference_keys():
+    project_id = uuid4()
+    conn = _Conn(
+        [
+            {
+                "content_md": "过期正文 {{chart:old_scan_key}}",
+                "referenced_chart_keys": ["quality_system", "schedule_gantt"],
+            },
+            {"content_md": "无图表", "referenced_chart_keys": []},
+        ]
+    )
+
+    result = _referenced_chart_placeholders(conn, project_id=project_id)
+
+    assert result == {"quality_system", "schedule_gantt"}
+
+
 def test_chart_gate_counts_only_unapproved_referenced_assets():
     assets = [
         _asset(placeholder_key="quality_system", status="approved"),
@@ -81,3 +102,13 @@ def test_chart_gate_counts_only_unapproved_referenced_assets():
 
     assert _unapproved_referenced_chart_count(assets, {"quality_system", "schedule_gantt"}) == 1
     assert _unapproved_referenced_chart_count(assets, set()) == 0
+
+
+def test_format_gate_warning_state_is_not_reported_as_passed():
+    state = _format_gate_state()
+
+    assert state == {
+        "format_passed": False,
+        "format_status": "warning_not_checked",
+        "format_message": "格式校验尚未接入自动检查，导出前需人工复核。",
+    }

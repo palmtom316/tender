@@ -19,23 +19,6 @@ from tender_backend.services.bid_outline_templates import (
 )
 
 
-CATEGORY_CHAPTER = {
-    "qualification": ("qualification", "1.1"),
-    "performance": ("qualification", "1.2"),
-    "project_team": ("qualification", "1.3"),
-    "personnel": ("technical", "6"),
-    "project_info": ("business", "5"),
-    "business": ("business", "24.6"),
-    "pricing": ("business", "23"),
-    "contract": ("business", "24.6"),
-    "schedule": ("technical", "3"),
-    "format": ("business", "24.6"),
-    "technical": ("technical", "8.1"),
-    "scoring": ("technical", "12"),
-    "veto": ("technical", "1"),
-    "special": ("technical", "15"),
-}
-
 SUBTYPE_CHAPTER = {
     "personnel_count": ("technical", "6"),
     "personnel_certificate": ("technical", "6"),
@@ -91,6 +74,8 @@ def _priority_level(requirement: dict[str, Any], volume_type: str, chapter_code:
 
 
 def _constraint_subtype(requirement: dict[str, Any]) -> str | None:
+    if requirement.get("constraint_subtype"):
+        return str(requirement.get("constraint_subtype")).strip() or None
     metadata = requirement.get("source_metadata") or requirement.get("metadata_json") or {}
     if not isinstance(metadata, dict):
         return None
@@ -100,7 +85,10 @@ def _constraint_subtype(requirement: dict[str, Any]) -> str | None:
 def _chapter_keys_for_requirement(requirement: dict[str, Any]) -> list[tuple[str, str]]:
     category = requirement.get("category")
     subtype = _constraint_subtype(requirement)
-    keys = [SUBTYPE_CHAPTER.get(subtype) or CATEGORY_CHAPTER.get(category, ("technical", "8.1"))]
+    keys: list[tuple[str, str]] = []
+    subtype_key = SUBTYPE_CHAPTER.get(subtype)
+    if subtype_key:
+        keys.append(subtype_key)
     if requirement.get("is_veto") or requirement.get("is_hard_constraint"):
         keys.append(("technical", "1"))
     if category == "scoring":
@@ -129,8 +117,10 @@ def _requirements_from_constraint_set(constraint_set: dict[str, Any]) -> list[di
                 "ignored_for_pricing": False,
                 "is_veto": item.get("category") == "veto",
                 "is_hard_constraint": item.get("confirmation_level") == "critical",
+                "constraint_subtype": item.get("constraint_subtype"),
                 "source_metadata": {
                     **dict(item.get("metadata_json") or {}),
+                    "constraint_subtype": item.get("constraint_subtype") or (item.get("metadata_json") or {}).get("constraint_subtype"),
                     "source_constraint_id": str(item.get("id")),
                 },
             }

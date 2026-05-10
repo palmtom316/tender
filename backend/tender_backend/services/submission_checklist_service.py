@@ -8,25 +8,29 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg.rows import dict_row
 
+from tender_backend.services.tender_constraint_service import TenderConstraintService
+
 
 class SubmissionChecklistService:
     def build(self, conn: Connection, *, project_id: UUID) -> dict[str, Any]:
         with conn.cursor(row_factory=dict_row) as cur:
             project = cur.execute("SELECT * FROM project WHERE id = %s", (project_id,)).fetchone()
-            requirements = cur.execute(
-                """
-                SELECT id, category, title, requirement_text, source_text, human_confirmed
-                FROM project_requirement
-                WHERE project_id = %s
-                  AND COALESCE(is_stale, false) = false
-                ORDER BY category, created_at
-                """,
-                (project_id,),
-            ).fetchall()
             attachments = cur.execute(
                 "SELECT * FROM external_bid_attachment WHERE project_id = %s ORDER BY created_at",
                 (project_id,),
             ).fetchall()
+            requirements = _confirmed_requirement_rows(conn, project_id=project_id)
+            if requirements is None:
+                requirements = cur.execute(
+                    """
+                    SELECT id, category, title, requirement_text, source_text, human_confirmed
+                    FROM project_requirement
+                    WHERE project_id = %s
+                      AND COALESCE(is_stale, false) = false
+                    ORDER BY category, created_at
+                    """,
+                    (project_id,),
+                ).fetchall()
         project = dict(project or {})
         signature_items = []
         copy_items = []
@@ -68,3 +72,22 @@ class SubmissionChecklistService:
 
 
 __all__ = ["SubmissionChecklistService"]
+
+
+def _confirmed_requirement_rows(conn: Connection, *, project_id: UUID) -> list[dict[str, Any]] | None:
+    constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
+    if not constraint_set:
+        return None
+    rows: list[dict[str, Any]] = []
+    for item in constraint_set.get("items") or []:
+        rows.append(
+            {
+                "id": item.get("id"),
+                "category": item.get("category"),
+                "title": item.get("title"),
+                "requirement_text": item.get("constraint_text") or "",
+                "source_text": item.get("constraint_text") or "",
+                "human_confirmed": item.get("status") in {"accepted", "confirmed"},
+            }
+        )
+    return rows

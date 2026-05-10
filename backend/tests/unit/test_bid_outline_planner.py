@@ -75,13 +75,67 @@ def test_plan_bid_outline_maps_hard_scoring_and_special_requirements() -> None:
 
 
 def test_chapter_outline_lists_input_requirements() -> None:
-    requirement = _requirement("project_team", title="项目经理须提供证书")
+    requirement = _requirement(
+        "project_team",
+        title="项目经理须提供证书",
+        source_metadata={"constraint_subtype": "personnel_certificate"},
+    )
 
     outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[requirement])
-    chapter = next(item for item in outline["chapters"] if item["chapter_code"] == "1.3")
+    chapter = next(item for item in outline["chapters"] if item["volume_type"] == "technical" and item["chapter_code"] == "6")
 
     assert "项目经理须提供证书" in chapter["outline_md"]
     assert "招标文件 AI 解析结果为最高优先级" in chapter["outline_md"]
+
+
+def test_non_legacy_outline_does_not_map_by_raw_category_fallback() -> None:
+    requirement = _requirement(
+        "technical",
+        title="泛化技术要求",
+        source_metadata={},
+    )
+
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[requirement])
+    all_mappings = [
+        mapping
+        for chapter in outline["chapters"]
+        for mapping in chapter["requirement_mappings"]
+        if mapping["requirement_id"] == requirement["id"]
+    ]
+
+    assert all_mappings == []
+    assert str(requirement["id"]) not in outline["metadata_json"]["unmapped_hard_requirement_ids"]
+
+
+def test_constraint_subtype_column_drives_confirmed_constraint_mapping() -> None:
+    project_id = uuid4()
+    requirement_id = uuid4()
+    constraint_id = uuid4()
+
+    outline = plan_bid_outline_from_confirmed_constraints(
+        project_id=project_id,
+        constraint_set={
+            "id": uuid4(),
+            "version": 2,
+            "status": "confirmed",
+            "items": [
+                {
+                    "id": constraint_id,
+                    "requirement_id": requirement_id,
+                    "category": "technical",
+                    "constraint_subtype": "safety_civilized",
+                    "status": "accepted",
+                    "title": "安全文明施工",
+                    "constraint_text": "须落实安全文明施工措施。",
+                    "metadata_json": {},
+                }
+            ],
+        },
+    )
+
+    chapter = next(item for item in outline["chapters"] if item["volume_type"] == "technical" and item["chapter_code"] == "10.2")
+
+    assert chapter["requirement_ids"] == [requirement_id]
 
 
 def test_sgcc_distribution_business_outline_preserves_parent_codes() -> None:

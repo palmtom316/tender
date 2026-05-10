@@ -17,6 +17,7 @@ class _Cursor:
         return False
 
     def execute(self, query, params=None):
+        self.conn.queries.append((query, params))
         if "SELECT * FROM bid_chapter WHERE id" in query:
             self.result = [self.conn.chapter]
         elif "FROM bid_chapter_requirement" in query and "JOIN project_requirement" in query:
@@ -30,6 +31,7 @@ class _Cursor:
                 "volume_type": params[2],
                 "chapter_code": params[3],
                 "content_md": params[4],
+                "referenced_chart_keys": params[5] if len(params) > 5 else [],
             }
             self.result = [self.conn.saved]
         else:
@@ -60,6 +62,7 @@ class _Conn:
         ]
         self.matches = []
         self.saved = None
+        self.queries = []
 
     def cursor(self, *args, **kwargs):
         return _Cursor(self)
@@ -137,3 +140,22 @@ def test_generate_schedule_chapter_uses_progress_strategy_and_chart_placeholder(
     assert "## 关键路径与资源保障" in row["content_md"]
     assert "## 进度预警与纠偏机制" in row["content_md"]
     assert "{{chart:schedule_gantt}}" in row["content_md"]
+
+
+def test_generate_bid_chapter_draft_persists_referenced_chart_keys() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "10.1",
+        "chapter_title": "质量保证措施",
+        "volume_type": "technical",
+    }
+    conn.requirements = []
+    conn.matches = []
+
+    generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    insert_query, insert_params = conn.queries[-1]
+    assert "referenced_chart_keys" in insert_query
+    assert insert_params[-1] == ["quality_system"]
+    assert conn.saved["referenced_chart_keys"] == ["quality_system"]

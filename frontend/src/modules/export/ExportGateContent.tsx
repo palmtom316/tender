@@ -120,7 +120,13 @@ export function ExportGateContent() {
           <GateIndicator
             passed={gates.format_passed}
             label="格式校验"
-            detail={gates.format_passed ? "格式合规" : "格式不合规"}
+            detail={
+              gates.format_status === "warning_not_checked"
+                ? gates.format_message || "格式校验未自动执行"
+                : gates.format_passed
+                  ? "格式合规"
+                  : "格式不合规"
+            }
           />
         </div>
       )}

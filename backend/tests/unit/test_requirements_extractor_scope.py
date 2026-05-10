@@ -33,6 +33,7 @@ def test_mixed_pricing_and_qualification_keeps_only_non_pricing_requirement():
     assert [req.category for req in requirements] == ["qualification"]
     assert requirements[0].ignored_for_pricing is False
     assert requirements[0].source_metadata["scope_policy"] == "bid_writing_v1"
+    assert requirements[0].source_metadata["extraction_mode_marker"] == "scoped_v1"
 
 
 def test_quality_schedule_safety_and_personnel_chunks_are_active_constraints():
@@ -64,3 +65,20 @@ def test_quality_schedule_safety_and_personnel_chunks_are_active_constraints():
         "safety_civilized",
         "personnel_count",
     ]
+
+
+def test_legacy_extraction_scope_policy_sets_rollback_marker(monkeypatch):
+    monkeypatch.setenv("EXTRACTION_SCOPE_POLICY", "legacy")
+
+    requirements = extract_requirements_from_source_chunks(
+        [
+            {
+                "id": "chunk-1",
+                "source_file": "招标文件.docx",
+                "source_locator": "p11",
+                "text": "投标人须具备电力工程施工总承包二级及以上资质。",
+            }
+        ]
+    )
+
+    assert requirements[0].source_metadata["extraction_mode_marker"] == "legacy_v0"

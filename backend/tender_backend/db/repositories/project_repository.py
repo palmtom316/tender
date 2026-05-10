@@ -43,6 +43,7 @@ class Project:
     lot_name: str | None = None
     selected_template_package_id: UUID | None = None
     workflow_status: str | None = None
+    metadata_json: dict[str, Any] | None = None
 
 
 PROJECT_COLUMNS = """
@@ -52,7 +53,7 @@ tender_no, project_type, industry, business_line, sub_type, employer_name, emplo
 evaluation_method, evaluation_detail, qualification_review_type, submission_deadline,
 bid_opening_time, bid_validity_period, bid_bond_amount, bid_bond_form, bid_bond_deadline,
 voltage_level, project_scope, tender_platform, submission_target, procurement_type,
-section_name, lot_name, selected_template_package_id, workflow_status
+section_name, lot_name, selected_template_package_id, workflow_status, metadata_json
 """
 
 PROJECT_COLUMNS_P = """
@@ -62,7 +63,7 @@ p.tender_no, p.project_type, p.industry, p.business_line, p.sub_type, p.employer
 p.evaluation_method, p.evaluation_detail, p.qualification_review_type, p.submission_deadline,
 p.bid_opening_time, p.bid_validity_period, p.bid_bond_amount, p.bid_bond_form, p.bid_bond_deadline,
 p.voltage_level, p.project_scope, p.tender_platform, p.submission_target, p.procurement_type,
-p.section_name, p.lot_name, p.selected_template_package_id, p.workflow_status
+p.section_name, p.lot_name, p.selected_template_package_id, p.workflow_status, p.metadata_json
 """
 
 
@@ -97,6 +98,7 @@ def _to_project(row: dict) -> Project:
         lot_name=row.get("lot_name"),
         selected_template_package_id=row.get("selected_template_package_id"),
         workflow_status=row.get("workflow_status"),
+        metadata_json=dict(row.get("metadata_json") or {}),
     )
 
 
@@ -121,14 +123,14 @@ class ProjectRepository:
             "bid_validity_period", "bid_bond_amount", "bid_bond_form", "bid_bond_deadline", "voltage_level", "project_scope",
             "is_live_work_required", "controlled_price", "is_subcontract_allowed", "is_consortium_allowed", "tender_platform",
             "submission_target", "platform_file_rules", "procurement_type", "parent_project_id", "section_name", "lot_name",
-            "selected_template_package_id", "workflow_status",
+            "selected_template_package_id", "workflow_status", "metadata_json",
         }
         values = {key: value for key, value in metadata.items() if key in allowed and value is not None}
         values.setdefault("workflow_status", "created")
         columns = ["id", "name", *values.keys()]
         params = [project_id, name]
         for key, value in values.items():
-            params.append(Jsonb(value) if key in {"evaluation_detail", "platform_file_rules"} else value)
+            params.append(Jsonb(value) if key in {"evaluation_detail", "platform_file_rules", "metadata_json"} else value)
         placeholders = ", ".join(["%s"] * len(columns))
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(
@@ -173,7 +175,7 @@ class ProjectRepository:
             "bid_validity_period", "bid_bond_amount", "bid_bond_form", "bid_bond_deadline", "voltage_level", "project_scope",
             "is_live_work_required", "controlled_price", "is_subcontract_allowed", "is_consortium_allowed", "tender_platform",
             "submission_target", "platform_file_rules", "procurement_type", "parent_project_id", "section_name", "lot_name",
-            "selected_template_package_id", "workflow_status", "status",
+            "selected_template_package_id", "workflow_status", "status", "metadata_json",
         }
         updates = {key: value for key, value in fields.items() if key in allowed}
         if not updates:
@@ -182,7 +184,7 @@ class ProjectRepository:
         values: list[Any] = []
         for key, value in updates.items():
             sets.append(f"{key} = %s")
-            values.append(Jsonb(value) if key in {"evaluation_detail", "platform_file_rules"} else value)
+            values.append(Jsonb(value) if key in {"evaluation_detail", "platform_file_rules", "metadata_json"} else value)
         values.append(project_id)
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(

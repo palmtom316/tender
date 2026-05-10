@@ -983,6 +983,8 @@ export interface ExportGates {
     unapproved_chart_count: number;
     referenced_chart_count: number;
     format_passed: boolean;
+    format_status: "passed" | "failed" | "warning_not_checked";
+    format_message?: string;
   };
   can_export: boolean;
 }

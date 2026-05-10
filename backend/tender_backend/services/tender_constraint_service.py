@@ -55,16 +55,16 @@ class TenderConstraintService:
                     "has_conflict": package.get("has_conflict", False),
                 }
                 if isinstance(requirement_metadata, dict):
-                    for key in ("scope_policy", "constraint_subtype", "pricing_keywords", "matched_keywords"):
+                    for key in ("scope_policy", "extraction_mode_marker", "constraint_subtype", "pricing_keywords", "matched_keywords"):
                         if key in requirement_metadata:
                             item_metadata[key] = requirement_metadata[key]
                 row = cur.execute(
                     """
                     INSERT INTO tender_constraint_item (
-                      id, constraint_set_id, project_id, requirement_id, category, status, confirmation_level,
+                      id, constraint_set_id, project_id, requirement_id, category, constraint_subtype, status, confirmation_level,
                       title, constraint_text, source_file, source_locator, metadata_json
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                     """,
                     (
@@ -73,6 +73,7 @@ class TenderConstraintService:
                         project_id,
                         requirement["id"],
                         requirement["category"],
+                        item_metadata.get("constraint_subtype"),
                         status,
                         package.get("confirmation_level") or "auto_accept",
                         requirement["title"],
@@ -98,7 +99,15 @@ class TenderConstraintService:
             if constraint_set is None:
                 return None
             items = cur.execute(
-                "SELECT * FROM tender_constraint_item WHERE constraint_set_id = %s ORDER BY category, created_at",
+                """
+                SELECT
+                  id, constraint_set_id, project_id, requirement_id, category, constraint_subtype,
+                  status, confirmation_level, title, constraint_text, source_file, source_locator,
+                  metadata_json, created_at, updated_at
+                FROM tender_constraint_item
+                WHERE constraint_set_id = %s
+                ORDER BY category, created_at
+                """,
                 (constraint_set["id"],),
             ).fetchall()
         result = dict(constraint_set)
@@ -121,7 +130,11 @@ class TenderConstraintService:
                 return None
             items = cur.execute(
                 """
-                SELECT * FROM tender_constraint_item
+                SELECT
+                  id, constraint_set_id, project_id, requirement_id, category, constraint_subtype,
+                  status, confirmation_level, title, constraint_text, source_file, source_locator,
+                  metadata_json, created_at, updated_at
+                FROM tender_constraint_item
                 WHERE constraint_set_id = %s
                   AND status IN ('accepted', 'confirmed')
                 ORDER BY category, created_at

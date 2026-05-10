@@ -19,6 +19,7 @@ from tender_backend.services.compliance_check_service import ComplianceCheckServ
 from tender_backend.services.review_service.compliance_matrix import build_compliance_matrix
 from tender_backend.services.review_service.review_engine import build_project_review
 from tender_backend.services.submission_checklist_service import SubmissionChecklistService
+from tender_backend.services.tender_constraint_service import TenderConstraintService
 
 __all__ = [
     "build_delivery_package",
@@ -50,6 +51,22 @@ def _project_name(conn: Connection, project_id: UUID) -> str:
 
 
 def _load_confirmation_records(conn: Connection, project_id: UUID) -> list[dict]:
+    constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
+    if constraint_set:
+        return [
+            {
+                "id": item.get("id"),
+                "category": item.get("category"),
+                "constraint_subtype": item.get("constraint_subtype") or (item.get("metadata_json") or {}).get("constraint_subtype"),
+                "title": item.get("title"),
+                "human_confirmed": item.get("status") in {"accepted", "confirmed"},
+                "confirmed_by": (item.get("metadata_json") or {}).get("confirmed_by"),
+                "confirmed_at": item.get("updated_at") or item.get("created_at"),
+                "review_status": item.get("status"),
+                "source_constraint_set_id": constraint_set.get("id"),
+            }
+            for item in constraint_set.get("items") or []
+        ]
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
             """
@@ -65,6 +82,23 @@ def _load_confirmation_records(conn: Connection, project_id: UUID) -> list[dict]
 
 
 def _load_traceability(conn: Connection, project_id: UUID) -> list[dict]:
+    constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
+    if constraint_set:
+        return [
+            {
+                "id": item.get("id"),
+                "requirement_id": item.get("requirement_id"),
+                "category": item.get("category"),
+                "constraint_subtype": item.get("constraint_subtype") or (item.get("metadata_json") or {}).get("constraint_subtype"),
+                "title": item.get("title"),
+                "source_file": item.get("source_file"),
+                "source_locator": item.get("source_locator"),
+                "chapter_code": (item.get("metadata_json") or {}).get("mapped_chapter_code"),
+                "chapter_title": (item.get("metadata_json") or {}).get("mapped_chapter_title"),
+                "source_constraint_set_id": constraint_set.get("id"),
+            }
+            for item in constraint_set.get("items") or []
+        ]
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
             """

@@ -9,6 +9,8 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from tender_backend.services.tender_constraint_service import TenderConstraintService
+
 
 CRITICAL_CATEGORIES = {"veto", "qualification", "performance", "project_team", "personnel"}
 SIGNATURE_WORDS = ("签章", "盖章", "签字", "CA", "电子签名")
@@ -133,20 +135,22 @@ class ComplianceCheckService:
     def _build_findings(self, conn: Connection, *, project_id: UUID) -> list[dict[str, Any]]:
         with conn.cursor(row_factory=dict_row) as cur:
             project = cur.execute("SELECT * FROM project WHERE id = %s", (project_id,)).fetchone()
-            requirements = cur.execute(
-                """
-                SELECT * FROM project_requirement
-                WHERE project_id = %s
-                  AND COALESCE(is_stale, false) = false
-                  AND COALESCE(review_status, 'pending') <> 'rejected'
-                ORDER BY created_at
-                """,
-                (project_id,),
-            ).fetchall()
             attachments = cur.execute(
                 "SELECT COUNT(*) AS c FROM external_bid_attachment WHERE project_id = %s",
                 (project_id,),
             ).fetchone()
+            requirements = self._confirmed_requirement_rows(conn, project_id=project_id)
+            if requirements is None:
+                requirements = cur.execute(
+                    """
+                    SELECT * FROM project_requirement
+                    WHERE project_id = %s
+                      AND COALESCE(is_stale, false) = false
+                      AND COALESCE(review_status, 'pending') <> 'rejected'
+                    ORDER BY created_at
+                    """,
+                    (project_id,),
+                ).fetchall()
         findings: list[dict[str, Any]] = []
         project_dict = dict(project or {})
         if not project_dict.get("submission_deadline"):
@@ -186,6 +190,28 @@ class ComplianceCheckService:
                     "requirement_id": row.get("id"),
                 })
         return findings
+
+    def _confirmed_requirement_rows(self, conn: Connection, *, project_id: UUID) -> list[dict[str, Any]] | None:
+        constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
+        if not constraint_set:
+            return None
+        rows: list[dict[str, Any]] = []
+        for item in constraint_set.get("items") or []:
+            metadata = item.get("metadata_json") or {}
+            subtype = item.get("constraint_subtype") or (metadata.get("constraint_subtype") if isinstance(metadata, dict) else None)
+            rows.append(
+                {
+                    "id": item.get("id"),
+                    "category": item.get("category"),
+                    "title": item.get("title"),
+                    "requirement_text": item.get("constraint_text") or "",
+                    "source_text": item.get("constraint_text") or "",
+                    "human_confirmed": item.get("status") in {"accepted", "confirmed"},
+                    "is_veto": item.get("category") == "veto" or subtype == "veto_rejection",
+                    "is_hard_constraint": item.get("confirmation_level") == "critical",
+                }
+            )
+        return rows
 
 
 __all__ = ["ComplianceCheckService"]

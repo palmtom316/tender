@@ -120,6 +120,37 @@ def test_build_from_requirements_copies_constraint_subtype_metadata():
     assert result["items"][0]["id"] == item_id
     insert_query, insert_params = conn.cursor_obj.queries[3]
     assert "INSERT INTO tender_constraint_item" in insert_query
+    assert "constraint_subtype" in insert_query
     metadata = insert_params[-1].obj
     assert metadata["scope_policy"] == "bid_writing_v1"
     assert metadata["constraint_subtype"] == "quality_target"
+    assert "quality_target" in insert_params
+
+
+def test_latest_confirmed_selects_constraint_subtype_column():
+    project_id = uuid4()
+    set_id = uuid4()
+    accepted_item = {
+        "id": uuid4(),
+        "constraint_set_id": set_id,
+        "project_id": project_id,
+        "category": "technical",
+        "constraint_subtype": "quality_target",
+        "status": "accepted",
+        "confirmation_level": "auto_accept",
+        "title": "质量目标",
+        "constraint_text": "质量目标合格率100%。",
+        "metadata_json": {},
+    }
+    conn = _Conn(
+        [
+            [{"id": set_id, "project_id": project_id, "version": 3, "status": "confirmed"}],
+            [accepted_item],
+        ]
+    )
+
+    result = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
+
+    assert result["items"][0]["constraint_subtype"] == "quality_target"
+    item_query, _ = conn.cursor_obj.queries[1]
+    assert "constraint_subtype" in item_query

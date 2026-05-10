@@ -35,6 +35,7 @@ from tender_backend.services.extract_service.requirements_extractor import (
     HUMAN_CONFIRM_CATEGORIES,
     REQUIREMENT_CATEGORIES,
     SCOPE_POLICY_VERSION,
+    extraction_mode_marker,
     infer_constraint_subtype,
 )
 
@@ -695,6 +696,7 @@ def _normalize_requirement(
             "ai_output_tokens": item.get("_output_tokens"),
             "chunk_type": source_chunk.get("chunk_type"),
             "scope_policy": SCOPE_POLICY_VERSION,
+            "extraction_mode_marker": extraction_mode_marker(),
             "constraint_subtype": constraint_subtype,
         },
     )

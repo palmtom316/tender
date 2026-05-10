@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -10,6 +11,7 @@ from psycopg.rows import dict_row
 
 
 PRICING_TERMS = ("报价", "投标报价", "价格", "最高限价", "单价", "总价")
+CHART_PLACEHOLDER_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
 
 TECHNICAL_CHAPTER_STRATEGIES: dict[str, dict[str, Any]] = {
     "6": {
@@ -221,16 +223,20 @@ def generate_bid_chapter_draft(
         lines.extend(["", "## 人工重写要求", rewrite_note])
 
     content_md = "\n".join(lines)
+    referenced_chart_keys = sorted(set(CHART_PLACEHOLDER_RE.findall(content_md)))
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """
-            INSERT INTO chapter_draft (id, project_id, volume_type, chapter_code, content_md)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO chapter_draft (id, project_id, volume_type, chapter_code, content_md, referenced_chart_keys)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (project_id, volume_type, chapter_code)
-            DO UPDATE SET content_md = EXCLUDED.content_md, updated_at = now()
+            DO UPDATE SET
+              content_md = EXCLUDED.content_md,
+              referenced_chart_keys = EXCLUDED.referenced_chart_keys,
+              updated_at = now()
             RETURNING *
             """,
-            (uuid4(), project_id, chapter.get("volume_type") or "technical", chapter["chapter_code"], content_md),
+            (uuid4(), project_id, chapter.get("volume_type") or "technical", chapter["chapter_code"], content_md, referenced_chart_keys),
         ).fetchone()
     conn.commit()
     assert row is not None

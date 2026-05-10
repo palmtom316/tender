@@ -164,7 +164,7 @@ def _referenced_chart_placeholders(conn: Connection, *, project_id: UUID) -> set
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
             """
-            SELECT content_md
+            SELECT content_md, referenced_chart_keys
             FROM chapter_draft
             WHERE project_id = %s
             """,
@@ -172,7 +172,11 @@ def _referenced_chart_placeholders(conn: Connection, *, project_id: UUID) -> set
         ).fetchall()
     placeholders: set[str] = set()
     for row in rows:
-        placeholders.update(_CHART_PLACEHOLDER_RE.findall(str(row.get("content_md") or "")))
+        persisted = row.get("referenced_chart_keys") or []
+        if persisted:
+            placeholders.update(str(key) for key in persisted if key)
+        else:
+            placeholders.update(_CHART_PLACEHOLDER_RE.findall(str(row.get("content_md") or "")))
     return placeholders
 
 
@@ -185,6 +189,14 @@ def _unapproved_referenced_chart_count(chart_assets: list, referenced_placeholde
         if key in referenced_placeholders and asset.status != "approved":
             count += 1
     return count
+
+
+def _format_gate_state() -> dict[str, str | bool]:
+    return {
+        "format_passed": False,
+        "format_status": "warning_not_checked",
+        "format_message": "格式校验尚未接入自动检查，导出前需人工复核。",
+    }
 
 
 @router.get("/projects/{project_id}/export-gates")
@@ -205,6 +217,7 @@ async def check_export_gates(
     chart_assets = ChartAssetRepository().list_by_project(conn, project_id=project_id)
     referenced_chart_placeholders = _referenced_chart_placeholders(conn, project_id=project_id)
     unapproved_chart_count = _unapproved_referenced_chart_count(chart_assets, referenced_chart_placeholders)
+    format_gate = _format_gate_state()
 
     return {
         "project_id": str(project_id),
@@ -216,7 +229,7 @@ async def check_export_gates(
             "charts_approved": unapproved_chart_count == 0,
             "unapproved_chart_count": unapproved_chart_count,
             "referenced_chart_count": len(referenced_chart_placeholders),
-            "format_passed": True,  # Phase 1: format check is a warning
+            **format_gate,
         },
         "can_export": unconfirmed_veto == 0 and len(blocking_issues) == 0 and unapproved_chart_count == 0,
     }

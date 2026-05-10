@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -53,6 +54,17 @@ class ExtractedRequirement:
 
 
 SCOPE_POLICY_VERSION = "bid_writing_v1"
+SCOPED_EXTRACTION_MODE_MARKER = "scoped_v1"
+LEGACY_EXTRACTION_MODE_MARKER = "legacy_v0"
+
+
+def extraction_scope_policy() -> str:
+    value = os.environ.get("EXTRACTION_SCOPE_POLICY", "strict").strip().lower()
+    return "legacy" if value == "legacy" else "strict"
+
+
+def extraction_mode_marker() -> str:
+    return LEGACY_EXTRACTION_MODE_MARKER if extraction_scope_policy() == "legacy" else SCOPED_EXTRACTION_MODE_MARKER
 
 KEYWORDS_BY_CATEGORY: dict[str, list[str]] = {
     "project_info": ["项目名称", "招标编号", "采购编号", "包号", "招标人", "采购人", "采购范围", "实施地点"],
@@ -289,6 +301,7 @@ def extract_requirements_from_source_chunks(chunks: list[dict[str, Any]]) -> lis
                         "pricing_keywords": pricing_hits,
                         "chunk_type": chunk.get("chunk_type"),
                         "scope_policy": SCOPE_POLICY_VERSION,
+                        "extraction_mode_marker": extraction_mode_marker(),
                         "constraint_subtype": constraint_subtype,
                     },
                 )
