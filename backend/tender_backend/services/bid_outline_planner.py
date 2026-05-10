@@ -20,13 +20,13 @@ from tender_backend.services.bid_outline_templates import (
 
 
 SUBTYPE_CHAPTERS = {
-    "personnel_count": [("technical", "6")],
-    "personnel_certificate": [("technical", "6")],
-    "quality_target": [("technical", "10.1")],
-    "schedule_target": [("technical", "3"), ("technical", "10.3")],
-    "safety_civilized": [("technical", "10.2")],
-    "sgcc_standard_compliance": [("technical", "8.1"), ("technical", "8.2"), ("technical", "13")],
-    "construction_method": [("technical", "8.1"), ("technical", "8.2")],
+    "personnel_count": [("technical", "6"), ("technical", "8.14")],
+    "personnel_certificate": [("technical", "6"), ("technical", "8.14")],
+    "quality_target": [("technical", "8.5"), ("technical", "10.1")],
+    "schedule_target": [("technical", "3"), ("technical", "8.7"), ("technical", "10.3")],
+    "safety_civilized": [("technical", "8.6"), ("technical", "10.2")],
+    "sgcc_standard_compliance": [("technical", "8"), ("technical", "8.1"), ("technical", "8.4"), ("technical", "8.15"), ("technical", "13")],
+    "construction_method": [("technical", "8"), ("technical", "8.3"), ("technical", "8.4")],
     "technical_scoring_response": [("technical", "12")],
     "submission_format": [("business", "24.6")],
     "signature_seal": [("business", "24.6")],

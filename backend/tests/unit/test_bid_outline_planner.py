@@ -44,7 +44,8 @@ def test_plan_bid_outline_creates_required_volumes_and_chapters() -> None:
     assert any(chapter["chapter_code"] == "1.1" for chapter in outline["chapters"])
     assert any(chapter["chapter_code"] == "1" and chapter["chapter_title"] == "商务偏差表" for chapter in outline["chapters"])
     assert any(chapter["chapter_code"] == "24.8" and chapter["chapter_title"] == "其他" for chapter in outline["chapters"])
-    assert any(chapter["chapter_code"] == "8.1" and chapter["chapter_title"] == "施工组织设计" for chapter in outline["chapters"])
+    assert any(chapter["chapter_code"] == "8" and chapter["chapter_title"] == "施工方案与技术措施" for chapter in outline["chapters"])
+    assert any(chapter["chapter_code"] == "8.15" and chapter["chapter_title"] == "国网年度框架施工工程投标其他创新内容" for chapter in outline["chapters"])
     assert outline["metadata_json"]["business_outline_template_key"] == "sgcc_distribution_business_v1"
     assert outline["metadata_json"]["technical_outline_template_key"] == "sgcc_distribution_technical_v1"
 
@@ -142,7 +143,7 @@ def test_construction_method_maps_to_organization_and_technical_measure_chapters
         if any(mapping["requirement_id"] == requirement["id"] for mapping in chapter["requirement_mappings"])
     }
 
-    assert {"8.1", "8.2"} <= mapped_codes
+    assert {"8", "8.3", "8.4"} <= mapped_codes
 
 
 def test_sgcc_standard_maps_to_construction_and_spec_response_chapters() -> None:
@@ -159,7 +160,31 @@ def test_sgcc_standard_maps_to_construction_and_spec_response_chapters() -> None
         if any(mapping["requirement_id"] == requirement["id"] for mapping in chapter["requirement_mappings"])
     }
 
-    assert {"8.1", "8.2", "13"} <= mapped_codes
+    assert {"8", "8.1", "8.4", "8.15", "13"} <= mapped_codes
+
+
+def test_chapter_8_internal_subsections_receive_topic_constraints() -> None:
+    requirements = [
+        _requirement("technical", title="人员组织", source_metadata={"constraint_subtype": "personnel_count"}),
+        _requirement("technical", title="质量目标", source_metadata={"constraint_subtype": "quality_target"}),
+        _requirement("schedule", title="计划工期", source_metadata={"constraint_subtype": "schedule_target"}),
+        _requirement("technical", title="安全文明施工", source_metadata={"constraint_subtype": "safety_civilized"}),
+    ]
+
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=requirements)
+    mapped_by_title = {
+        requirement["title"]: {
+            chapter["chapter_code"]
+            for chapter in outline["chapters"]
+            if any(mapping["requirement_id"] == requirement["id"] for mapping in chapter["requirement_mappings"])
+        }
+        for requirement in requirements
+    }
+
+    assert {"6", "8.14"} <= mapped_by_title["人员组织"]
+    assert {"8.5", "10.1"} <= mapped_by_title["质量目标"]
+    assert {"3", "8.7", "10.3"} <= mapped_by_title["计划工期"]
+    assert {"8.6", "10.2"} <= mapped_by_title["安全文明施工"]
 
 
 def test_technical_scoring_maps_to_supporting_materials_and_relevant_chapter() -> None:
@@ -243,10 +268,10 @@ def test_sgcc_distribution_business_outline_preserves_parent_codes() -> None:
 def test_sgcc_distribution_technical_outline_uses_sample_numbering() -> None:
     outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[])
 
-    chapter = next(item for item in outline["chapters"] if item["volume_type"] == "technical" and item["chapter_code"] == "10.3")
+    chapter = next(item for item in outline["chapters"] if item["volume_type"] == "technical" and item["chapter_code"] == "8.15")
 
-    assert chapter["chapter_title"] == "工程进度计划及保证措施"
-    assert chapter["parent_code"] == "10"
+    assert chapter["chapter_title"] == "国网年度框架施工工程投标其他创新内容"
+    assert chapter["parent_code"] == "8"
     assert chapter["metadata_json"]["template_key"] == "sgcc_distribution_technical_v1"
     assert chapter["metadata_json"]["source_sample"] == "docs/samples/国网公司配网工程技术标目录.md"
 

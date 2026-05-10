@@ -18,6 +18,35 @@ class TechnicalChapterStrategy:
     forbidden_terms: tuple[str, ...] = ("报价", "投标报价", "最高限价", "单价", "总价")
 
 
+CHAPTER_8_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("8.1 编制依据与标准", "基于招标文件、已确认约束和本地标准库建立标准-条款-响应矩阵；未匹配到来源的标准只列为待补充依据。"),
+    ("8.2 工程概况与施工重难点分析", "围绕工程范围、现场条件、交叉跨越、停电窗口、地下管线和关键风险进行重难点分析。"),
+    ("8.3 施工组织与部署", "说明施工区段、项目组织、资源投入、现场布置、材料供应和外部协调机制。"),
+    ("8.4 主要施工方法及技术要求", "按测量、开挖、基础、电杆组立、架线、电缆敷设、设备安装、接地、恢复等工序形成SOP。"),
+    ("8.5 质量管理体系与措施", "将质量目标、检验批、WHS控制点、旁站监督、材料设备质量和问题闭环嵌入施工过程。"),
+    ("8.6 安全管理体系与措施", "识别危险源，设置安全组织、HSE检查、专项应急、培训交底和现场安全技术措施。"),
+    ("8.7 施工进度计划与保障", "分解里程碑、关键路径、资源保障、气候影响、进度预警和纠偏机制。"),
+    ("8.8 环境保护、绿色低碳与碳足迹管理", "响应绿色施工、扬尘噪声控制、废弃物回收、节能节材和低碳管理要求。"),
+    ("8.9 科技创新与智能化应用", "仅在招标文件、评分标准或企业资料支持时写入智能装备、数字化施工、BIM和装配化应用。"),
+    ("8.10 地域特性专题方案", "项目所在地或招标文件明确存在高温、雨季、城区受限、山地等条件时生成对应专项措施。"),
+    ("8.11 竣工验收与数字化移交", "说明三级自检、预验收、竣工资料、试验报告、影像资料和数字化移交。"),
+    ("8.12 售后服务、培训及增值服务", "仅基于招标文件服务要求和企业能力资料编写质保、响应、培训和增值服务。"),
+    ("8.13 拟投入施工车辆、机具、工器具、检测设备、安全工器具及设施", "从设备库和项目配置中组织车辆机具、检测设备、安全工器具及检定状态，缺资料则列为待补充。"),
+    ("8.14 施工项目部组织架构创新设计", "在人员库和项目组织要求基础上说明管理层级、岗位职责、协同机制和资源调配。"),
+    ("8.15 国网年度框架施工工程投标其他创新内容", "仅当项目属于年度框架或评分标准要求创新时，汇总可佐证的进度、质量、数字化、应急和服务创新。"),
+)
+
+
+CHAPTER_8_CHILD_CHARTS: dict[str, tuple[str, ...]] = {
+    "8.2": ("risk_matrix",),
+    "8.3": ("construction_flow",),
+    "8.4": ("construction_flow", "risk_matrix"),
+    "8.5": ("quality_system",),
+    "8.6": ("safety_system", "risk_matrix"),
+    "8.7": ("schedule_gantt",),
+}
+
+
 CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
     "6": TechnicalChapterStrategy(
         key="project_team",
@@ -33,33 +62,19 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         innovation_slots=("岗位履约看板", "关键岗位 AB 角备份"),
         self_check_rules=("人员数量和证书要求必须逐项响应", "不得出现报价信息"),
     ),
-    "8.1": TechnicalChapterStrategy(
-        key="construction_organization_design",
-        purpose="说明施工总体部署、施工流程、资源组织和国网工程管理措施。",
-        sections=(
-            ("施工总体部署", "结合工程范围、现场条件和国网工程管理要求进行施工区段、工序和资源部署。"),
-            ("关键施工流程", "按准备、实施、验收、移交的主线组织工序，明确关键控制点和交接标准。"),
-            ("资源投入与现场协调", "统筹人员、机械、材料、停电窗口和外部协调，降低交叉作业风险。"),
+    "8": TechnicalChapterStrategy(
+        key="construction_plan_and_technical_measures",
+        purpose="按用户确认的第8章内部15项子目录，系统化编制施工方案与技术措施。",
+        sections=CHAPTER_8_SECTIONS,
+        required_facts=("project_scope", "project_location", "construction_period", "quality_requirement"),
+        required_standards=("construction_process", "construction_technical", "acceptance", "sgcc_management"),
+        required_charts=("construction_flow", "risk_matrix", "quality_system", "safety_system", "schedule_gantt"),
+        innovation_slots=("标准化SOP", "FMEA风险矩阵", "WBS进度分解", "数字化施工留痕", "装配化施工条件化应用"),
+        self_check_rules=(
+            "15项必须作为第8章内部子目录，不得提升为技术标一级章节",
+            "地域、设备、标准、创新和服务承诺必须有招标文件、评分标准、标准库或企业资料来源",
+            "不得输出内部评分提示语、虚构参数或无佐证领先性表述",
         ),
-        required_facts=("project_scope", "project_location", "construction_period"),
-        required_standards=("construction_process", "sgcc_management"),
-        required_charts=("construction_flow",),
-        innovation_slots=("停电窗口协同表", "移动化工序验收记录"),
-        self_check_rules=("施工流程必须覆盖准备、实施、验收、移交", "需体现国网工程要求"),
-    ),
-    "8.2": TechnicalChapterStrategy(
-        key="construction_technical_measures",
-        purpose="说明关键施工技术措施、设备工具、质量验收和风险控制。",
-        sections=(
-            ("关键施工技术措施", "围绕主要工序列明施工方法、工器具、人员分工和验收标准。"),
-            ("过程控制与验收标准", "对关键工序设置旁站、复核、隐蔽验收和资料同步要求。"),
-            ("风险预控与创新措施", "针对交叉作业、停电窗口、设备到货等风险设置预控和纠偏措施。"),
-        ),
-        required_facts=("construction_method_constraints", "selected_equipment"),
-        required_standards=("construction_technical", "acceptance"),
-        required_charts=("construction_flow",),
-        innovation_slots=("工序二维码交底", "关键节点影像留痕"),
-        self_check_rules=("每项措施必须有责任岗位和验收标准", "不得泛泛承诺"),
     ),
     "10.1": TechnicalChapterStrategy(
         key="quality_assurance",
@@ -132,6 +147,23 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         self_check_rules=("只能引用本地标准库或用户确认标准",),
     ),
 }
+
+for _heading, _body in CHAPTER_8_SECTIONS:
+    _chapter_code, _title = _heading.split(" ", 1)
+    CHAPTER_STRATEGIES[_chapter_code] = TechnicalChapterStrategy(
+        key=f"construction_plan_{_chapter_code.replace('.', '_')}",
+        purpose=f"编制第8章内部子目录《{_title}》，并保持其不提升为技术标一级章节。",
+        sections=((_title, _body),),
+        required_facts=("project_scope", "project_location", "construction_period", "quality_requirement"),
+        required_standards=("construction_process", "construction_technical", "acceptance", "sgcc_management"),
+        required_charts=CHAPTER_8_CHILD_CHARTS.get(_chapter_code, ()),
+        innovation_slots=("标准化SOP", "风险矩阵", "数字化施工留痕"),
+        self_check_rules=(
+            "本内容必须作为第8章内部子目录输出",
+            "地域、设备、标准、创新和服务承诺必须有招标文件、评分标准、标准库或企业资料来源",
+            "不得输出内部评分提示语、虚构参数或无佐证领先性表述",
+        ),
+    )
 
 
 def strategy_for_chapter(chapter_code: str | None) -> TechnicalChapterStrategy | None:

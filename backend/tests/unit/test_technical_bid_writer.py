@@ -25,6 +25,22 @@ def test_technical_self_check_detects_strategy_sections_and_chart_placeholders()
     assert result["chart_placeholder_count"] == 1
 
 
+def test_technical_self_check_detects_chapter_8_internal_sections() -> None:
+    result = TechnicalBidWriter()._self_check(
+        """
+        ## 编制原则
+        ## 8.1 编制依据与标准
+        ## 8.2 工程概况与施工重难点分析
+        ## 8.15 国网年度框架施工工程投标其他创新内容
+        {{chart:construction_flow}}
+        """
+    )
+
+    assert result["has_strategy_sections"] is True
+    assert result["strategy_section_count"] == 3
+    assert result["chart_placeholder_count"] == 1
+
+
 def test_technical_writer_records_context_and_creates_recommended_charts(monkeypatch) -> None:
     from uuid import uuid4
 

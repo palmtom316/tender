@@ -60,6 +60,32 @@ def test_review_draft_flags_sgcc_domain_gaps_and_unsupported_claims():
     assert "质量措施缺少检查验收闭环" in titles
 
 
+def test_review_draft_uses_chapter_8_revised_internal_directory_checks():
+    issues = review_draft(
+        content="""
+        ## 编制依据与标准
+        本节依据招标文件和本地标准库形成标准条款响应矩阵。
+        """,
+        chapter_code="8.1",
+        requirements=[],
+        facts={},
+    )
+
+    titles = {issue.title for issue in issues}
+    assert "施工组织缺少国网管理要求" not in titles
+    assert "施工组织缺少流程或工序控制" not in titles
+    assert "编制依据缺少标准条款矩阵" not in titles
+
+    method_issues = review_draft(
+        content="## 主要施工方法及技术要求\n本节说明施工流程和工序控制。",
+        chapter_code="8.4",
+        requirements=[],
+        facts={},
+    )
+
+    assert any(issue.title == "主要施工方法缺少验收控制" for issue in method_issues)
+
+
 def test_review_draft_reports_chapter_quality_metrics():
     content = """
     ## 质量目标响应
