@@ -129,6 +129,37 @@ export function ExportGateContent() {
             }
           />
           <GateIndicator
+            passed={gates.critical_constraints_resolved}
+            label="关键约束闭环"
+            detail={
+              gates.critical_constraints_resolved
+                ? "关键约束均已处理"
+                : `${gates.unresolved_critical_constraint_count} 项关键约束仍未处理`
+            }
+          />
+          <GateIndicator
+            passed={gates.template_required_items_rendered}
+            label="模板渲染完整性"
+            detail={
+              gates.template_required_items_rendered
+                ? "必需模板项均已渲染"
+                : `${gates.required_template_failed_count} 个必需模板项渲染失败${
+                    gates.failed_required_template_items?.length
+                      ? `：${gates.failed_required_template_items.join("、")}`
+                      : ""
+                  }`
+            }
+          />
+          <GateIndicator
+            passed={gates.stale_artifacts_clear}
+            label="内容时效"
+            detail={
+              gates.stale_artifacts_clear
+                ? "目录、草稿和图表均为当前版本"
+                : `${gates.stale_artifact_count} 项草稿、目录或图表已过期`
+            }
+          />
+          <GateIndicator
             passed={gates.format_passed}
             label="格式校验"
             detail={

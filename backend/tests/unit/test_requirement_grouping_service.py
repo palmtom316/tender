@@ -58,6 +58,72 @@ def test_key_field_conflict_is_critical_and_not_silently_merged():
     assert package["source_count"] == 2
 
 
+def test_personnel_certificate_grade_conflict_is_detected():
+    req_a = _req(
+        category="project_team",
+        title="项目经理资格",
+        requirement_text="项目经理须具备机电工程一级注册建造师资格。",
+        source_metadata={"constraint_subtype": "personnel_certificate"},
+    )
+    req_b = _req(
+        category="project_team",
+        title="项目经理资格",
+        requirement_text="项目经理须具备机电工程二级注册建造师资格。",
+        source_metadata={"constraint_subtype": "personnel_certificate"},
+    )
+
+    package = build_requirement_workbench("project-1", [req_a, req_b])["packages"][0]
+
+    assert package["has_conflict"] is True
+    assert "certificate_grade" in package["conflict_fields"]
+    assert package["confirmation_level"] == "critical"
+
+
+def test_schedule_duration_conflict_is_detected():
+    req_a = _req(category="schedule", title="计划工期", requirement_text="计划工期90日历天。")
+    req_b = _req(category="schedule", title="计划工期", requirement_text="计划工期120日历天。")
+
+    package = build_requirement_workbench("project-1", [req_a, req_b])["packages"][0]
+
+    assert package["has_conflict"] is True
+    assert "duration" in package["conflict_fields"]
+    assert package["key_fields"]["duration"] == ["120日历天", "90日历天"]
+
+
+def test_signature_seal_conflict_is_detected():
+    req_a = _req(category="format", title="签章要求", requirement_text="投标文件须法定代表人签字并加盖公章。")
+    req_b = _req(category="format", title="签章要求", requirement_text="投标文件仅需电子签章。")
+
+    package = build_requirement_workbench("project-1", [req_a, req_b])["packages"][0]
+
+    assert package["has_conflict"] is True
+    assert "signature_seal" in package["conflict_fields"]
+
+
+def test_performance_quality_file_count_and_deadline_conflicts_are_detected():
+    result = build_requirement_workbench(
+        "project-1",
+        [
+            _req(category="performance", title="业绩要求", requirement_text="近三年须具有2项类似工程业绩。"),
+            _req(category="performance", title="业绩要求", requirement_text="近三年须具有3项类似工程业绩。"),
+            _req(category="technical", title="质量目标", requirement_text="质量目标合格率100%。", source_metadata={"constraint_subtype": "quality_target"}),
+            _req(category="technical", title="质量目标", requirement_text="质量目标优良。", source_metadata={"constraint_subtype": "quality_target"}),
+            _req(category="format", title="文件份数", requirement_text="电子版1份。"),
+            _req(category="format", title="文件份数", requirement_text="电子版2份。"),
+            _req(category="format", title="递交截止", requirement_text="递交截止时间为2026年6月1日09:00。"),
+            _req(category="format", title="递交截止", requirement_text="递交截止时间为2026年6月2日09:00。"),
+        ],
+    )
+
+    conflict_fields = {
+        field
+        for package in result["packages"]
+        for field in package["conflict_fields"]
+    }
+
+    assert {"performance_count", "quality_target", "file_count", "date"} <= conflict_fields
+
+
 def test_pricing_only_clause_is_ignored():
     result = build_requirement_workbench(
         "project-1",

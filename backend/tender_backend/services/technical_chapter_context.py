@@ -31,6 +31,7 @@ class TechnicalChapterContextBuilder:
             "standard_clauses": self._standard_clauses(conn, requirement_ids=requirement_ids),
             "personnel_selections": self._personnel_selections(conn, project_id=project_id),
             "equipment_selections": self._equipment_selections(conn, project_id=project_id),
+            "company_assets": self._company_assets(conn),
             "chart_assets": self._chart_assets(conn, project_id=project_id, chapter_id=chapter_id),
             "recommended_charts": chart_recommendations_for_chapter(chapter.get("chapter_code")),
             "strategy": _strategy_to_dict(strategy),
@@ -148,6 +149,78 @@ class TechnicalChapterContextBuilder:
                 ORDER BY asset_type, display_order, created_at
                 """,
                 (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _company_assets(self, conn: Connection) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "company_profiles": self._company_profiles(conn),
+            "certificates": self._certificates(conn),
+            "performances": self._performances(conn),
+            "evidence_assets": self._evidence_assets(conn),
+            "method_statements": self._method_statements(conn),
+        }
+
+    def _company_profiles(self, conn: Connection) -> list[dict[str, Any]]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """
+                SELECT id, company_name, business_scope, profile_json
+                FROM company_profile
+                ORDER BY created_at DESC
+                LIMIT 3
+                """,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _certificates(self, conn: Connection) -> list[dict[str, Any]]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """
+                SELECT id, certificate_name, grade, specialty, valid_to, status
+                FROM qualification_certificate
+                WHERE COALESCE(status, 'active') = 'active'
+                ORDER BY valid_to DESC NULLS LAST, created_at DESC
+                LIMIT 12
+                """,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _performances(self, conn: Connection) -> list[dict[str, Any]]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """
+                SELECT id, project_name, client_name, service_scope, evidence_summary
+                FROM project_performance
+                ORDER BY started_on DESC NULLS LAST, created_at DESC
+                LIMIT 8
+                """,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _evidence_assets(self, conn: Connection) -> list[dict[str, Any]]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """
+                SELECT id, asset_name, asset_domain, asset_type, file_name
+                FROM evidence_asset
+                ORDER BY owner_type, sort_order, created_at DESC
+                LIMIT 20
+                """,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _method_statements(self, conn: Connection) -> list[dict[str, Any]]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """
+                SELECT id, asset_name, asset_domain, asset_type, file_name, metadata_json
+                FROM evidence_asset
+                WHERE asset_domain IN ('method_statement', 'technical_method', 'construction_method')
+                   OR asset_type IN ('method_statement', 'technical_method')
+                ORDER BY sort_order, created_at DESC
+                LIMIT 8
+                """,
             ).fetchall()
         return [dict(row) for row in rows]
 

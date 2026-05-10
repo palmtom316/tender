@@ -73,15 +73,22 @@ def review_draft(
         ))
 
     generic_phrases = ("严格响应", "完全响应", "按招标文件执行", "满足招标要求")
+    strategy = strategy_for_chapter(chapter_code)
+    quality_metrics = _chapter_quality_metrics(
+        content=content,
+        requirements=requirements,
+        strategy=strategy,
+        generic_phrases=generic_phrases,
+    )
     if any(phrase in content for phrase in generic_phrases) and len(content) < 500:
         issues.append(ReviewIssue(
             severity="P1",
             title="章节内容泛化",
             detail="章节以泛化承诺替代具体措施，需补充组织、流程、责任、标准、检查和闭环内容。",
             chapter_code=chapter_code,
+            metadata_json={"quality_metrics": quality_metrics},
         ))
 
-    strategy = strategy_for_chapter(chapter_code)
     if strategy is not None:
         missing_sections = [heading for heading, _body in strategy.sections if f"## {heading}" not in content]
         if missing_sections:
@@ -101,9 +108,80 @@ def review_draft(
                 chapter_code=chapter_code,
                 metadata_json={"missing_charts": missing_charts, "strategy": strategy.key},
             ))
+        if strategy.required_standards and not _has_standard_basis(content):
+            issues.append(ReviewIssue(
+                severity="P1",
+                title="缺少标准依据",
+                detail="章节未体现标准、规范、验收或国网依据，需补充本地标准库或用户确认的标准条款。",
+                chapter_code=chapter_code,
+                metadata_json={"required_standards": list(strategy.required_standards), "strategy": strategy.key},
+            ))
+        issues.extend(_sgcc_domain_issues(content=content, chapter_code=chapter_code))
+
+    unsupported_claims = _unsupported_claims(content)
+    if unsupported_claims:
+        issues.append(ReviewIssue(
+            severity="P1",
+            title="存在未支撑承诺",
+            detail="章节包含缺少来源或证明支撑的绝对化/领先性表述：" + "、".join(unsupported_claims),
+            chapter_code=chapter_code,
+            metadata_json={"unsupported_claims": unsupported_claims},
+        ))
+
+    if _quality_metrics_block(quality_metrics):
+        issues.append(ReviewIssue(
+            severity="P1",
+            title="章节质量指标不足",
+            detail="章节缺少足够的策略章节、约束响应或实质段落，需补充具体措施、责任、标准、检查和闭环内容。",
+            chapter_code=chapter_code,
+            metadata_json={"quality_metrics": quality_metrics},
+        ))
 
     logger.info("review_completed", chapter_code=chapter_code, issue_count=len(issues))
     return issues
+
+
+def _chapter_quality_metrics(
+    *,
+    content: str,
+    requirements: list[dict],
+    strategy: Any,
+    generic_phrases: tuple[str, ...],
+) -> dict[str, Any]:
+    section_total = len(strategy.sections) if strategy is not None else 0
+    section_hit = sum(1 for heading, _body in (strategy.sections if strategy is not None else []) if f"## {heading}" in content)
+    covered_requirements = sum(1 for requirement in requirements if _contains_requirement(content, requirement))
+    substantive_paragraphs = [
+        paragraph.strip()
+        for paragraph in re.split(r"\n\s*\n", content)
+        if len(paragraph.strip()) >= 40 and not paragraph.strip().startswith("{{chart:")
+    ]
+    chart_placeholders = re.findall(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}", content)
+    generic_hits = sum(content.count(phrase) for phrase in generic_phrases)
+    length_units = max(1, len(content) // 200)
+    return {
+        "required_section_coverage": round(section_hit / section_total, 4) if section_total else 1.0,
+        "required_section_count": section_total,
+        "covered_required_section_count": section_hit,
+        "confirmed_constraint_coverage": round(covered_requirements / len(requirements), 4) if requirements else 1.0,
+        "confirmed_constraint_count": len(requirements),
+        "covered_confirmed_constraint_count": covered_requirements,
+        "chart_placeholder_count": len(set(chart_placeholders)),
+        "pricing_term_absent": not any(term in content for term in ("投标报价", "最高限价", "单价", "总价")),
+        "generic_phrase_density": round(generic_hits / length_units, 4),
+        "substantive_paragraph_count": len(substantive_paragraphs),
+        "minimum_substantive_paragraph_count": 3 if strategy is not None else 2,
+    }
+
+
+def _quality_metrics_block(metrics: dict[str, Any]) -> bool:
+    return (
+        metrics["required_section_coverage"] < 0.7
+        or metrics["confirmed_constraint_coverage"] < 0.8
+        or metrics["generic_phrase_density"] > 0
+        or metrics["substantive_paragraph_count"] < metrics["minimum_substantive_paragraph_count"]
+        or not metrics["pricing_term_absent"]
+    )
 
 
 def persist_review_issues(
@@ -164,6 +242,60 @@ def _contains_requirement(content: str, requirement: dict[str, Any]) -> bool:
     return False
 
 
+def _has_standard_basis(content: str) -> bool:
+    return any(term in content for term in ("标准", "规范", "规程", "验收", "国网", "国家电网"))
+
+
+def _unsupported_claims(content: str) -> list[str]:
+    patterns = ("唯一", "行业第一", "全国领先", "最先进", "零事故", "绝对确保", "100%提前")
+    return [pattern for pattern in patterns if pattern in content]
+
+
+def _sgcc_domain_issues(*, content: str, chapter_code: str) -> list[ReviewIssue]:
+    required_terms: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
+        "6": (("关键岗位/资格响应不足", ("岗位", "资格|证书")),),
+        "8.1": (
+            ("施工组织缺少国网管理要求", ("国网|国家电网",)),
+            ("施工组织缺少流程或工序控制", ("流程", "工序")),
+        ),
+        "8.2": (
+            ("施工技术措施缺少验收控制", ("验收", "控制")),
+            ("施工技术措施缺少风险预控", ("风险", "预控")),
+        ),
+        "10.1": (
+            ("质量措施缺少国网质量要求", ("国网|国家电网",)),
+            ("质量措施缺少检查验收闭环", ("检查", "验收", "闭环")),
+        ),
+        "10.2": (
+            ("安全文明施工缺少风险管控", ("风险", "分级", "管控")),
+            ("安全文明施工缺少应急响应", ("应急", "响应")),
+        ),
+        "10.3": (
+            ("进度措施缺少里程碑或关键路径", ("里程碑", "关键路径")),
+            ("进度措施缺少预警纠偏", ("预警", "纠偏")),
+        ),
+    }
+    issues: list[ReviewIssue] = []
+    for title, terms in required_terms.get(chapter_code, ()):
+        if not _content_satisfies(content, terms):
+            issues.append(ReviewIssue(
+                severity="P1",
+                title=title,
+                detail="章节未覆盖国网工程技术标该主题的关键响应要素。",
+                chapter_code=chapter_code,
+                metadata_json={"required_terms": list(terms)},
+            ))
+    return issues
+
+
+def _content_satisfies(content: str, terms: tuple[str, ...]) -> bool:
+    for term in terms:
+        alternatives = tuple(part for part in term.split("|") if part)
+        if alternatives and not any(part in content for part in alternatives):
+            return False
+    return True
+
+
 def build_project_review(conn: Connection, *, project_id: UUID) -> list[ReviewIssue]:
     """Review the full bid draft against requirements, matches, and outline."""
     constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
@@ -184,7 +316,7 @@ def build_project_review(conn: Connection, *, project_id: UUID) -> list[ReviewIs
                 (project_id,),
             ).fetchall()
         drafts = cur.execute(
-            "SELECT chapter_code, content_md FROM chapter_draft WHERE project_id = %s",
+            "SELECT chapter_code, content_md, is_stale, stale_reason FROM chapter_draft WHERE project_id = %s",
             (project_id,),
         ).fetchall()
         chapters = cur.execute(
@@ -229,6 +361,17 @@ def build_project_review(conn: Connection, *, project_id: UUID) -> list[ReviewIs
         mapped_by_requirement.setdefault(str(row["requirement_id"]), []).append(row["chapter_code"])
 
     issues: list[ReviewIssue] = []
+    for draft in drafts:
+        if draft.get("is_stale"):
+            issues.append(
+                ReviewIssue(
+                    severity="P1",
+                    title="章节草稿上下文已过期",
+                    detail=draft.get("stale_reason") or "后续澄清、约束或目录变化后，章节草稿需要重新生成或复核。",
+                    chapter_code=draft.get("chapter_code"),
+                    metadata_json={"stale": True},
+                )
+            )
     hard_categories = {"veto", "qualification", "performance", "project_team", "technical", "scoring", "special", "format"}
     severity_by_category = {
         "veto": "P0",

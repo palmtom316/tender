@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -14,6 +15,50 @@ from tender_backend.services.bid_outline_planner import build_bid_outline
 
 
 class OutlineReconciliationService:
+    _CONFLICT_TRIGGERS: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("separate_volume_submission", re.compile(r"独立成册|单独成册|另册|单独密封|单独提交")),
+        ("binding_order", re.compile(r"按顺序装订|装订顺序|目录顺序")),
+        ("missing_mandatory_section", re.compile(r"必须提供|应提供|须提供|必须包含|应包含|须包含")),
+        ("veto_uncovered", re.compile(r"否决|废标|无效投标|实质性不响应")),
+    )
+
+    def build_template_conflict_record(
+        self,
+        *,
+        source_text: str,
+        source_locator: str | None,
+        affected_chapter_code: str,
+        proposed_action: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        trigger = self._rule_trigger(source_text)
+        if trigger is None:
+            return {
+                "policy": "template_default",
+                "status": "not_applicable",
+                "trigger": None,
+                "affected_chapter_code": affected_chapter_code,
+                "source_locator": source_locator,
+                "proposed_action": proposed_action,
+                "reason": "未命中确定性招标文件目录冲突触发器，保持用户提供的目录模板",
+            }
+        return {
+            "policy": "tender_conflict_override",
+            "status": "draft",
+            "trigger": trigger,
+            "affected_chapter_code": affected_chapter_code,
+            "source_locator": source_locator,
+            "proposed_action": proposed_action,
+            "reason": reason or "招标文件存在确定性目录/分册/递交冲突，需人工确认后覆盖模板",
+        }
+
+    def _rule_trigger(self, source_text: str) -> str | None:
+        text = str(source_text or "")
+        for trigger, pattern in self._CONFLICT_TRIGGERS:
+            if pattern.search(text):
+                return trigger
+        return None
+
     def preview(self, conn: Connection, *, project_id: UUID) -> dict[str, Any]:
         outline = BidOutlineRepository().get_latest_by_project(conn, project_id=project_id)
         if outline is None:

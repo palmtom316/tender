@@ -29,13 +29,22 @@ class TenderConstraintService:
                 (project_id,),
             ).fetchall()
             version = int(version_row["version"] if version_row else 1)
+            cur.execute(
+                """
+                UPDATE tender_constraint_set
+                SET status = 'superseded', updated_at = now()
+                WHERE project_id = %s
+                  AND status IN ('draft', 'reviewing')
+                """,
+                (project_id,),
+            )
             constraint_set = cur.execute(
                 """
                 INSERT INTO tender_constraint_set (id, project_id, version, status, metadata_json)
                 VALUES (%s, %s, %s, %s, %s)
                 RETURNING *
                 """,
-                (uuid4(), project_id, version, "draft", Jsonb({"source": "project_requirement"})),
+                (uuid4(), project_id, version, "reviewing", Jsonb({"source": "project_requirement", "lifecycle": "reviewing"})),
             ).fetchone()
             if constraint_set is None:
                 raise RuntimeError("failed to create constraint set")
@@ -53,9 +62,26 @@ class TenderConstraintService:
                 item_metadata = {
                     "package_id": package.get("id"),
                     "has_conflict": package.get("has_conflict", False),
+                    "conflict_fields": list(package.get("conflict_fields") or []),
+                    "key_fields": package.get("key_fields") or {},
+                    "representative_conclusion": package.get("title") or requirement.get("title"),
+                    "system_conclusion": package.get("system_conclusion"),
+                    "lane": package.get("lane"),
                 }
                 if isinstance(requirement_metadata, dict):
-                    for key in ("scope_policy", "extraction_mode_marker", "constraint_subtype", "pricing_keywords", "matched_keywords"):
+                    for key in (
+                        "scope_policy",
+                        "extraction_mode_marker",
+                        "constraint_subtype",
+                        "pricing_keywords",
+                        "matched_keywords",
+                        "ignored_reason",
+                        "target_value",
+                        "evidence_need",
+                        "chapter_hint",
+                        "severity",
+                        "source_confidence_reason",
+                    ):
                         if key in requirement_metadata:
                             item_metadata[key] = requirement_metadata[key]
                 row = cur.execute(
@@ -141,6 +167,62 @@ class TenderConstraintService:
                 """,
                 (constraint_set["id"],),
             ).fetchall()
+        result = dict(constraint_set)
+        result["items"] = [dict(row) for row in items]
+        return result
+
+    def confirm_latest(self, conn: Connection, *, project_id: UUID, confirmed_by: str | None = None) -> dict[str, Any]:
+        current = self.latest(conn, project_id=project_id)
+        if current is None:
+            raise ValueError("constraint set is required before confirmation")
+        metadata = dict(current.get("metadata_json") or {})
+        metadata["confirmed_by"] = confirmed_by
+        metadata["lifecycle"] = "confirmed"
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                UPDATE tender_constraint_set
+                SET status = 'superseded', updated_at = now()
+                WHERE project_id = %s
+                  AND id <> %s
+                  AND status IN ('draft', 'reviewing', 'confirmed', 'accepted')
+                """,
+                (project_id, current["id"]),
+            )
+            cur.execute(
+                """
+                UPDATE tender_constraint_item
+                SET status = 'accepted', updated_at = now()
+                WHERE constraint_set_id = %s
+                  AND status NOT IN ('rejected', 'ignored')
+                """,
+                (current["id"],),
+            )
+            constraint_set = cur.execute(
+                """
+                UPDATE tender_constraint_set
+                SET status = 'confirmed', metadata_json = %s, updated_at = now()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (Jsonb(metadata), current["id"]),
+            ).fetchone()
+            items = cur.execute(
+                """
+                SELECT
+                  id, constraint_set_id, project_id, requirement_id, category, constraint_subtype,
+                  status, confirmation_level, title, constraint_text, source_file, source_locator,
+                  metadata_json, created_at, updated_at
+                FROM tender_constraint_item
+                WHERE constraint_set_id = %s
+                  AND status IN ('accepted', 'confirmed')
+                ORDER BY category, created_at
+                """,
+                (current["id"],),
+            ).fetchall()
+        conn.commit()
+        if constraint_set is None:
+            raise RuntimeError("failed to confirm constraint set")
         result = dict(constraint_set)
         result["items"] = [dict(row) for row in items]
         return result

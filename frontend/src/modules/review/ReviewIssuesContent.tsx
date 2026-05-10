@@ -12,6 +12,15 @@ const SEVERITY_VARIANT: Record<string, "danger" | "warning" | "info" | "success"
   P3: "success",
 };
 
+function qualityMetrics(issue: { metadata_json?: Record<string, unknown> }) {
+  const metrics = issue.metadata_json?.quality_metrics;
+  return metrics && typeof metrics === "object" ? metrics as Record<string, unknown> : null;
+}
+
+function percent(value: unknown) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
 export function ReviewIssuesContent() {
   const { projectId } = useNavigation();
   const queryClient = useQueryClient();
@@ -91,6 +100,17 @@ export function ReviewIssuesContent() {
             </div>
             <h3 style={{ margin: "var(--space-2) 0 var(--space-1)" }}>{issue.title}</h3>
             {issue.detail && <p className="source-text">{issue.detail}</p>}
+            {qualityMetrics(issue) && (
+              <div className="review-metric-strip" aria-label="章节质量指标">
+                <span>策略章节覆盖 {percent(qualityMetrics(issue)?.required_section_coverage)}</span>
+                <span>约束响应覆盖 {percent(qualityMetrics(issue)?.confirmed_constraint_coverage)}</span>
+                <span>
+                  实质段落 {Number(qualityMetrics(issue)?.substantive_paragraph_count || 0)}/
+                  {Number(qualityMetrics(issue)?.minimum_substantive_paragraph_count || 0)}
+                </span>
+                <span>泛化密度 {Number(qualityMetrics(issue)?.generic_phrase_density || 0)}</span>
+              </div>
+            )}
           </Card>
         ))}
         {!isLoading && issues.length === 0 && (

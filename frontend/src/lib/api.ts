@@ -595,6 +595,38 @@ export function bulkConfirmRequirements(projectId: string, requirementIds: strin
   });
 }
 
+export function updateRequirement(id: string, fields: Partial<Requirement> & Record<string, unknown>): Promise<Requirement> {
+  return request<Requirement>(`/requirements/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function rejectRequirement(id: string, reviewNote?: string): Promise<Requirement> {
+  return request<Requirement>(`/requirements/${id}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ review_note: reviewNote ?? "人工从关键约束中排除" }),
+  });
+}
+
+export function mergeRequirements(targetId: string, sourceRequirementIds: string[]): Promise<Requirement> {
+  return request<Requirement>(`/requirements/${targetId}/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_requirement_ids: sourceRequirementIds }),
+  });
+}
+
+export function splitRequirementForReview(id: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/requirements/${id}/split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parts: [] }),
+  });
+}
+
 export function fetchSourceChunk(id: string, options?: { signal?: AbortSignal }): Promise<SourceChunk> {
   return request<SourceChunk>(`/source-chunks/${id}`, { signal: options?.signal });
 }
@@ -609,6 +641,12 @@ export function buildConstraintSet(projectId: string): Promise<{ id: string; ite
 
 export function fetchConstraintSet(projectId: string, options?: { signal?: AbortSignal }): Promise<{ items: unknown[] }> {
   return request<{ items: unknown[] }>(`/projects/${projectId}/constraint-set`, { signal: options?.signal });
+}
+
+export function confirmConstraintSet(projectId: string): Promise<{ id: string; status: string; items: unknown[] }> {
+  return request<{ id: string; status: string; items: unknown[] }>(`/projects/${projectId}/constraint-set/confirm`, {
+    method: "POST",
+  });
 }
 
 export function runComplianceCheck(projectId: string): Promise<{ id: string; findings: unknown[] }> {
@@ -729,6 +767,8 @@ export interface Draft {
   chapter_code: string;
   content_md: string;
   updated_at: string;
+  is_stale?: boolean;
+  stale_reason?: string | null;
 }
 
 export function fetchDrafts(
@@ -770,9 +810,21 @@ export interface OutlineDiff {
   chapter_code: string;
   chapter_title: string;
   volume_type: string;
-  operation: "add" | "remove" | "rename" | "move" | "keep" | "mark_manual_required" | "mark_external_attached";
+  operation:
+    | "add"
+    | "remove"
+    | "rename"
+    | "move"
+    | "keep"
+    | "keep_template"
+    | "keep_mapped"
+    | "tender_conflict_override"
+    | "mark_manual_required"
+    | "mark_external_attached";
   requirement_count: number;
   reason: string;
+  source_locator?: string | null;
+  proposed_action?: string | null;
 }
 
 export interface BidOutlineReconciliation {
@@ -880,6 +932,16 @@ export function generateTechnicalChapter(projectId: string, chapterId: string): 
   });
 }
 
+export function fetchTechnicalChapterContext(
+  projectId: string,
+  chapterId: string,
+  options?: { signal?: AbortSignal },
+): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/projects/${projectId}/technical-bid/chapters/${chapterId}/context`, {
+    signal: options?.signal,
+  });
+}
+
 export function listChartAssets(projectId: string, options?: { signal?: AbortSignal }): Promise<ChartAsset[]> {
   return request<ChartAsset[]>(`/projects/${projectId}/chart-assets`, { signal: options?.signal });
 }
@@ -922,6 +984,7 @@ export interface ReviewIssue {
   title: string;
   detail: string | null;
   resolved: boolean;
+  metadata_json?: Record<string, unknown>;
 }
 
 export function fetchReviewIssues(
@@ -984,6 +1047,13 @@ export interface ExportGates {
     referenced_chart_count: number;
     constraints_confirmed: boolean;
     legacy_pre_constraint_set: boolean;
+    critical_constraints_resolved: boolean;
+    unresolved_critical_constraint_count: number;
+    template_required_items_rendered: boolean;
+    required_template_failed_count: number;
+    failed_required_template_items?: string[];
+    stale_artifacts_clear: boolean;
+    stale_artifact_count: number;
     format_passed: boolean;
     format_status: "passed" | "failed" | "warning_not_checked";
     format_message?: string;

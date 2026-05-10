@@ -739,6 +739,62 @@
   color: var(--color-text);
 }
 
+.chart-control-row {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.chart-control-row label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 220px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.template-conflict-list {
+  display: grid;
+  gap: var(--space-2);
+  width: min(100%, 760px);
+}
+
+.template-conflict-item {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.template-conflict-item span {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.template-conflict-item p {
+  margin: 0;
+}
+
+.review-metric-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.review-metric-strip span {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-surface) 90%, var(--color-primary-light));
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
 .status-pill {
   white-space: nowrap;
   padding: 2px var(--space-2);

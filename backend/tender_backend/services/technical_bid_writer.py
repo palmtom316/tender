@@ -70,6 +70,8 @@ class TechnicalBidWriter:
                 "self_check": self_check,
                 "context_hash": _context_hash(context),
                 "prompt_version": "technical_chapter_context_v1",
+                "prompt_contract": _technical_prompt_contract(context),
+                "source_trace": _source_trace(context),
                 "generation_mode": "deterministic_strategy_fallback",
             },
         )
@@ -226,3 +228,82 @@ def _chart_title(chart_type: str, chapter: dict[str, Any]) -> str:
         "schedule_gantt": "施工进度计划图",
     }
     return names.get(chart_type, f"{chapter.get('chapter_title') or '技术章节'}图表")
+
+
+def _technical_prompt_contract(context: dict[str, Any]) -> dict[str, Any]:
+    """Describe the only inputs an AI prose pass may use."""
+
+    strategy = context.get("strategy") if isinstance(context.get("strategy"), dict) else {}
+    headings = [
+        section.get("heading")
+        for section in strategy.get("sections", [])
+        if isinstance(section, dict) and section.get("heading")
+    ]
+    return {
+        "version": "technical_chapter_context_v1",
+        "input_policy": "normalized_context_and_strategy_only",
+        "allowed_context_keys": [
+            "chapter",
+            "constraint_set",
+            "constraints",
+            "tender_summary",
+            "scoring_items",
+            "standard_clauses",
+            "personnel_selections",
+            "equipment_selections",
+            "company_assets",
+            "recommended_charts",
+            "chart_assets",
+            "strategy",
+        ],
+        "strategy_key": strategy.get("key"),
+        "required_output": {
+            "format": "structured_markdown",
+            "headings": headings,
+            "must_include": [
+                "response_matrix",
+                "measures",
+                "responsibilities",
+                "standards_table",
+                "chart_placeholders_when_recommended",
+            ],
+            "trace_metadata": [
+                "constraint_ids",
+                "standard_clause_ids",
+                "scoring_ids",
+                "personnel_ids",
+                "equipment_ids",
+                "chart_placeholder_keys",
+            ],
+        },
+        "forbidden_terms": list(strategy.get("forbidden_terms") or ["报价", "投标报价", "最高限价", "单价", "总价"]),
+    }
+
+
+def _source_trace(context: dict[str, Any]) -> dict[str, list[str]]:
+    def ids(rows: Any, key: str = "id") -> list[str]:
+        if not isinstance(rows, list):
+            return []
+        values: list[str] = []
+        for row in rows:
+            if isinstance(row, dict) and row.get(key):
+                values.append(str(row[key]))
+        return values
+
+    chart_keys: list[str] = []
+    for key in context.get("recommended_charts") or []:
+        if key:
+            chart_keys.append(str(key))
+    for asset in context.get("chart_assets") or []:
+        if isinstance(asset, dict) and (asset.get("placeholder_key") or asset.get("chart_type")):
+            chart_keys.append(str(asset.get("placeholder_key") or asset.get("chart_type")))
+
+    return {
+        "constraint_ids": ids(context.get("constraints")),
+        "requirement_ids": ids(context.get("constraints"), "requirement_id"),
+        "standard_clause_ids": ids(context.get("standard_clauses"), "id"),
+        "scoring_ids": ids(context.get("scoring_items")),
+        "personnel_ids": ids(context.get("personnel_selections")),
+        "equipment_ids": ids(context.get("equipment_selections")),
+        "chart_placeholder_keys": sorted(set(chart_keys)),
+    }

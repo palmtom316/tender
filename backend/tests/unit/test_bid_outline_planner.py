@@ -7,6 +7,7 @@ from tender_backend.services.bid_outline_planner import (
     plan_bid_outline_from_confirmed_constraints,
     plan_bid_outline_from_requirements,
 )
+from tender_backend.services.bid_outline_templates import base_bid_chapters
 
 
 def _requirement(category: str, **overrides):
@@ -105,6 +106,96 @@ def test_non_legacy_outline_does_not_map_by_raw_category_fallback() -> None:
 
     assert all_mappings == []
     assert str(requirement["id"]) not in outline["metadata_json"]["unmapped_hard_requirement_ids"]
+
+
+def test_no_conflict_outline_preserves_template_structure_byte_for_byte() -> None:
+    outline = plan_bid_outline_from_requirements(
+        project_id=uuid4(),
+        requirements=[
+            _requirement("technical", source_metadata={"constraint_subtype": "quality_target"}),
+            _requirement("technical", source_metadata={"constraint_subtype": "safety_civilized"}),
+        ],
+    )
+
+    expected = [
+        (chapter["volume_type"], chapter["chapter_code"], chapter["chapter_title"], chapter.get("parent_code"))
+        for chapter in base_bid_chapters()
+    ]
+    actual = [
+        (chapter["volume_type"], chapter["chapter_code"], chapter["chapter_title"], chapter.get("parent_code"))
+        for chapter in outline["chapters"]
+    ]
+    assert actual == expected
+
+
+def test_construction_method_maps_to_organization_and_technical_measure_chapters() -> None:
+    requirement = _requirement(
+        "technical",
+        title="施工技术措施",
+        source_metadata={"constraint_subtype": "construction_method"},
+    )
+
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[requirement])
+    mapped_codes = {
+        chapter["chapter_code"]
+        for chapter in outline["chapters"]
+        if any(mapping["requirement_id"] == requirement["id"] for mapping in chapter["requirement_mappings"])
+    }
+
+    assert {"8.1", "8.2"} <= mapped_codes
+
+
+def test_sgcc_standard_maps_to_construction_and_spec_response_chapters() -> None:
+    requirement = _requirement(
+        "technical",
+        title="国网标准符合性",
+        source_metadata={"constraint_subtype": "sgcc_standard_compliance"},
+    )
+
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[requirement])
+    mapped_codes = {
+        chapter["chapter_code"]
+        for chapter in outline["chapters"]
+        if any(mapping["requirement_id"] == requirement["id"] for mapping in chapter["requirement_mappings"])
+    }
+
+    assert {"8.1", "8.2", "13"} <= mapped_codes
+
+
+def test_technical_scoring_maps_to_supporting_materials_and_relevant_chapter() -> None:
+    requirement = _requirement(
+        "scoring",
+        title="质量评分点",
+        requirement_text="质量保证措施完整得满分。",
+        source_metadata={"constraint_subtype": "technical_scoring_response", "chapter_hint": "10.1"},
+    )
+
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[requirement])
+    mapped_codes = {
+        chapter["chapter_code"]
+        for chapter in outline["chapters"]
+        if any(mapping["requirement_id"] == requirement["id"] for mapping in chapter["requirement_mappings"])
+    }
+
+    assert {"12", "10.1"} <= mapped_codes
+
+
+def test_veto_rejection_maps_to_existing_deviation_and_response_chapters() -> None:
+    requirement = _requirement(
+        "veto",
+        title="否决项",
+        requirement_text="投标文件存在重大偏差将被否决。",
+        source_metadata={"constraint_subtype": "veto_rejection"},
+    )
+
+    outline = plan_bid_outline_from_requirements(project_id=uuid4(), requirements=[requirement])
+    mapped_keys = {
+        (chapter["volume_type"], chapter["chapter_code"])
+        for chapter in outline["chapters"]
+        if any(mapping["requirement_id"] == requirement["id"] for mapping in chapter["requirement_mappings"])
+    }
+
+    assert {("business", "1"), ("technical", "1")} <= mapped_keys
 
 
 def test_constraint_subtype_column_drives_confirmed_constraint_mapping() -> None:

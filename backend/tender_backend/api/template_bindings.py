@@ -6,6 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from psycopg import Connection, errors
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
@@ -76,6 +78,29 @@ class RenderBundleBody(BaseModel):
 
 class RenderItemBody(BaseModel):
     project_id: UUID | None = None
+
+
+def _persist_template_render_status(conn: Connection, *, project_id: UUID, result: dict[str, Any]) -> None:
+    failed_required_items = [
+        str(item.get("filename") or item.get("relative_path") or item.get("item_code") or "unknown")
+        for item in result.get("items") or []
+        if item.get("required") and item.get("status") == "failed"
+    ]
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute("SELECT metadata_json FROM project WHERE id = %s", (project_id,)).fetchone()
+        metadata = dict((row or {}).get("metadata_json") or {})
+        metadata["template_render_status"] = {
+            "required_failed_count": int(result.get("required_failed_count") or 0),
+            "failed_count": int(result.get("failed_count") or 0),
+            "rendered_count": int(result.get("rendered_count") or 0),
+            "total_item_count": int(result.get("total_item_count") or 0),
+            "failed_required_items": failed_required_items,
+        }
+        cur.execute(
+            "UPDATE project SET metadata_json = %s WHERE id = %s",
+            (Jsonb(metadata), project_id),
+        )
+    conn.commit()
 
 
 def _binding_out(row) -> BindingRuleOut:
@@ -240,12 +265,15 @@ async def render_template_package_bundle_endpoint(
     conn: Connection = Depends(get_db_conn),
 ) -> dict[str, object]:
     try:
-        return render_template_package_bundle(
+        result = render_template_package_bundle(
             conn,
             package_id=package_id,
             include_zip=payload.include_zip,
             project_id=payload.project_id,
         )
+        if payload.project_id is not None:
+            _persist_template_render_status(conn, project_id=payload.project_id, result=result)
+        return result
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

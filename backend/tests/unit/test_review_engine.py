@@ -33,6 +33,52 @@ def test_review_draft_requires_strategy_sections_and_chart_placeholders():
     titles = {issue.title for issue in issues}
     assert "缺少策略必备章节" in titles
     assert "缺少必备图表占位符" in titles
+    assert "缺少标准依据" not in titles
+
+
+def test_review_draft_flags_sgcc_domain_gaps_and_unsupported_claims():
+    issues = review_draft(
+        content="""
+        ## 质量目标响应
+        工程质量合格率100%，采用行业第一的先进做法。
+        ## 质量管理组织
+        建立项目经理牵头的质量组织。
+        ## 过程质量控制措施
+        控制材料和工序。
+        ## 质量检查与闭环改进
+        整改后复核。
+        {{chart:quality_system}}
+        """,
+        chapter_code="10.1",
+        requirements=[],
+        facts={},
+    )
+
+    titles = {issue.title for issue in issues}
+    assert "存在未支撑承诺" in titles
+    assert "质量措施缺少国网质量要求" in titles
+    assert "质量措施缺少检查验收闭环" in titles
+
+
+def test_review_draft_reports_chapter_quality_metrics():
+    content = """
+    ## 质量目标响应
+    我方严格响应招标文件要求。
+    """
+
+    issues = review_draft(
+        content=content,
+        chapter_code="10.1",
+        requirements=[{"id": "r1", "category": "technical", "title": "隐蔽工程三检制", "requirement_text": "隐蔽工程必须执行自检、互检、专检。"}],
+        facts={},
+    )
+
+    metrics_issue = next(issue for issue in issues if issue.title == "章节质量指标不足")
+    metrics = metrics_issue.metadata_json["quality_metrics"]
+    assert metrics["required_section_coverage"] < 1
+    assert metrics["confirmed_constraint_coverage"] == 0
+    assert metrics["generic_phrase_density"] > 0
+    assert metrics["substantive_paragraph_count"] < metrics["minimum_substantive_paragraph_count"]
 
 
 def test_review_draft_accepts_complete_strategy_skeleton():
@@ -78,7 +124,14 @@ class _Cursor:
                 raise AssertionError("raw requirements should not be loaded with confirmed constraint set")
             self.result = []
         elif "FROM chapter_draft" in query:
-            self.result = [{"chapter_code": "10.1", "content_md": "## 质量目标响应\n质量目标\n{{chart:quality_system}}"}]
+            self.result = [
+                {
+                    "chapter_code": "10.1",
+                    "content_md": "## 质量目标响应\n质量目标\n{{chart:quality_system}}",
+                    "is_stale": self.conn.stale_draft,
+                    "stale_reason": "约束已更新",
+                }
+            ]
         elif "FROM bid_chapter_requirement" in query:
             self.result = []
         elif "FROM bid_chapter" in query:
@@ -99,6 +152,7 @@ class _Conn:
     def __init__(self):
         self.queries = []
         self.fail_on_raw_requirements = True
+        self.stale_draft = False
 
     def cursor(self, *args, **kwargs):
         return _Cursor(self)
@@ -133,3 +187,19 @@ def test_build_project_review_prefers_confirmed_constraints_and_flags_unapproved
 
     assert any(issue.title == "引用图表未审批" for issue in issues)
     assert not any(issue.title.startswith("硬约束未映射章节") for issue in issues)
+
+
+def test_build_project_review_flags_stale_draft(monkeypatch):
+    from uuid import uuid4
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"id": uuid4(), "version": 1, "status": "confirmed", "items": []}
+
+    conn = _Conn()
+    conn.stale_draft = True
+    monkeypatch.setattr(review_engine, "TenderConstraintService", _ConstraintService)
+
+    issues = review_engine.build_project_review(conn, project_id=uuid4())
+
+    assert any(issue.title == "章节草稿上下文已过期" for issue in issues)

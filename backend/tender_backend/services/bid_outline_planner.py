@@ -19,21 +19,21 @@ from tender_backend.services.bid_outline_templates import (
 )
 
 
-SUBTYPE_CHAPTER = {
-    "personnel_count": ("technical", "6"),
-    "personnel_certificate": ("technical", "6"),
-    "quality_target": ("technical", "10.1"),
-    "schedule_target": ("technical", "10.3"),
-    "safety_civilized": ("technical", "10.2"),
-    "sgcc_standard_compliance": ("technical", "13"),
-    "construction_method": ("technical", "8.1"),
-    "technical_scoring_response": ("technical", "12"),
-    "submission_format": ("business", "24.6"),
-    "signature_seal": ("business", "24.6"),
-    "veto_rejection": ("technical", "1"),
-    "qualification_certificate": ("qualification", "1.1"),
-    "performance_threshold": ("qualification", "1.2"),
-    "mandatory_attachment": ("business", "24.6"),
+SUBTYPE_CHAPTERS = {
+    "personnel_count": [("technical", "6")],
+    "personnel_certificate": [("technical", "6")],
+    "quality_target": [("technical", "10.1")],
+    "schedule_target": [("technical", "3"), ("technical", "10.3")],
+    "safety_civilized": [("technical", "10.2")],
+    "sgcc_standard_compliance": [("technical", "8.1"), ("technical", "8.2"), ("technical", "13")],
+    "construction_method": [("technical", "8.1"), ("technical", "8.2")],
+    "technical_scoring_response": [("technical", "12")],
+    "submission_format": [("business", "24.6")],
+    "signature_seal": [("business", "24.6")],
+    "veto_rejection": [("business", "1"), ("technical", "1")],
+    "qualification_certificate": [("qualification", "1.1")],
+    "performance_threshold": [("qualification", "1.2")],
+    "mandatory_attachment": [("business", "24.6")],
 }
 
 
@@ -86,9 +86,11 @@ def _chapter_keys_for_requirement(requirement: dict[str, Any]) -> list[tuple[str
     category = requirement.get("category")
     subtype = _constraint_subtype(requirement)
     keys: list[tuple[str, str]] = []
-    subtype_key = SUBTYPE_CHAPTER.get(subtype)
-    if subtype_key:
-        keys.append(subtype_key)
+    subtype_keys = SUBTYPE_CHAPTERS.get(subtype) or []
+    keys.extend(subtype_keys)
+    metadata = requirement.get("source_metadata") or requirement.get("metadata_json") or {}
+    if isinstance(metadata, dict) and metadata.get("chapter_hint"):
+        keys.append(("technical", str(metadata["chapter_hint"])))
     if requirement.get("is_veto") or requirement.get("is_hard_constraint"):
         keys.append(("technical", "1"))
     if category == "scoring":

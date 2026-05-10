@@ -4,12 +4,13 @@ import {
   approveChartAsset,
   assembleBusinessBid,
   confirmBidOutline,
-  createChartAsset,
   fetchBidOutline,
   fetchDrafts,
+  fetchTechnicalChapterContext,
   fetchTechnicalWritingPlan,
   generateBidChapter,
   generateBidOutline,
+  generateChartAsset,
   generateTechnicalChapter,
   listChartAssets,
   previewBidOutlineReconciliation,
@@ -18,11 +19,49 @@ import {
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
 
+const CHART_TYPE_OPTIONS = [
+  { value: "org_chart", label: "项目组织机构图" },
+  { value: "responsibility_matrix", label: "岗位职责矩阵" },
+  { value: "construction_flow", label: "施工流程图" },
+  { value: "quality_system", label: "质量管理体系图" },
+  { value: "safety_system", label: "安全管理体系图" },
+  { value: "risk_matrix", label: "风险分级管控矩阵" },
+  { value: "emergency_org", label: "应急组织图" },
+  { value: "schedule_gantt", label: "施工进度横道图" },
+] as const;
+
+function chartTitle(chartType: string) {
+  return CHART_TYPE_OPTIONS.find((option) => option.value === chartType)?.label ?? "技术图表";
+}
+
+function chartPlaceholder(asset: { placeholder_key?: string | null; chart_type: string }) {
+  return asset.placeholder_key || asset.chart_type;
+}
+
+function appendChartPlaceholder(content: string, key: string) {
+  const placeholder = `{{chart:${key}}}`;
+  if (content.includes(placeholder)) return content;
+  return `${content}${content.trim().length > 0 ? "\n\n" : ""}${placeholder}`;
+}
+
+function contextCount(context: Record<string, unknown> | undefined, key: string) {
+  const value = context?.[key];
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function companyAssetCount(context: Record<string, unknown> | undefined, key: string) {
+  const assets = context?.company_assets;
+  if (!assets || typeof assets !== "object") return 0;
+  const value = (assets as Record<string, unknown>)[key];
+  return Array.isArray(value) ? value.length : 0;
+}
+
 export function EditorContent() {
   const { projectId } = useNavigation();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
+  const [chartType, setChartType] = useState<string>("quality_system");
 
   const { data: drafts = [], isLoading } = useQuery({
     queryKey: ["drafts", projectId],
@@ -70,6 +109,21 @@ export function EditorContent() {
       return listChartAssets(projectId, { signal });
     },
     enabled: !!projectId,
+  });
+
+  const selected = drafts.find((d) => d.id === selectedId);
+  const selectedOutlineChapter = selected
+    ? outline?.chapters.find((chapter) => chapter.chapter_code === selected.chapter_code)
+    : null;
+
+  const { data: chapterContext } = useQuery({
+    queryKey: ["technical-chapter-context", projectId, selectedOutlineChapter?.id],
+    queryFn: ({ signal }) => {
+      if (!projectId || !selectedOutlineChapter?.id) throw new Error("No technical chapter selected");
+      return fetchTechnicalChapterContext(projectId, selectedOutlineChapter.id, { signal });
+    },
+    enabled: !!projectId && !!selectedOutlineChapter?.id && selectedOutlineChapter.volume_type === "technical",
+    retry: false,
   });
 
   const save = useMutation({
@@ -130,20 +184,14 @@ export function EditorContent() {
     },
   });
 
-  const createOrgChart = useMutation({
+  const generateChart = useMutation({
     mutationFn: () => {
       if (!projectId) throw new Error("No project selected");
-      return createChartAsset(projectId, {
-        chart_type: "org_chart",
-        title: "项目组织机构图",
-        spec_json: {
-          nodes: [
-            { label: "项目经理" },
-            { label: "技术负责人" },
-            { label: "安全负责人" },
-            { label: "质量负责人" },
-          ],
-        },
+      return generateChartAsset(projectId, {
+        chart_type: chartType,
+        title: chartTitle(chartType),
+        placeholder_key: chartType,
+        outline_node_id: selectedOutlineChapter?.id ?? null,
       });
     },
     onSuccess: () => {
@@ -167,8 +215,6 @@ export function EditorContent() {
       </div>
     );
   }
-
-  const selected = drafts.find((d) => d.id === selectedId);
 
   const handleSelect = (draft: { id: string; content_md: string }) => {
     setSelectedId(draft.id);
@@ -196,13 +242,6 @@ export function EditorContent() {
         >
           {businessAssembly.isPending ? "装配中..." : "资格商务装配"}
         </ClayButton>
-        <ClayButton
-          variant="secondary"
-          onClick={() => createOrgChart.mutate()}
-          disabled={!projectId || createOrgChart.isPending}
-        >
-          生成组织图草案
-        </ClayButton>
       </div>
 
       {reconciliation && (
@@ -219,6 +258,27 @@ export function EditorContent() {
             <span>目录状态：{outline?.status ?? "未生成"}</span>
             <span>图表：{chartAssets.length} 个</span>
             <span>技术章节：{technicalPlan?.chapter_count ?? 0} 个</span>
+          </div>
+        </section>
+      )}
+
+      {reconciliation?.diffs.some((diff) => diff.operation === "tender_conflict_override") && (
+        <section className="workflow-gate-panel" aria-label="招标冲突确认记录">
+          <div>
+            <strong>招标冲突覆盖</strong>
+            <p>仅已确认且有招标文件依据的目录冲突会覆盖用户目录模板。</p>
+          </div>
+          <div className="template-conflict-list">
+            {reconciliation.diffs
+              .filter((diff) => diff.operation === "tender_conflict_override")
+              .map((diff) => (
+                <article key={`${diff.chapter_id}-${diff.operation}`} className="template-conflict-item">
+                  <strong>{diff.chapter_code} {diff.chapter_title}</strong>
+                  <span>{diff.source_locator || "未记录来源位置"}</span>
+                  <p>{diff.reason}</p>
+                  {diff.proposed_action && <code>{diff.proposed_action}</code>}
+                </article>
+              ))}
           </div>
         </section>
       )}
@@ -273,8 +333,62 @@ export function EditorContent() {
                 >
                   {asset.status === "approved" ? "已审批" : "审批图表"}
                 </ClayButton>
+                <ClayButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEditContent((current) => appendChartPlaceholder(current, chartPlaceholder(asset)))}
+                  disabled={!selected}
+                >
+                  插入 {chartPlaceholder(asset)}
+                </ClayButton>
               </article>
             ))}
+          </div>
+        </section>
+      )}
+
+      <section className="workflow-gate-panel" aria-label="图表生成与插入">
+        <div>
+          <strong>图表生成与插入</strong>
+          <p>按技术章节选择图表类型，生成草案后用占位符插入正文，正式导出前审批引用图表。</p>
+        </div>
+        <div className="chart-control-row">
+          <label>
+            <span>图表类型</span>
+            <select
+              className="clay-input"
+              value={chartType}
+              onChange={(event) => setChartType(event.target.value)}
+              aria-label="图表类型"
+            >
+              {CHART_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <ClayButton onClick={() => generateChart.mutate()} disabled={generateChart.isPending}>
+            {generateChart.isPending ? "生成中..." : "生成图表草案"}
+          </ClayButton>
+        </div>
+      </section>
+
+      {selectedOutlineChapter?.volume_type === "technical" && (
+        <section className="workflow-gate-panel" aria-label="章节生成上下文">
+          <div>
+            <strong>章节生成上下文</strong>
+            <p>生成前核对约束、评分、标准、人员、设备、图表和企业资料输入。</p>
+          </div>
+          <div className="workflow-gate-panel__chips">
+            <span>约束：{contextCount(chapterContext, "constraints")}</span>
+            <span>评分：{contextCount(chapterContext, "scoring_items")}</span>
+            <span>标准：{contextCount(chapterContext, "standard_clauses")}</span>
+            <span>人员：{contextCount(chapterContext, "personnel_selections")}</span>
+            <span>设备：{contextCount(chapterContext, "equipment_selections")}</span>
+            <span>图表：{contextCount(chapterContext, "chart_assets")}</span>
+            <span>业绩：{companyAssetCount(chapterContext, "performances")}</span>
+            <span>证书：{companyAssetCount(chapterContext, "certificates")}</span>
           </div>
         </section>
       )}
@@ -318,6 +432,7 @@ export function EditorContent() {
               <span className="outline-date">
                 {new Date(d.updated_at).toLocaleDateString("zh-CN")}
               </span>
+              {d.is_stale && <span className="status-pill status-pill--needs_review">stale</span>}
             </div>
           ))}
           {!isLoading && drafts.length === 0 && (
@@ -334,6 +449,7 @@ export function EditorContent() {
             <>
               <div className="editor-toolbar">
                 <h2>{selected.chapter_code}</h2>
+                {selected.is_stale && <span className="status-pill status-pill--needs_review">{selected.stale_reason || "内容已过期"}</span>}
                 <ClayButton
                   onClick={() => save.mutate({ id: selected.id, content: editContent })}
                   disabled={save.isPending}

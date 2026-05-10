@@ -193,6 +193,19 @@ async def get_latest_project_constraint_set(
     return _constraint_service.latest(conn, project_id=project_id) or {"project_id": str(project_id), "items": []}
 
 
+@router.post("/projects/{project_id}/constraint-set/confirm")
+async def confirm_project_constraint_set(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    try:
+        return _constraint_service.confirm_latest(conn, project_id=project_id, confirmed_by=user.display_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/projects/{project_id}/clarifications")
 async def create_project_clarification(
     project_id: UUID,

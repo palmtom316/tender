@@ -77,7 +77,8 @@ def test_generate_bid_chapter_draft_excludes_pricing_body() -> None:
 
     assert row["chapter_code"] == "1"
     assert row["volume_type"] == "technical"
-    assert "该项涉及报价信息" in row["content_md"]
+    assert "该项属于非本系统处理范围" in row["content_md"]
+    assert "投标报价不得写入技术文件" not in row["content_md"]
     assert "硬约束处理" in row["content_md"]
 
 

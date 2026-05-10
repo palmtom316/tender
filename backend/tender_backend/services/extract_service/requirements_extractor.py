@@ -259,6 +259,19 @@ def extract_requirements_from_source_chunks(chunks: list[dict[str, Any]]) -> lis
             if not (pricing_hits and category in PRICING_ONLY_CATEGORIES and hits == pricing_hits)
         ]
         matched_categories = _scope_matched_categories(matched_categories, combined)
+        if not matched_categories:
+            ignored_reason = "pricing_only" if pricing_hits else "background_only"
+            metadata = dict(chunk.get("extraction_metadata") or {})
+            metadata.update(
+                {
+                    "ignored_reason": ignored_reason,
+                    "pricing_keywords": pricing_hits,
+                    "scope_policy": SCOPE_POLICY_VERSION,
+                    "extraction_mode_marker": extraction_mode_marker(),
+                }
+            )
+            chunk["extraction_metadata"] = metadata
+            continue
 
         for category, hits in matched_categories:
             source_locator = chunk.get("source_locator")

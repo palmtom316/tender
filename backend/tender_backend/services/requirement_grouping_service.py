@@ -62,6 +62,17 @@ KEY_FIELD_PATTERNS: dict[str, re.Pattern[str]] = {
     "certificate_grade": re.compile(r"(?:一级|二级|三级|四级|五级|甲级|乙级|丙级|[一二三四五]级)"),
     "social_security_months": re.compile(r"\d+\s*个?月"),
     "file_size": re.compile(r"\d+(?:\.\d+)?\s*(?:MB|M|GB|G)"),
+    "duration": re.compile(r"\d+\s*(?:日历天|天|个月|月)"),
+    "performance_count": re.compile(r"\d+\s*项(?=.*(?:业绩|类似工程|合同))|(?:业绩|类似工程|合同).{0,12}\d+\s*项"),
+    "file_count": re.compile(r"(?:正本|副本|电子版|U盘|纸质)\s*\d+\s*份|\d+\s*份"),
+    "quality_target": re.compile(r"(?:合格率\s*\d+(?:\.\d+)?%|优良|合格|创优|达标投产)"),
+}
+
+SIGNATURE_SEAL_MARKERS = {
+    "legal_representative_signature": ("法定代表人签字", "法定代表人签章", "法定代表人签名"),
+    "company_seal": ("加盖公章", "盖公章", "公章"),
+    "electronic_signature": ("电子签章", "电子签名", "CA签章", "CA"),
+    "manual_signature": ("签字", "签名"),
 }
 
 
@@ -102,6 +113,13 @@ def _extract_key_fields(text: str) -> dict[str, list[str]]:
         values = sorted(set(match.group(0).replace(" ", "") for match in pattern.finditer(text)))
         if values:
             fields[name] = values
+    signature_values = [
+        marker
+        for marker, keywords in SIGNATURE_SEAL_MARKERS.items()
+        if any(keyword in text for keyword in keywords)
+    ]
+    if signature_values:
+        fields["signature_seal"] = signature_values
     return fields
 
 

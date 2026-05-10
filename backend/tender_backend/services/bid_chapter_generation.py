@@ -21,7 +21,7 @@ def _text(value: Any) -> str:
 
 def _sanitize_for_body(value: str) -> str:
     if any(term in value for term in PRICING_TERMS):
-        return "（该项涉及报价信息，正文生成时已按规则排除，需在报价文件中另行处理。）"
+        return "（该项属于非本系统处理范围，正文生成时已按规则排除。）"
     return value
 
 

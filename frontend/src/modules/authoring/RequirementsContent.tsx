@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  buildConstraintSet,
   bulkConfirmRequirements,
+  confirmConstraintSet,
   createTenderClarification,
+  fetchConstraintSet,
   fetchRequirementWorkbench,
   fetchTenderSummary,
   listTenderClarifications,
+  mergeRequirements,
+  rejectRequirement,
+  splitRequirementForReview,
   startTenderAiExtractionRun,
   type RequirementPackage,
   type RequirementWorkbenchLane,
   type TenderClarification,
+  updateRequirement,
   uploadTenderClarification,
 } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
@@ -208,6 +215,16 @@ export function RequirementsContent() {
     enabled: !!projectId,
   });
 
+  const { data: constraintSet } = useQuery({
+    queryKey: ["constraint-set", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchConstraintSet(projectId, { signal });
+    },
+    enabled: !!projectId,
+    retry: false,
+  });
+
   const { data: tenderSummary } = useQuery({
     queryKey: ["tender-summary", projectId],
     queryFn: ({ signal }) => {
@@ -234,6 +251,44 @@ export function RequirementsContent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["requirement-workbench", projectId] });
+    },
+  });
+
+  const packageAction = useMutation({
+    mutationFn: async ({ action, pkg }: { action: "reject" | "pricing_ignored" | "promote" | "merge" | "split"; pkg: RequirementPackage }) => {
+      const ids = pkg.requirements;
+      if (ids.length === 0) return null;
+      if (action === "merge") return mergeRequirements(ids[0], ids.slice(1));
+      if (action === "split") return splitRequirementForReview(ids[0]);
+      if (action === "reject") return Promise.all(ids.map((id) => rejectRequirement(id)));
+      if (action === "pricing_ignored") return Promise.all(ids.map((id) => updateRequirement(id, { ignored_for_pricing: true, review_status: "rejected" })));
+      return Promise.all(ids.map((id) => updateRequirement(id, { is_hard_constraint: true, requires_human_confirm: true })));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["requirement-workbench", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["constraint-set", projectId] });
+    },
+  });
+
+  const buildConstraints = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error("No project selected");
+      return buildConstraintSet(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["constraint-set", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["requirement-workbench", projectId] });
+    },
+  });
+
+  const confirmConstraints = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error("No project selected");
+      return confirmConstraintSet(projectId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["constraint-set", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["export-gates", projectId] });
     },
   });
 
@@ -336,6 +391,9 @@ export function RequirementsContent() {
     isSuccess: createClarification.isSuccess,
     isError: createClarification.isError,
   });
+  const constraintSetStatus = String((constraintSet as { status?: string } | undefined)?.status || "not_built");
+  const constraintItemCount = Array.isArray(constraintSet?.items) ? constraintSet.items.length : 0;
+  const canConfirmConstraintSet = Boolean(constraintSet && constraintItemCount > 0 && constraintSetStatus !== "confirmed");
 
   return (
     <div className="requirement-workbench">
@@ -354,6 +412,39 @@ export function RequirementsContent() {
           {startAiExtraction.isPending ? "任务提交中..." : "提交 AI 抽取任务"}
         </ClayButton>
       </div>
+
+      {workbench && (
+        <section className="workflow-gate-panel" aria-label="约束集确认里程碑">
+          <div>
+            <strong>确认约束集</strong>
+            <p>
+              {constraintSetStatus === "confirmed"
+                ? `已确认 ${constraintItemCount} 条约束，后续目录映射、商务装配、技术生成和导出以该版本为准。`
+                : `当前有 ${workbench.stats.package_count} 个条款包，需生成并确认约束集后再进入目录映射。`}
+            </p>
+          </div>
+          <div className="workflow-gate-panel__chips">
+            <span>状态：{constraintSetStatus === "not_built" ? "未生成" : constraintSetStatus}</span>
+            <span>阻断：{workbench.stats.blocking_count}</span>
+            <span>冲突：{workbench.stats.conflict_count}</span>
+          </div>
+          <div className="toolbar-row" style={{ margin: 0 }}>
+            <ClayButton
+              variant="secondary"
+              onClick={() => buildConstraints.mutate()}
+              disabled={buildConstraints.isPending || workbench.stats.package_count === 0}
+            >
+              {buildConstraints.isPending ? "生成中..." : "生成约束集"}
+            </ClayButton>
+            <ClayButton
+              onClick={() => confirmConstraints.mutate()}
+              disabled={!canConfirmConstraintSet || confirmConstraints.isPending}
+            >
+              {constraintSetStatus === "confirmed" ? "约束集已确认" : confirmConstraints.isPending ? "确认中..." : "确认约束集"}
+            </ClayButton>
+          </div>
+        </section>
+      )}
 
       {tenderSummary && (
         <section className="tender-summary-card" aria-label="招标摘要">
@@ -598,6 +689,21 @@ export function RequirementsContent() {
                           </ClayButton>
                         )}
                         {pkg.confirmation_level !== "critical" && <span>默认不阻断，可抽查</span>}
+                        <ClayButton size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); packageAction.mutate({ action: "promote", pkg }); }} disabled={packageAction.isPending}>
+                          提为关键
+                        </ClayButton>
+                        <ClayButton size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); packageAction.mutate({ action: "pricing_ignored", pkg }); }} disabled={packageAction.isPending}>
+                          标记报价忽略
+                        </ClayButton>
+                        <ClayButton size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); packageAction.mutate({ action: "merge", pkg }); }} disabled={packageAction.isPending || pkg.requirements.length < 2}>
+                          合并
+                        </ClayButton>
+                        <ClayButton size="sm" variant="ghost" onClick={(event) => { event.stopPropagation(); packageAction.mutate({ action: "split", pkg }); }} disabled={packageAction.isPending}>
+                          拆分复核
+                        </ClayButton>
+                        <ClayButton size="sm" variant="danger" onClick={(event) => { event.stopPropagation(); packageAction.mutate({ action: "reject", pkg }); }} disabled={packageAction.isPending}>
+                          剔除
+                        </ClayButton>
                       </div>
                     </article>
                   ))}

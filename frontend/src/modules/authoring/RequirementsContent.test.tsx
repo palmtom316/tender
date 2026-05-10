@@ -3,12 +3,15 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { useNavigationMock, fetchWorkbenchMock, fetchTenderSummaryMock, startRunMock, bulkConfirmMock, listTenderClarificationsMock, createTenderClarificationMock, uploadTenderClarificationMock, fetchProjectEquipmentAssetsMock, fetchProjectEquipmentSelectionsMock, confirmProjectEquipmentSelectionsMock, createProjectEquipmentSelectionMock, deleteProjectEquipmentSelectionMock, updateProjectEquipmentSelectionMock, fetchProjectEquipmentPreviewMock } = vi.hoisted(() => ({
+const { useNavigationMock, fetchWorkbenchMock, fetchTenderSummaryMock, startRunMock, bulkConfirmMock, buildConstraintSetMock, fetchConstraintSetMock, confirmConstraintSetMock, listTenderClarificationsMock, createTenderClarificationMock, uploadTenderClarificationMock, fetchProjectEquipmentAssetsMock, fetchProjectEquipmentSelectionsMock, confirmProjectEquipmentSelectionsMock, createProjectEquipmentSelectionMock, deleteProjectEquipmentSelectionMock, updateProjectEquipmentSelectionMock, fetchProjectEquipmentPreviewMock } = vi.hoisted(() => ({
   useNavigationMock: vi.fn(),
   fetchWorkbenchMock: vi.fn(),
   fetchTenderSummaryMock: vi.fn(),
   startRunMock: vi.fn(),
   bulkConfirmMock: vi.fn(),
+  buildConstraintSetMock: vi.fn(),
+  fetchConstraintSetMock: vi.fn(),
+  confirmConstraintSetMock: vi.fn(),
   listTenderClarificationsMock: vi.fn(),
   createTenderClarificationMock: vi.fn(),
   uploadTenderClarificationMock: vi.fn(),
@@ -33,6 +36,9 @@ vi.mock("../../lib/api", async () => {
     fetchTenderSummary: fetchTenderSummaryMock,
     startTenderAiExtractionRun: startRunMock,
     bulkConfirmRequirements: bulkConfirmMock,
+    buildConstraintSet: buildConstraintSetMock,
+    fetchConstraintSet: fetchConstraintSetMock,
+    confirmConstraintSet: confirmConstraintSetMock,
     listTenderClarifications: listTenderClarificationsMock,
     createTenderClarification: createTenderClarificationMock,
     uploadTenderClarification: uploadTenderClarificationMock,
@@ -166,6 +172,9 @@ describe("RequirementsContent workbench", () => {
     useNavigationMock.mockReturnValue({ projectId: "proj-1", documentId: "doc-1" });
     fetchTenderSummaryMock.mockResolvedValue(summary());
     fetchWorkbenchMock.mockResolvedValue(workbench());
+    fetchConstraintSetMock.mockResolvedValue({ project_id: "proj-1", items: [] });
+    buildConstraintSetMock.mockResolvedValue({ id: "set-1", status: "draft", items: [{ id: "item-1" }] });
+    confirmConstraintSetMock.mockResolvedValue({ id: "set-1", status: "confirmed", items: [{ id: "item-1" }] });
     listTenderClarificationsMock.mockResolvedValue([]);
     fetchProjectEquipmentAssetsMock.mockResolvedValue([]);
     fetchProjectEquipmentSelectionsMock.mockResolvedValue([]);
@@ -206,6 +215,17 @@ describe("RequirementsContent workbench", () => {
     button.click();
 
     await waitFor(() => expect(bulkConfirmMock).toHaveBeenCalledWith("proj-1", ["req-1", "req-2"]));
+  });
+
+  it("shows constraint-set milestone and confirms the set", async () => {
+    fetchConstraintSetMock.mockResolvedValueOnce({ id: "set-1", status: "draft", items: [{ id: "item-1" }] });
+    render(withClient(<RequirementsContent />));
+
+    expect(await screen.findByLabelText("约束集确认里程碑")).toBeInTheDocument();
+    const button = await screen.findByRole("button", { name: "确认约束集" });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(confirmConstraintSetMock).toHaveBeenCalledWith("proj-1"));
   });
 
   it("uploads clarification file for analysis", async () => {

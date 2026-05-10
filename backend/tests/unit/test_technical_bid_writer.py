@@ -107,4 +107,7 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
     assert "{{chart:quality_system}}" in result["draft"]["content_md"]
     assert captured["prompt_inputs"]["strategy"]["key"] == "quality_assurance"
     assert captured["metadata"]["context_hash"]
+    assert captured["metadata"]["prompt_contract"]["input_policy"] == "normalized_context_and_strategy_only"
+    assert "constraint_ids" in captured["metadata"]["prompt_contract"]["required_output"]["trace_metadata"]
+    assert captured["metadata"]["source_trace"]["chart_placeholder_keys"] == ["quality_system"]
     assert captured["metadata"]["self_check"]["chart_placeholder_count"] == 1
