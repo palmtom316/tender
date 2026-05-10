@@ -180,14 +180,14 @@ export function EditorContent() {
       <h1 className="section-heading">章节编辑</h1>
       <div className="toolbar-row">
         <ClayButton onClick={() => createOutline.mutate()} disabled={createOutline.isPending}>
-          {outline ? "重新规划目录" : "生成投标目录"}
+          {outline ? "检查模板冲突" : "按模板生成目录映射"}
         </ClayButton>
         <ClayButton
           variant="secondary"
           onClick={() => confirmOutline.mutate()}
           disabled={!outline || outline.status === "confirmed" || !reconciliation?.can_confirm || confirmOutline.isPending}
         >
-          {outline?.status === "confirmed" ? "大纲已确认" : "确认大纲"}
+          {outline?.status === "confirmed" ? "目录映射已确认" : "确认目录映射"}
         </ClayButton>
         <ClayButton
           variant="secondary"
@@ -208,10 +208,10 @@ export function EditorContent() {
       {reconciliation && (
         <section className="workflow-gate-panel">
           <div>
-            <strong>大纲确认闸门</strong>
+            <strong>目录模板映射确认</strong>
             <p>
               {reconciliation.can_confirm
-                ? `可确认，${reconciliation.diffs.length} 项章节差异已汇总。`
+                ? `可确认，${reconciliation.diffs.length} 项模板映射/冲突检查结果已汇总。`
                 : `${reconciliation.unresolved_critical_count} 项关键条款未确认，暂不能进入商务/技术生成。`}
             </p>
           </div>
