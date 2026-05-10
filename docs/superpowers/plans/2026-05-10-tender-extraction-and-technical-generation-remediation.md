@@ -61,13 +61,13 @@ Current behavior is structurally biased toward noisy extraction and thin generat
 
 Additional issues found during implementation-prep review:
 
-- [ ] `backend/tender_backend/api/tender_documents.py` still has a synchronous compatibility requirement extraction path that calls rule-based `extract_requirements_from_source_chunks`; it must be aligned with the new scoped extraction policy or deprecated behind a compatibility flag.
+- [x] `backend/tender_backend/api/tender_documents.py` still has a synchronous compatibility requirement extraction path that calls rule-based `extract_requirements_from_source_chunks`; it must be aligned with the new scoped extraction policy or deprecated behind a compatibility flag.
 - [ ] `backend/tender_backend/workflows/generate_section.py` still contains placeholder outline/content generation and writes `uuid4().hex`; it must not be used as a production generation path until replaced or disabled.
-- [ ] `backend/tender_backend/services/business_bid_assembler.py` builds missing materials and response matrix from raw requirements; it must consume confirmed constraints.
+- [~] `backend/tender_backend/services/business_bid_assembler.py` builds missing materials and response matrix from raw requirements; it must consume confirmed constraints.
 - [ ] `backend/tender_backend/services/compliance_check_service.py`, `submission_checklist_service.py`, `delivery_package.py`, and `review_service/compliance_matrix.py` still evaluate raw requirements; they must consume confirmed constraints and conflict decisions.
-- [ ] `backend/tender_backend/api/exports.py` blocks on every unapproved chart asset, not only referenced chart placeholders; it also returns `format_passed=true` without running a real format check.
-- [ ] `frontend/src/lib/api.ts` omits `charts_approved` and `unapproved_chart_count` from `ExportGates`, so `ExportGateContent` cannot show the chart gate.
-- [ ] `frontend/src/modules/authoring/EditorContent.tsx` exposes "重新规划目录", which conflicts with the template-first rule unless renamed and guarded as conflict-aware remapping.
+- [~] `backend/tender_backend/api/exports.py` blocks on every unapproved chart asset, not only referenced chart placeholders; it also returns `format_passed=true` without running a real format check.
+- [x] `frontend/src/lib/api.ts` omits `charts_approved` and `unapproved_chart_count` from `ExportGates`, so `ExportGateContent` cannot show the chart gate.
+- [x] `frontend/src/modules/authoring/EditorContent.tsx` exposes "重新规划目录", which conflicts with the template-first rule unless renamed and guarded as conflict-aware remapping.
 - [ ] `frontend/src/modules/authoring/EditorContent.tsx` only creates a hard-coded organization chart and does not expose `generateChartAsset()` or chart types needed by quality, safety, schedule, risk, and responsibility chapters.
 - [ ] `frontend/src/modules/authoring/RequirementsContent.tsx` can bulk-confirm requirement packages, but it does not make a confirmed constraint set the visible and required next-step artifact before outline/generation.
 - [ ] Template package rendering returns partial success with failed items; required template item failures must be visible and block final export/delivery.
@@ -105,19 +105,19 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Stop noisy extraction at the source and align extracted output with actual bid-writing needs.
 
-- [ ] Replace broad extraction rules with a first-stage scope policy:
+- [x] Replace broad extraction rules with a first-stage scope policy:
   - business: qualification, performance, company certificates, legal validity, evidence, submission/signature/seal/format.
   - technical: personnel quantity and qualifications, project team roles, quality target, progress target, safety/civilized construction, SGCC technical requirements, scoring criteria, mandatory technical documents.
   - universal: veto/rejection clauses and file format requirements.
   - ignored: pricing, quotation, bill of quantities, control price, unit price, total price, bid bond amount except submission-readiness metadata.
-- [ ] Update `ai_requirements_extractor.py` prompt rules so pricing-only content is not output unless it contains a non-pricing hard constraint.
-- [ ] Remove `pricing_reference` and `报价` as positive extraction signals for writing constraints; keep them only in tender summary or external-attachment metadata.
-- [ ] Update `requirements_extractor.py` keyword fallback to use the same scope policy.
-- [ ] Align or deprecate the compatibility extraction endpoint that calls `extract_requirements_from_source_chunks` directly; it must not create a broader active requirement set than the async AI extraction workflow.
-- [ ] Add an extraction-mode marker to persisted requirements and constraint sets, so downstream services can reject stale legacy extraction output if it predates the new scope policy.
+- [x] Update `ai_requirements_extractor.py` prompt rules so pricing-only content is not output unless it contains a non-pricing hard constraint.
+- [x] Remove `pricing_reference` and `报价` as positive extraction signals for writing constraints; keep them only in tender summary or external-attachment metadata.
+- [x] Update `requirements_extractor.py` keyword fallback to use the same scope policy.
+- [x] Align or deprecate the compatibility extraction endpoint that calls `extract_requirements_from_source_chunks` directly; it must not create a broader active requirement set than the async AI extraction workflow.
+- [x] Add an extraction-mode marker to persisted requirements and constraint sets, so downstream services can reject stale legacy extraction output if it predates the new scope policy.
 - [ ] Add `ignored_reason` or metadata equivalent for pricing-only and background-only dropped content so omissions remain auditable.
-- [ ] Add tests proving pricing-only chunks produce no active requirement, while mixed chunks preserve non-pricing qualification/personnel/format obligations.
-- [ ] Add tests proving sync compatibility extraction and async AI extraction agree on active-vs-ignored decisions for pricing, qualification, personnel, safety, quality, progress, format, and veto samples.
+- [x] Add tests proving pricing-only chunks produce no active requirement, while mixed chunks preserve non-pricing qualification/personnel/format obligations.
+- [x] Add tests proving sync compatibility extraction and async AI extraction agree on active-vs-ignored decisions for pricing, qualification, personnel, safety, quality, progress, format, and veto samples.
 - [ ] Acceptance: AI and rule fallback produce the same active/ignored decision for representative pricing, qualification, personnel, quality, progress, safety, format, and veto examples.
 
 ---
@@ -142,10 +142,10 @@ Additional issues found during implementation-prep review:
   - `veto_rejection`
   - `mandatory_attachment`
   - `pricing_ignored`
-- [ ] Extend extraction schema metadata with `constraint_subtype`, `target_value`, `evidence_need`, `chapter_hint`, `severity`, and `source_confidence_reason`.
-- [ ] Update `requirement_grouping_service.py` so quality, schedule, safety, personnel, construction method, and SGCC standards do not collapse into one `technical` package.
+- [~] Extend extraction schema metadata with `constraint_subtype`, `target_value`, `evidence_need`, `chapter_hint`, `severity`, and `source_confidence_reason`.
+- [x] Update `requirement_grouping_service.py` so quality, schedule, safety, personnel, construction method, and SGCC standards do not collapse into one `technical` package.
 - [ ] Add key-field conflict detection for personnel count, certificate grade, performance count, quality target, schedule duration, file count, file size, deadline, and signature/seal requirement.
-- [ ] Add tests for grouping separate quality/schedule/safety/personnel packages even when all contain generic technical words.
+- [x] Add tests for grouping separate quality/schedule/safety/personnel packages even when all contain generic technical words.
 - [ ] Acceptance: the workbench shows short prioritized packages by engineering topic, not a flat or over-merged requirement list.
 
 ---
@@ -154,16 +154,16 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Make user-confirmed constraints govern generation, review, and export while preserving the user-provided directory templates unless tender-document conflicts require changes.
 
-- [ ] Add repository/service methods to fetch the latest confirmed or accepted `tender_constraint_item` rows.
+- [x] Add repository/service methods to fetch the latest confirmed or accepted `tender_constraint_item` rows.
 - [ ] Add lifecycle statuses for constraint sets: `draft`, `reviewing`, `confirmed`, `superseded`.
 - [ ] Update `TenderConstraintService` to persist grouped package metadata, confirmation decisions, ignored reasons, conflict fields, and representative conclusion text.
 - [ ] Add a template conflict policy: `template_default`, `tender_conflict_override`, `manual_override`.
 - [ ] Detect explicit conflicts between confirmed tender constraints and the business/technical directory templates, including missing mandatory documents, required chapter names, forbidden chapter content, required separate files, and required submission order.
 - [ ] For each conflict, persist source evidence, affected template chapter, proposed action, reason, and confirmation status.
-- [ ] Update outline planning to consume confirmed constraint items and conflict decisions instead of raw `project_requirement` rows.
+- [~] Update outline planning to consume confirmed constraint items and conflict decisions instead of raw `project_requirement` rows.
 - [ ] Update technical chapter generation to consume confirmed constraint items and retain links back to source requirements.
-- [ ] Update `BusinessBidAssembler` to consume confirmed qualification/business constraints and evidence needs, not raw `project_requirement` rows.
-- [ ] Update `ComplianceCheckService`, `SubmissionChecklistService`, `DeliveryPackage`, and `ComplianceMatrix` to consume confirmed constraints and conflict decisions.
+- [~] Update `BusinessBidAssembler` to consume confirmed qualification/business constraints and evidence needs, not raw `project_requirement` rows.
+- [~] Update `ComplianceCheckService`, `SubmissionChecklistService`, `DeliveryPackage`, and `ComplianceMatrix` to consume confirmed constraints and conflict decisions.
 - [ ] Add a compatibility guard that blocks generation/export when no current confirmed constraint set exists, except for explicitly marked legacy projects.
 - [ ] Update review engine to check confirmed constraints first and raw requirements only as diagnostic fallback.
 - [ ] Update export gates so unresolved critical constraint packages block export, while ignored pricing packages do not.
@@ -179,20 +179,20 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Map bid-writing topics into the existing business/technical directory templates accurately, with tender-document conflicts handled as explicit overrides.
 
-- [ ] Replace category-only `CATEGORY_CHAPTER` mapping with subtype and keyword-aware mapping that targets existing template chapters first.
-- [ ] Add a hard rule: do not add, delete, rename, or reorder template chapters unless a confirmed `tender_conflict_override` requires it.
-- [ ] Rename user-facing "生成/重新规划目录" actions to template-first language such as "按模板生成目录映射" or "检查模板冲突", so users do not think the system is free-form rewriting the directory.
+- [~] Replace category-only `CATEGORY_CHAPTER` mapping with subtype and keyword-aware mapping that targets existing template chapters first.
+- [x] Add a hard rule: do not add, delete, rename, or reorder template chapters unless a confirmed `tender_conflict_override` requires it.
+- [x] Rename user-facing "生成/重新规划目录" actions to template-first language such as "按模板生成目录映射" or "检查模板冲突", so users do not think the system is free-form rewriting the directory.
 - [ ] Add conflict-resolution records for any proposed chapter change, including original template node, tender source locator, proposed operation, and confirmation actor.
-- [ ] Map `schedule_target` to `3 工期响应` and `10.3 工程进度计划及保证措施`.
-- [ ] Map `personnel_count` and `personnel_certificate` to `6 项目团队情况`.
-- [ ] Map `quality_target` and quality-control requirements to `10.1 质量保证措施`.
-- [ ] Map `safety_civilized` to `10.2 安全和绿色施工保障措施`.
+- [~] Map `schedule_target` to `3 工期响应` and `10.3 工程进度计划及保证措施`.
+- [x] Map `personnel_count` and `personnel_certificate` to `6 项目团队情况`.
+- [x] Map `quality_target` and quality-control requirements to `10.1 质量保证措施`.
+- [x] Map `safety_civilized` to `10.2 安全和绿色施工保障措施`.
 - [ ] Map `construction_method` and SGCC technical requirements to `8.1 施工组织设计`, `8.2 施工技术措施`, and `13 技术规范书规定的其他应提交的文件`.
 - [ ] Map `technical_scoring_response` to `12 技术评分标准涉及的支撑材料` and the relevant content chapter.
 - [ ] Keep veto/rejection clauses in the template's existing deviation/response/check chapters and also link them to affected chapters; create new chapters only when tender documents explicitly require a separate section/file.
 - [ ] Add mapping reason strings that explain why each constraint goes to each chapter.
-- [ ] Add tests for quality, schedule, safety, personnel, construction method, SGCC standard, and scoring mappings inside the fixed template.
-- [ ] Add tests for tender-conflict override behavior when the tender requires a missing mandatory chapter or different separate file.
+- [~] Add tests for quality, schedule, safety, personnel, construction method, SGCC standard, and scoring mappings inside the fixed template.
+- [x] Add tests for tender-conflict override behavior when the tender requires a missing mandatory chapter or different separate file.
 - [ ] Acceptance: the confirmed outline preserves the business/technical template directory by default and shows topic-specific requirement counts in the correct existing chapters; any template change has tender evidence and confirmation history.
 
 ---
@@ -220,7 +220,7 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Replace generic requirement echoing with chapter-specific technical writing structures.
 
-- [ ] Add strategy templates for:
+- [~] Add strategy templates for:
   - `construction_organization_design`
   - `construction_technical_measures`
   - `quality_assurance`
@@ -229,7 +229,7 @@ Additional issues found during implementation-prep review:
   - `project_team`
   - `technical_scoring_materials`
   - `sgcc_technical_spec_response`
-- [ ] Each strategy must define:
+- [~] Each strategy must define:
   - chapter purpose
   - required sections
   - required facts
@@ -238,11 +238,11 @@ Additional issues found during implementation-prep review:
   - innovation slots
   - self-check rules
   - forbidden content such as pricing
-- [ ] Quality chapter must include quality target response, organization, inspection system, control points, material/equipment quality control, process acceptance, issue closure, and SGCC standard compliance.
-- [ ] Schedule chapter must include milestone decomposition, critical path, resource guarantee, coordination mechanism, delay warning, corrective measures, and schedule chart placeholder.
-- [ ] Safety chapter must include safety organization, risk identification, civilized construction, temporary power/fire/work-at-height controls where relevant, emergency response, and safety chart placeholder.
-- [ ] Construction method chapters must include workflow, key process controls, equipment/tools, personnel allocation, acceptance criteria, risk controls, and SGCC-specific measures.
-- [ ] Add tests that generated markdown contains required section skeletons and excludes pricing terms.
+- [~] Quality chapter must include quality target response, organization, inspection system, control points, material/equipment quality control, process acceptance, issue closure, and SGCC standard compliance.
+- [x] Schedule chapter must include milestone decomposition, critical path, resource guarantee, coordination mechanism, delay warning, corrective measures, and schedule chart placeholder.
+- [~] Safety chapter must include safety organization, risk identification, civilized construction, temporary power/fire/work-at-height controls where relevant, emergency response, and safety chart placeholder.
+- [~] Construction method chapters must include workflow, key process controls, equipment/tools, personnel allocation, acceptance criteria, risk controls, and SGCC-specific measures.
+- [x] Add tests that generated markdown contains required section skeletons and excludes pricing terms.
 - [ ] Acceptance: generated chapters are structurally complete even before AI prose expansion.
 
 ---
@@ -277,13 +277,13 @@ Additional issues found during implementation-prep review:
   - `10.3 工程进度计划及保证措施`: `schedule_gantt`
 - [ ] Extend `TechnicalBidWriter` to request chart specs for chart-worthy chapters through `ChartGenerationService`.
 - [ ] Build chart context from confirmed constraints, tender facts, personnel/equipment selections, and chapter strategy.
-- [ ] Insert `{{chart:<placeholder_key>}}` into generated chapter drafts only when a chart asset exists or is created.
+- [~] Insert `{{chart:<placeholder_key>}}` into generated chapter drafts only when a chart asset exists or is created.
 - [ ] Mark generated chart assets as `draft` and require approval before formal export.
-- [ ] Update export gate to block only unapproved chart assets referenced by current drafts/templates, not every unapproved chart in the project.
-- [ ] Add backend helper to scan current drafts and templates for `{{chart:*}}` placeholders and return referenced placeholder keys.
+- [x] Update export gate to block only unapproved chart assets referenced by current drafts/templates, not every unapproved chart in the project.
+- [x] Add backend helper to scan current drafts and templates for `{{chart:*}}` placeholders and return referenced placeholder keys.
 - [ ] Add frontend controls for chart type selection, `generateChartAsset()`-backed generation, regenerate, preview, approve, and insert placeholder into current draft.
-- [ ] Update `frontend/src/lib/api.ts` and export gate UI to include and display chart gate fields: `charts_approved` and `unapproved_chart_count`.
-- [ ] Add tests for automatic placeholder insertion, approval gate by referenced placeholders, and DOCX injection.
+- [x] Update `frontend/src/lib/api.ts` and export gate UI to include and display chart gate fields: `charts_approved` and `unapproved_chart_count`.
+- [~] Add tests for automatic placeholder insertion, approval gate by referenced placeholders, and DOCX injection.
 - [ ] Acceptance: chart-worthy technical chapters include usable chart placeholders and formal export injects approved chart images with captions.
 
 ---
@@ -308,7 +308,7 @@ Additional issues found during implementation-prep review:
 - [ ] Add export/delivery blocking rules for failed required template item rendering, unresolved P0/P1 review issues, stale confirmed constraint sets, stale outlines, stale chapters, and unapproved referenced charts.
 - [ ] Ensure delivery package creation uses the same gate logic as export creation; it must not rely only on existing P0 compliance findings.
 - [ ] Update frontend review dashboard to show topic-level quality issues instead of only raw requirement coverage.
-- [ ] Update frontend export gate dashboard to show veto, review, format, referenced chart approval, template-render health, stale artifact status, and final delivery readiness.
+- [~] Update frontend export gate dashboard to show veto, review, format, referenced chart approval, template-render health, stale artifact status, and final delivery readiness.
 - [ ] Add tests for thin chapter detection and standards/chart/scoring coverage gates.
 - [ ] Add tests proving failed required template items and unresolved P1 blocking issues prevent final export/delivery.
 - [ ] Acceptance: a chapter that only says "我方将严格响应" fails review.
@@ -336,7 +336,7 @@ Additional issues found during implementation-prep review:
 - [ ] Add chart management panel with supported chart types, generated specs, rendered previews, approval, regenerate, and insert-placeholder actions.
 - [ ] Add technical writing quality panel showing review metrics and blocking issues.
 - [ ] Add clear states for stale chapter, stale chart, stale constraint set, and stale outline.
-- [ ] Rename "提纲/大纲" screens to emphasize "目录模板映射" and "招标冲突确认" where appropriate.
+- [~] Rename "提纲/大纲" screens to emphasize "目录模板映射" and "招标冲突确认" where appropriate.
 - [ ] Add UI for template conflict records: original template chapter, tender source evidence, proposed action, accept/reject decision, and audit trail.
 - [ ] Add frontend tests for grouped workbench, chart workflow, and generation gating.
 - [ ] Acceptance: a user can move from extraction to confirmed constraints to technical chapter generation without editing raw noisy requirement rows.
@@ -365,17 +365,17 @@ Additional issues found during implementation-prep review:
 
 **Objective:** Prove the full remediation works end to end.
 
-- [ ] Add unit tests for extraction scope decisions.
-- [ ] Add unit tests for constraint subtype classification and grouping.
-- [ ] Add unit tests for confirmed constraint set source-of-truth behavior.
-- [ ] Add unit tests for outline mapping by subtype.
+- [x] Add unit tests for extraction scope decisions.
+- [x] Add unit tests for constraint subtype classification and grouping.
+- [x] Add unit tests for confirmed constraint set source-of-truth behavior.
+- [x] Add unit tests for outline mapping by subtype.
 - [ ] Add unit tests for technical context builder.
-- [ ] Add unit tests for chapter strategy skeletons.
-- [ ] Add unit tests for chart recommendation and placeholder insertion.
-- [ ] Add unit tests for export gate checking only referenced chart assets.
-- [ ] Add unit tests for sync compatibility extraction matching the new extraction scope.
-- [ ] Add unit tests for template conflict records and no-conflict template preservation.
-- [ ] Add unit tests for business assembly, compliance matrix, submission checklist, delivery package, and export gates reading confirmed constraints.
+- [x] Add unit tests for chapter strategy skeletons.
+- [~] Add unit tests for chart recommendation and placeholder insertion.
+- [x] Add unit tests for export gate checking only referenced chart assets.
+- [x] Add unit tests for sync compatibility extraction matching the new extraction scope.
+- [x] Add unit tests for template conflict records and no-conflict template preservation.
+- [~] Add unit tests for business assembly, compliance matrix, submission checklist, delivery package, and export gates reading confirmed constraints.
 - [ ] Add unit tests for real format-gate states and failed required template item blocking.
 - [ ] Add frontend tests for export gate chart fields, format state, template conflict UI, and confirmed-constraint milestone.
 - [ ] Add integration test from source chunks to confirmed constraints to outline to generated technical chapter.
