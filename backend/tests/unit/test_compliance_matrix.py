@@ -16,7 +16,9 @@ class _Cursor:
         return False
 
     def execute(self, query, params=None):
-        if "FROM project_requirement" in query:
+        if "FROM tender_constraint_set" in query:
+            self.result = []
+        elif "FROM project_requirement" in query:
             self.result = [
                 {"id": uuid4(), "title": "营业执照", "category": "qualification", "source_text": ""},
                 {"id": uuid4(), "title": "项目经理 证书", "category": "project_team", "source_text": ""},
@@ -34,6 +36,9 @@ class _Cursor:
     def fetchall(self):
         return self.result
 
+    def fetchone(self):
+        return self.result[0] if self.result else None
+
 
 class _Conn:
     def cursor(self, *args, **kwargs):
@@ -47,3 +52,32 @@ def test_build_compliance_matrix_marks_covered_partial_and_uncovered() -> None:
     assert coverage_by_title["营业执照"] == "covered"
     assert coverage_by_title["项目经理 证书"] == "partial"
     assert coverage_by_title["安全生产许可证"] == "uncovered"
+
+
+def test_build_compliance_matrix_prefers_confirmed_constraints(monkeypatch) -> None:
+    project_id = uuid4()
+    constraint_id = uuid4()
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {
+                "id": uuid4(),
+                "version": 1,
+                "status": "confirmed",
+                "items": [
+                    {
+                        "id": constraint_id,
+                        "category": "technical",
+                        "title": "质量目标",
+                        "constraint_text": "质量目标合格率100%。",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("tender_backend.services.review_service.compliance_matrix.TenderConstraintService", _ConstraintService)
+
+    entries = build_compliance_matrix(_Conn(), project_id=project_id)
+
+    assert len(entries) == 1
+    assert entries[0].requirement_id == str(constraint_id)
+    assert entries[0].requirement_title == "质量目标"

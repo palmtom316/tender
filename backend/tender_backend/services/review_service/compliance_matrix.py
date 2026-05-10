@@ -10,6 +10,8 @@ from psycopg.rows import dict_row
 
 import structlog
 
+from tender_backend.services.tender_constraint_service import TenderConstraintService
+
 logger = structlog.stdlib.get_logger(__name__)
 
 
@@ -28,17 +30,29 @@ def build_compliance_matrix(
     project_id: UUID,
 ) -> list[ComplianceEntry]:
     """Build the compliance matrix by matching requirements to chapter drafts."""
+    constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
     with conn.cursor(row_factory=dict_row) as cur:
-        requirements = cur.execute(
-            """
-            SELECT id, title, category, source_text
-            FROM project_requirement
-            WHERE project_id = %s
-              AND COALESCE(is_stale, false) = false
-            ORDER BY category, created_at
-            """,
-            (project_id,),
-        ).fetchall()
+        if constraint_set:
+            requirements = [
+                {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "category": item.get("category"),
+                    "source_text": item.get("constraint_text") or "",
+                }
+                for item in constraint_set.get("items") or []
+            ]
+        else:
+            requirements = cur.execute(
+                """
+                SELECT id, title, category, source_text
+                FROM project_requirement
+                WHERE project_id = %s
+                  AND COALESCE(is_stale, false) = false
+                ORDER BY category, created_at
+                """,
+                (project_id,),
+            ).fetchall()
 
         drafts = cur.execute(
             "SELECT chapter_code, content_md FROM chapter_draft WHERE project_id = %s",

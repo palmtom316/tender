@@ -9,8 +9,10 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from tender_backend.services.tender_constraint_service import TenderConstraintService
 
 BUSINESS_VOLUMES = {"qualification", "business"}
+BUSINESS_CONSTRAINT_CATEGORIES = {"qualification", "performance", "project_team", "personnel", "business"}
 
 
 class BusinessBidAssembler:
@@ -19,7 +21,21 @@ class BusinessBidAssembler:
         if outline is None:
             raise ValueError("confirmed outline is required before qualification-business assembly")
         chapters = [row for row in self._outline_chapters(conn, outline_id=outline["id"]) if row["volume_type"] in BUSINESS_VOLUMES]
+        constraint_set = TenderConstraintService().latest_confirmed(conn, project_id=project_id)
         missing = self._missing_business_materials(conn, project_id=project_id)
+        response_matrix = (
+            self._response_matrix_from_constraints(constraint_set)
+            if constraint_set
+            else self._response_matrix(conn, project_id=project_id, volume_types=BUSINESS_VOLUMES)
+        )
+        metadata = {
+            "chapter_count": len(chapters),
+            "missing_material_count": len(missing),
+            "constraint_source_of_truth": "confirmed_constraint_set" if constraint_set else "legacy_project_requirement",
+        }
+        if constraint_set:
+            metadata["constraint_set_id"] = str(constraint_set.get("id"))
+            metadata["constraint_set_version"] = constraint_set.get("version")
         run = self._create_run(
             conn,
             project_id=project_id,
@@ -28,13 +44,13 @@ class BusinessBidAssembler:
             strategy="data_insert",
             status="needs_review" if missing else "completed",
             created_by=created_by,
-            metadata={"chapter_count": len(chapters), "missing_material_count": len(missing)},
+            metadata=metadata,
         )
         return {
             "project_id": str(project_id),
             "run": run,
             "chapters": chapters,
-            "response_matrix": self._response_matrix(conn, project_id=project_id, volume_types=BUSINESS_VOLUMES),
+            "response_matrix": response_matrix,
             "missing_materials": missing,
             "boundary": "报价内容不由本服务生成；报价分册仅支持外部附件挂载。",
         }
@@ -97,6 +113,27 @@ class BusinessBidAssembler:
                 (project_id, list(volume_types)),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def _response_matrix_from_constraints(self, constraint_set: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in constraint_set.get("items") or []:
+            if item.get("category") not in BUSINESS_CONSTRAINT_CATEGORIES:
+                continue
+            metadata = item.get("metadata_json") or {}
+            rows.append(
+                {
+                    "source_constraint_id": str(item.get("id")),
+                    "requirement_id": str(item.get("requirement_id")) if item.get("requirement_id") else None,
+                    "category": item.get("category"),
+                    "requirement_title": item.get("title"),
+                    "constraint_text": item.get("constraint_text"),
+                    "source_file": item.get("source_file"),
+                    "source_locator": item.get("source_locator"),
+                    "constraint_subtype": metadata.get("constraint_subtype") if isinstance(metadata, dict) else None,
+                    "priority_level": item.get("confirmation_level") or "normal",
+                }
+            )
+        return rows
 
     def _create_run(
         self,
