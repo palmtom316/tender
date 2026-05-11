@@ -90,7 +90,7 @@ def review_draft(
         ))
 
     if strategy is not None:
-        missing_sections = [heading for heading, _body in strategy.sections if f"## {heading}" not in content]
+        missing_sections = [heading for heading, _body in strategy.sections if not _has_heading(content, heading)]
         if missing_sections:
             issues.append(ReviewIssue(
                 severity="P1",
@@ -149,7 +149,7 @@ def _chapter_quality_metrics(
     generic_phrases: tuple[str, ...],
 ) -> dict[str, Any]:
     section_total = len(strategy.sections) if strategy is not None else 0
-    section_hit = sum(1 for heading, _body in (strategy.sections if strategy is not None else []) if f"## {heading}" in content)
+    section_hit = sum(1 for heading, _body in (strategy.sections if strategy is not None else []) if _has_heading(content, heading))
     covered_requirements = sum(1 for requirement in requirements if _contains_requirement(content, requirement))
     substantive_paragraphs = [
         paragraph.strip()
@@ -182,6 +182,10 @@ def _quality_metrics_block(metrics: dict[str, Any]) -> bool:
         or metrics["substantive_paragraph_count"] < metrics["minimum_substantive_paragraph_count"]
         or not metrics["pricing_term_absent"]
     )
+
+
+def _has_heading(content: str, heading: str) -> bool:
+    return re.search(rf"^\s*#{{2,6}}\s+{re.escape(heading)}(?:\s*$|\s)", content, re.MULTILINE) is not None
 
 
 def persist_review_issues(

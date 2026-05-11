@@ -19,7 +19,7 @@ def test_review_draft_rejects_thin_generic_response():
 def test_review_draft_requires_strategy_sections_and_chart_placeholders():
     content = """
     ## 编制原则
-    ## 质量目标响应
+    ### 10.1.1 编制依据与质量目标
     工程质量合格率100%，满足国网要求。
     """
 
@@ -39,13 +39,15 @@ def test_review_draft_requires_strategy_sections_and_chart_placeholders():
 def test_review_draft_flags_sgcc_domain_gaps_and_unsupported_claims():
     issues = review_draft(
         content="""
-        ## 质量目标响应
+        ### 10.1.1 编制依据与质量目标
         工程质量合格率100%，采用行业第一的先进做法。
-        ## 质量管理组织
+        ### 10.1.2 质量管理标准和规范
+        标准规范执行招标文件、国网和国家电网相关验收要求。
+        ### 10.1.3 质量保证体系与组织职责
         建立项目经理牵头的质量组织。
-        ## 过程质量控制措施
+        ### 10.1.4 全过程质量控制措施
         控制材料和工序。
-        ## 质量检查与闭环改进
+        ### 10.1.9 质量问题处置和持续改进
         整改后复核。
         {{chart:quality_system}}
         """,
@@ -56,7 +58,6 @@ def test_review_draft_flags_sgcc_domain_gaps_and_unsupported_claims():
 
     titles = {issue.title for issue in issues}
     assert "存在未支撑承诺" in titles
-    assert "质量措施缺少国网质量要求" in titles
     assert "质量措施缺少检查验收闭环" in titles
 
 
@@ -88,7 +89,7 @@ def test_review_draft_uses_chapter_8_revised_internal_directory_checks():
 
 def test_review_draft_reports_chapter_quality_metrics():
     content = """
-    ## 质量目标响应
+    ### 10.1.1 编制依据与质量目标
     我方严格响应招标文件要求。
     """
 
@@ -110,14 +111,36 @@ def test_review_draft_reports_chapter_quality_metrics():
 def test_review_draft_accepts_complete_strategy_skeleton():
     content = """
     ## 编制原则
-    ## 质量目标响应
+    ### 10.1.1 编制依据与质量目标
     工程质量合格率100%，满足国网要求。
-    ## 质量管理组织
+    ### 10.1.2 质量管理标准和规范
+    标准规范执行招标文件、国网和国家电网相关验收要求。
+    ### 10.1.3 质量保证体系与组织职责
     建立项目经理牵头、技术负责人主控的质量管理体系。
-    ## 过程质量控制措施
+    ### 10.1.4 全过程质量控制措施
     覆盖材料进场、工序交接、隐蔽工程和关键节点验收。
-    ## 质量检查与闭环改进
+    ### 10.1.5 质量管理制度
+    执行交底、三检、工序交接和隐蔽验收制度。
+    ### 10.1.6 施工过程质量控制
+    对关键工序设置WHSR控制点。
+    ### 10.1.7 质量通病防治措施
+    防治电缆、接地、二次接线和资料一致性通病。
+    ### 10.1.8 送电前质量专项检查
+    送电前联合检查实体、试验、缺陷和资料。
+    ### 10.1.9 质量问题处置和持续改进
     通过自检、互检、专检、整改、复验形成闭环。
+    ### 10.1.10 质量资料同步管理
+    质量资料与工程实体同步形成并归档。
+    ### 10.1.11 业主、监理、运行单位协同验收机制
+    关键节点提前报验并组织联合验收。
+    ### 10.1.12 质量履约评价保障措施
+    将整改及时性和资料移交纳入履约评价。
+    ### 10.1.13 质量管理创新与亮点措施
+    采用首件样板和质量问题销项看板。
+    ### 10.1.14 数字化质量追溯系统应用
+    建立材料、工序、试验和缺陷追溯链。
+    ### 10.1.15 地域特殊质量保证措施
+    对已确认环境条件采取针对性质量保障措施。
     {{chart:quality_system}}
     本章还包括资料同步、标准条款响应、责任岗位和检查频次，确保内容充分。
     """

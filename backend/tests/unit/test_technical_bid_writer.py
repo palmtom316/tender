@@ -12,10 +12,10 @@ def test_technical_self_check_detects_strategy_sections_and_chart_placeholders()
     result = TechnicalBidWriter()._self_check(
         """
         ## 编制原则
-        ## 质量目标响应
-        ## 质量管理组织
-        ## 过程质量控制措施
-        ## 质量检查与闭环改进
+        ### 10.1.1 编制依据与质量目标
+        ### 10.1.2 质量管理标准和规范
+        ### 10.1.3 质量保证体系与组织职责
+        ### 10.1.4 全过程质量控制措施
         {{chart:quality_system}}
         """
     )
@@ -33,6 +33,55 @@ def test_technical_self_check_detects_chapter_8_internal_sections() -> None:
         ## 8.2 工程概况与施工重难点分析
         ## 8.15 国网年度框架施工工程投标其他创新内容
         {{chart:construction_flow}}
+        """
+    )
+
+    assert result["has_strategy_sections"] is True
+    assert result["strategy_section_count"] == 3
+    assert result["chart_placeholder_count"] == 1
+
+
+def test_technical_self_check_detects_chapter_9_work_plan_sections() -> None:
+    result = TechnicalBidWriter()._self_check(
+        """
+        ## 编制原则
+        ## 9.1 项目理解与总体工作思路
+        ## 9.4 协调配合工作规划
+        ## 9.8 跨章节协同与边界管理
+        {{chart:responsibility_matrix}}
+        """
+    )
+
+    assert result["has_strategy_sections"] is True
+    assert result["strategy_section_count"] == 3
+    assert result["chart_placeholder_count"] == 1
+
+
+def test_technical_self_check_detects_safety_green_internal_sections() -> None:
+    result = TechnicalBidWriter()._self_check(
+        """
+        ## 编制原则
+        ### 10.2.1 安全与绿色施工目标响应
+        ### 10.2.4 危险源辨识与风险分级管控
+        ### 10.2.7 应急预案体系与响应机制
+        {{chart:safety_system}}
+        {{chart:risk_matrix}}
+        """
+    )
+
+    assert result["has_strategy_sections"] is True
+    assert result["strategy_section_count"] == 3
+    assert result["chart_placeholder_count"] == 2
+
+
+def test_technical_self_check_detects_schedule_internal_sections() -> None:
+    result = TechnicalBidWriter()._self_check(
+        """
+        ## 编制原则
+        ### 10.3.1 编制依据与进度目标
+        ### 10.3.5 总体施工进度计划
+        ### 10.3.10 进度动态管控与预警纠偏
+        {{chart:schedule_gantt}}
         """
     )
 
@@ -69,7 +118,12 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
                 "standard_clauses": [],
                 "recommended_charts": ["quality_system"],
                 "chart_assets": [],
-                "strategy": {"key": "quality_assurance"},
+                "strategy": {"key": "quality_assurance", "prompt_template_path": "docs/samples/配网质量保证措施提示词.md"},
+                "prompt_template": {
+                    "path": "docs/samples/配网质量保证措施提示词.md",
+                    "status": "loaded",
+                    "content_md": "# 国网配网工程技术标第10章第10.1节《质量保证措施》AI编写模板及提示词",
+                },
             }
 
     class _ChartService:
@@ -127,3 +181,6 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
     assert "constraint_ids" in captured["metadata"]["prompt_contract"]["required_output"]["trace_metadata"]
     assert captured["metadata"]["source_trace"]["chart_placeholder_keys"] == ["quality_system"]
     assert captured["metadata"]["self_check"]["chart_placeholder_count"] == 1
+    assert captured["metadata"]["prompt_template"]["path"] == "docs/samples/配网质量保证措施提示词.md"
+    assert captured["metadata"]["prompt_template"]["status"] == "loaded"
+    assert captured["metadata"]["prompt_template"]["content_hash"]

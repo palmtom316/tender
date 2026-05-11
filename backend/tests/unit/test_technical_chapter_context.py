@@ -158,6 +158,10 @@ def test_technical_chapter_context_builder_collects_traceable_inputs():
     assert context["company_assets"]["evidence_assets"][0]["asset_name"] == "质量体系认证证书"
     assert context["chart_assets"][0]["placeholder_key"] == "quality_system"
     assert context["recommended_charts"] == ["quality_system"]
+    assert context["strategy"]["prompt_template_path"] == "docs/samples/配网质量保证措施提示词.md"
+    assert context["prompt_template"]["status"] == "loaded"
+    assert context["prompt_template"]["path"] == "docs/samples/配网质量保证措施提示词.md"
+    assert "10.1.15 地域特殊质量保证措施" in context["prompt_template"]["content_md"]
 
 
 def test_technical_chapter_context_builder_handles_empty_optional_data():
@@ -181,3 +185,4 @@ def test_technical_chapter_context_builder_handles_empty_optional_data():
     assert context["standard_clauses"] == []
     assert context["company_assets"]["company_profiles"] == []
     assert context["recommended_charts"] == ["quality_system"]
+    assert context["prompt_template"]["status"] == "loaded"

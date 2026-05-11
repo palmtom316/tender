@@ -8,7 +8,11 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg.rows import dict_row
 
-from tender_backend.services.technical_chapter_strategies import chart_recommendations_for_chapter, strategy_for_chapter
+from tender_backend.services.technical_chapter_strategies import (
+    chart_recommendations_for_chapter,
+    prompt_template_for_chapter,
+    strategy_for_chapter,
+)
 from tender_backend.services.tender_constraint_service import TenderConstraintService
 
 
@@ -35,6 +39,7 @@ class TechnicalChapterContextBuilder:
             "chart_assets": self._chart_assets(conn, project_id=project_id, chapter_id=chapter_id),
             "recommended_charts": chart_recommendations_for_chapter(chapter.get("chapter_code")),
             "strategy": _strategy_to_dict(strategy),
+            "prompt_template": prompt_template_for_chapter(chapter.get("chapter_code")),
             "trace_policy": {
                 "source_trace_visibility": "metadata_and_review_panel",
                 "standard_source_policy": "local_library_only",
@@ -263,6 +268,7 @@ def _strategy_to_dict(strategy: Any) -> dict[str, Any]:
         "innovation_slots": list(strategy.innovation_slots),
         "self_check_rules": list(strategy.self_check_rules),
         "forbidden_terms": list(strategy.forbidden_terms),
+        "prompt_template_path": strategy.prompt_template_path,
     }
 
 

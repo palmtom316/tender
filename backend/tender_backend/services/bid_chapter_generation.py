@@ -194,7 +194,9 @@ def _strategy_lines(
 
     lines: list[str] = []
     for heading, default_body in strategy["sections"]:
-        lines.extend([f"## {heading}", default_body])
+        heading_code = str(heading).split(" ", 1)[0]
+        heading_level = "##" if "." not in heading_code or str(heading).startswith(("8.", "9.")) else "###"
+        lines.extend([f"{heading_level} {heading}", default_body])
         if heading.endswith("响应") or heading in {"里程碑计划", "风险识别与分级管控", "关键岗位配置", "评分点响应索引"}:
             lines.extend(_requirement_lines(requirements, matches))
         lines.extend(_substantial_strategy_lines(heading=heading, requirements=requirements, strategy=strategy))

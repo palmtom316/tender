@@ -73,6 +73,7 @@ class TechnicalBidWriter:
                 "prompt_contract": _technical_prompt_contract(context),
                 "source_trace": _source_trace(context),
                 "generation_mode": "deterministic_strategy_fallback",
+                "prompt_template": _prompt_template_trace(context),
             },
         )
         return {"project_id": str(project_id), "chapter": chapter, "draft": draft, "run": run}
@@ -146,15 +147,52 @@ class TechnicalBidWriter:
 
     def _self_check(self, content: str) -> dict[str, Any]:
         strategy_headings = (
-            "质量目标响应",
-            "质量管理组织",
-            "过程质量控制措施",
-            "质量检查与闭环改进",
-            "安全文明施工目标",
-            "风险识别与分级管控",
-            "里程碑计划",
-            "关键路径与资源保障",
-            "进度预警与纠偏机制",
+            "10.1.1 编制依据与质量目标",
+            "10.1.2 质量管理标准和规范",
+            "10.1.3 质量保证体系与组织职责",
+            "10.1.4 全过程质量控制措施",
+            "10.1.5 质量管理制度",
+            "10.1.6 施工过程质量控制",
+            "10.1.7 质量通病防治措施",
+            "10.1.8 送电前质量专项检查",
+            "10.1.9 质量问题处置和持续改进",
+            "10.1.10 质量资料同步管理",
+            "10.1.11 业主、监理、运行单位协同验收机制",
+            "10.1.12 质量履约评价保障措施",
+            "10.1.13 质量管理创新与亮点措施",
+            "10.1.14 数字化质量追溯系统应用",
+            "10.1.15 地域特殊质量保证措施",
+            "10.2.1 安全与绿色施工目标响应",
+            "10.2.2 安全管理体系与组织职责",
+            "10.2.3 安全管理制度体系",
+            "10.2.4 危险源辨识与风险分级管控",
+            "10.2.5 施工过程安全保障措施",
+            "10.2.6 专项安全技术措施",
+            "10.2.7 应急预案体系与响应机制",
+            "10.2.8 安全教育培训与班组安全管理",
+            "10.2.9 数字化安全管控手段",
+            "10.2.10 绿色施工总体目标与管理体系",
+            "10.2.11 环境保护与文明施工措施",
+            "10.2.12 节材、节水、节能与节地措施",
+            "10.2.13 碳排放管理与碳足迹核算",
+            "10.2.14 职业健康与劳动保护",
+            "10.2.15 安全绿色履约评价保障",
+            "10.2.16 地域特殊安全与绿色施工措施",
+            "10.3.1 编制依据与进度目标",
+            "10.3.2 进度管理体系与组织职责",
+            "10.3.3 工期约束与关键假设",
+            "10.3.4 施工阶段划分与流水组织",
+            "10.3.5 总体施工进度计划",
+            "10.3.6 关键路径与节点控制",
+            "10.3.7 资源配置与进度匹配",
+            "10.3.8 材料设备供应进度保障",
+            "10.3.9 停电窗口与外部协调保障",
+            "10.3.10 进度动态管控与预警纠偏",
+            "10.3.11 延误风险识别与应急赶工",
+            "10.3.12 质量安全环保与进度协同",
+            "10.3.13 数字化进度管理与资料留痕",
+            "10.3.14 框架项目多项目进度协调",
+            "10.3.15 地域特殊进度保障措施",
             "项目组织架构",
             "关键岗位配置",
             "职责分工与协同机制",
@@ -175,8 +213,16 @@ class TechnicalBidWriter:
             "8.13 拟投入施工车辆、机具、工器具、检测设备、安全工器具及设施",
             "8.14 施工项目部组织架构创新设计",
             "8.15 国网年度框架施工工程投标其他创新内容",
+            "9.1 项目理解与总体工作思路",
+            "9.2 工作目标分解与任务策划",
+            "9.3 项目管理组织与制度规划",
+            "9.4 协调配合工作规划",
+            "9.5 技术管理与创新应用规划",
+            "9.6 风险防控与应急管理规划",
+            "9.7 履约创优与标准化管理规划",
+            "9.8 跨章节协同与边界管理",
         )
-        strategy_section_count = sum(1 for heading in strategy_headings if f"## {heading}" in content)
+        strategy_section_count = sum(1 for heading in strategy_headings if _has_heading(content, heading))
         return {
             "has_principle_section": "编制原则" in content,
             "has_response_section": "响应内容" in content or strategy_section_count > 0,
@@ -231,6 +277,10 @@ def _context_hash(context: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _has_heading(content: str, heading: str) -> bool:
+    return re.search(rf"^\s*#{{2,6}}\s+{re.escape(heading)}(?:\s*$|\s)", content, re.MULTILINE) is not None
+
+
 def _chart_title(chart_type: str, chapter: dict[str, Any]) -> str:
     names = {
         "org_chart": "项目组织机构图",
@@ -270,6 +320,7 @@ def _technical_prompt_contract(context: dict[str, Any]) -> dict[str, Any]:
             "recommended_charts",
             "chart_assets",
             "strategy",
+            "prompt_template",
         ],
         "strategy_key": strategy.get("key"),
         "required_output": {
@@ -292,6 +343,17 @@ def _technical_prompt_contract(context: dict[str, Any]) -> dict[str, Any]:
             ],
         },
         "forbidden_terms": list(strategy.get("forbidden_terms") or ["报价", "投标报价", "最高限价", "单价", "总价"]),
+    }
+
+
+def _prompt_template_trace(context: dict[str, Any]) -> dict[str, Any]:
+    prompt_template = context.get("prompt_template") if isinstance(context.get("prompt_template"), dict) else {}
+    content = str(prompt_template.get("content_md") or "")
+    return {
+        "path": prompt_template.get("path"),
+        "status": prompt_template.get("status"),
+        "content_length": len(content),
+        "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest() if content else None,
     }
 
 

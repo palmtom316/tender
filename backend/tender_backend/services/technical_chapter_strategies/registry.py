@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,15 @@ class TechnicalChapterStrategy:
     innovation_slots: tuple[str, ...]
     self_check_rules: tuple[str, ...]
     forbidden_terms: tuple[str, ...] = ("报价", "投标报价", "最高限价", "单价", "总价")
+    prompt_template_path: str | None = None
+
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+CHAPTER_8_PROMPT_PATH = "docs/samples/配网施工方案及技术措施提示词.md"
+WORK_PLAN_PROMPT_PATH = "docs/samples/配网工作规划描述提示词.md"
+QUALITY_PROMPT_PATH = "docs/samples/配网质量保证措施提示词.md"
+SAFETY_GREEN_PROMPT_PATH = "docs/samples/配网安全与绿色施工保障措施提示词.md"
+SCHEDULE_PROMPT_PATH = "docs/samples/配网工程进度计划及保证措施提示词.md"
 
 
 CHAPTER_8_SECTIONS: tuple[tuple[str, str], ...] = (
@@ -47,6 +58,76 @@ CHAPTER_8_CHILD_CHARTS: dict[str, tuple[str, ...]] = {
 }
 
 
+WORK_PLAN_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("9.1 项目理解与总体工作思路", "基于项目事实和招标约束说明项目定位、实施关注点、关键成功因素和总体工作思路。"),
+    ("9.2 工作目标分解与任务策划", "将工作规划分解为组织、技术、协调、风险、履约和资料任务，并建立责任接口和成果资料。"),
+    ("9.3 项目管理组织与制度规划", "规划项目管理组织、职责边界、制度清单、会议报告、审批边界和问题闭环。"),
+    ("9.4 协调配合工作规划", "识别发包人、监理、设计、运行、调度、属地、管线和居民物业等协调接口和形成资料。"),
+    ("9.5 技术管理与创新应用规划", "规划技术文件、图纸会审、技术交底、专项方案审批、技术问题会商和创新应用边界。"),
+    ("9.6 风险防控与应急管理规划", "建立项目级风险清单、动态监控、专项预案索引、升级机制和跨章节风险治理接口。"),
+    ("9.7 履约创优与标准化管理规划", "将工作规划与承包商履约评价、标准化项目部、过程检查、资料归档和创优要求衔接。"),
+    ("9.8 跨章节协同与边界管理", "明确第9章与第8章、第10.1节、第10.2节、第10.3节的分工，防止重复承诺和冲突。"),
+)
+
+
+QUALITY_ASSURANCE_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("10.1.1 编制依据与质量目标", "依据招标文件、技术规范书、设计文件、答疑补遗和已确认标准条款，原文响应质量目标并建立目标分解矩阵。"),
+    ("10.1.2 质量管理标准和规范", "从本地标准库和用户确认标准中形成标准-条款-响应矩阵，未确认标准不得虚构版本号。"),
+    ("10.1.3 质量保证体系与组织职责", "建立项目经理负责、技术负责人主控、质量负责人监督、专业负责人落实、班组自检的质量体系。"),
+    ("10.1.4 全过程质量控制措施", "覆盖施工准备、材料设备进场、过程施工、控制点、隐蔽工程、试验调试和竣工移交。"),
+    ("10.1.5 质量管理制度", "按交底、图纸会审、进场验收、三检、工序交接、隐蔽验收、例会、整改闭环、奖惩和保修制度组织。"),
+    ("10.1.6 施工过程质量控制", "围绕项目施工范围选择适用配网工序，形成一工序一策、WHSR控制点和记录资料。"),
+    ("10.1.7 质量通病防治措施", "针对基础、电缆、接地、柜体、二次接线、自动化通信和资料一致性等通病制定预控与治理。"),
+    ("10.1.8 送电前质量专项检查", "组织送电前实体状态、试验结果、相序回路、缺陷闭环、资料齐备性和现场状态联合确认。"),
+    ("10.1.9 质量问题处置和持续改进", "建立质量问题分级、隔离报告、原因分析、整改复查、销项归档和复盘改进流程。"),
+    ("10.1.10 质量资料同步管理", "落实一工序一资料、一设备一档案、一隐蔽一影像、一缺陷一闭环、一验收一签认。"),
+    ("10.1.11 业主、监理、运行单位协同验收机制", "前置报验、隐蔽共同验收、运维提前介入、送电联合检查和缺陷清单销项。"),
+    ("10.1.12 质量履约评价保障措施", "将质量管理与国网承包商履约评价、过程检查、通报整改、达标投产和保修服务衔接。"),
+    ("10.1.13 质量管理创新与亮点措施", "仅基于招标要求、评分项或企业资料写入可落地、可留痕、可验收的质量创新措施。"),
+    ("10.1.14 数字化质量追溯系统应用", "说明材料、设备、工序、试验、缺陷和资料的追溯链，平台对接按发包人开放要求执行。"),
+    ("10.1.15 地域特殊质量保证措施", "仅基于已确认所在地和环境条件编写高温、高湿、雨季、山地、城区受限和防腐等适配措施。"),
+)
+
+
+SAFETY_GREEN_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("10.2.1 安全与绿色施工目标响应", "原文响应安全文明施工、绿色施工、环保和职业健康目标，并建立目标分解和响应矩阵。"),
+    ("10.2.2 安全管理体系与组织职责", "建立项目经理负责、安全负责人监督、专业负责人落实、班组安全员现场管控的安全管理体系。"),
+    ("10.2.3 安全管理制度体系", "覆盖安全责任、教育培训、技术交底、临电、高处、吊装、消防、交通、劳保、隐患和应急制度。"),
+    ("10.2.4 危险源辨识与风险分级管控", "根据施工范围识别危险源，建立风险分级、重大风险控制和动态评估机制。"),
+    ("10.2.5 施工过程安全保障措施", "围绕临电、基坑、电杆、架线、吊装、电缆、临近带电体、试验和交通等工序设置安全控制。"),
+    ("10.2.6 专项安全技术措施", "针对高处、起重、有限空间、临近带电、地下管线、交通、防火、防汛和防暑等编制专项措施。"),
+    ("10.2.7 应急预案体系与响应机制", "建立触电、坠落、中暑、防汛、火灾、管线损坏、起重、有限空间和交通事故等应急预案。"),
+    ("10.2.8 安全教育培训与班组安全管理", "建立培训矩阵、站班会、安全交底、班组自查、反违章、隐患上报和复盘机制。"),
+    ("10.2.9 数字化安全管控手段", "基于已确认能力说明移动巡检、隐患台账、影像留存、电子围栏、视频监控和安全看板。"),
+    ("10.2.10 绿色施工总体目标与管理体系", "响应绿色施工、低碳、环保和文明施工要求，建立四节一环保组织、制度和指标分解。"),
+    ("10.2.11 环境保护与文明施工措施", "覆盖扬尘、噪声、水污染、土壤、固废、危险品、地下管线环境风险、场地恢复和文明施工。"),
+    ("10.2.12 节材、节水、节能与节地措施", "按节材、节水、节能、节地分类制定控制措施，量化指标必须有来源。"),
+    ("10.2.13 碳排放管理与碳足迹核算", "仅在招标、评分或用户确认要求时展开核算边界、数据台账、减碳措施和报告条件。"),
+    ("10.2.14 职业健康与劳动保护", "覆盖防暑、防尘、防噪、防有害气体、劳保用品、健康检查、生活区卫生和传染病管理。"),
+    ("10.2.15 安全绿色履约评价保障", "将安全绿色施工与承包商履约评价、过程检查、通报整改、环保检查和服务衔接。"),
+    ("10.2.16 地域特殊安全与绿色施工措施", "仅基于已确认所在地和环境条件编写高温、雨季、山地、城区受限、地下管线和交通适配措施。"),
+)
+
+
+SCHEDULE_ASSURANCE_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("10.3.1 编制依据与进度目标", "依据招标文件、技术规范书、设计文件、答疑补遗和已确认约束，原文响应工期目标并建立进度目标分解矩阵。"),
+    ("10.3.2 进度管理体系与组织职责", "建立项目经理统筹、技术负责人计划审核、施工负责人落实、材料设备负责人保障和资料同步留痕的进度体系。"),
+    ("10.3.3 工期约束与关键假设", "汇总工期、里程碑、停电窗口、供货周期、交叉施工和外部审批等已确认约束，不编造未确认假设。"),
+    ("10.3.4 施工阶段划分与流水组织", "按施工准备、土建基础、线路或电缆施工、设备安装、试验调试和验收移交划分阶段并说明衔接条件。"),
+    ("10.3.5 总体施工进度计划", "基于已确认工期和里程碑形成总体计划，并在系统推荐时插入施工进度计划图占位符。"),
+    ("10.3.6 关键路径与节点控制", "识别材料到货、土建基础、电缆敷设、设备安装、试验调试、验收送电等关键工作和节点完成标准。"),
+    ("10.3.7 资源配置与进度匹配", "将人员、机具、试验调试和材料供应资源与施工阶段匹配，缺少来源的资源数量列为待补充。"),
+    ("10.3.8 材料设备供应进度保障", "围绕关键物资到货、进场验收、缺料预警、安装衔接和质量验收建立供应保障措施。"),
+    ("10.3.9 停电窗口与外部协调保障", "覆盖停电送电、运行单位接口、占道交通、居民物业和相邻工程协调，不承诺未确认许可。"),
+    ("10.3.10 进度动态管控与预警纠偏", "建立日跟踪、周分析、节点复核、预警纠偏和复盘闭环，阈值和频次必须有来源。"),
+    ("10.3.11 延误风险识别与应急赶工", "识别材料、天气、地下障碍、停电窗口、外部审批和设计变更等延误风险，并给出受约束的赶工措施。"),
+    ("10.3.12 质量安全环保与进度协同", "明确进度安排不得突破质量验收、安全许可、绿色施工和外部审批边界，并与10.1、10.2保持一致。"),
+    ("10.3.13 数字化进度管理与资料留痕", "基于已确认能力说明移动填报、进度台账、影像留痕、节点看板和资料闭环，不指定无来源软件品牌。"),
+    ("10.3.14 框架项目多项目进度协调", "仅在年度框架或批次多项目场景下说明任务排序、资源统筹、机具共享、专项技术组调配和复盘机制。"),
+    ("10.3.15 地域特殊进度保障措施", "仅基于已确认所在地和环境条件编写高温、雨季、山地、城区受限、交通组织和材料运输等进度保障措施。"),
+)
+
+
 CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
     "6": TechnicalChapterStrategy(
         key="project_team",
@@ -75,50 +156,71 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
             "地域、设备、标准、创新和服务承诺必须有招标文件、评分标准、标准库或企业资料来源",
             "不得输出内部评分提示语、虚构参数或无佐证领先性表述",
         ),
+        prompt_template_path=CHAPTER_8_PROMPT_PATH,
+    ),
+    "9": TechnicalChapterStrategy(
+        key="work_plan_description",
+        purpose="按第9章《工作规划描述》提示词，说明总体规划、管理接口、协调机制、风险治理、履约创优和跨章节边界管理。",
+        sections=WORK_PLAN_SECTIONS,
+        required_facts=("project_scope", "project_location", "construction_period", "owner_management_requirements", "external_coordination_constraints"),
+        required_standards=("project_management", "sgcc_management"),
+        required_charts=("responsibility_matrix", "risk_matrix"),
+        innovation_slots=("工作任务矩阵", "协调接口清单", "风险治理台账", "跨章节索引", "标准化项目部规划"),
+        self_check_rules=(
+            "9.1至9.8必须作为第9章内部子章节，不得误写为第7章、第8章或第10章",
+            "第9章只写规划和接口，不重复第8章施工方法、第10.1质量控制、第10.2安全绿色、第10.3进度计划的详细承诺",
+            "外部许可、会议频次、响应时限、创新成果和创优承诺必须有招标文件、评分标准或企业资料来源",
+            "不得输出内部评分提示语、价格信息、硬编码地域或无来源绝对化承诺",
+        ),
+        prompt_template_path=WORK_PLAN_PROMPT_PATH,
     ),
     "10.1": TechnicalChapterStrategy(
         key="quality_assurance",
-        purpose="响应质量目标并说明质量体系、过程控制、验收和闭环改进。",
-        sections=(
-            ("质量目标响应", "逐项响应招标文件质量目标，确保工程质量、资料质量和验收结果满足国网工程要求。"),
-            ("质量管理组织", "建立项目经理牵头、技术负责人主控、专业人员分级负责的质量管理体系。"),
-            ("过程质量控制措施", "覆盖材料设备进场、工序交接、隐蔽工程、关键节点验收和资料同步归档。"),
-            ("质量检查与闭环改进", "通过自检、互检、专检、问题整改、复验销项形成质量闭环。"),
-        ),
+        purpose="按第10章第10.1节《质量保证措施》提示词，响应质量目标并系统说明质量体系、过程控制、验收、资料和闭环改进。",
+        sections=QUALITY_ASSURANCE_SECTIONS,
         required_facts=("quality_requirement", "quality_constraints"),
         required_standards=("quality_acceptance", "sgcc_quality"),
         required_charts=("quality_system",),
-        innovation_slots=("质量问题销项看板", "首件样板引路"),
-        self_check_rules=("质量目标必须原文响应", "必须包含检查与整改闭环"),
+        innovation_slots=("质量问题销项看板", "首件样板引路", "一设备一档案", "数字化质量追溯", "质量负面清单"),
+        self_check_rules=(
+            "10.1.1至10.1.15必须作为10.1节内部子章节，不得提升为第10章其他一级子项",
+            "质量目标必须原文响应",
+            "必须包含检查、整改、复查、销项、归档和复盘闭环",
+            "地域、设备、标准、创新和承诺必须有招标文件、评分标准、标准库或企业资料来源",
+        ),
+        prompt_template_path=QUALITY_PROMPT_PATH,
     ),
     "10.2": TechnicalChapterStrategy(
         key="safety_green_construction",
-        purpose="响应安全文明施工与绿色施工要求，说明风险分级管控和应急闭环。",
-        sections=(
-            ("安全文明施工目标", "响应安全文明施工和绿色施工要求，落实国网工程安全管理标准。"),
-            ("风险识别与分级管控", "识别临电、吊装、高处、交叉作业、消防和交通等风险，形成预控清单。"),
-            ("现场文明与绿色施工措施", "控制扬尘、噪声、废弃物、材料堆放和现场标识，保持作业面有序。"),
-            ("应急响应与持续改进", "建立应急组织、预案演练、事件报告和复盘改进机制。"),
-        ),
+        purpose="按第10章第10.2节《安全和绿色施工保障措施》提示词，响应安全文明施工、绿色施工、风险分级管控和应急闭环要求。",
+        sections=SAFETY_GREEN_SECTIONS,
         required_facts=("safety_constraints", "site_conditions"),
         required_standards=("safety", "green_construction"),
         required_charts=("safety_system", "risk_matrix"),
-        innovation_slots=("风险四色看板", "班前会移动签到"),
-        self_check_rules=("必须包含文明施工和绿色施工", "必须包含风险分级管控"),
+        innovation_slots=("风险四色看板", "班前会移动签到", "隐患闭环看板", "数字化安全巡检", "绿色施工台账"),
+        self_check_rules=(
+            "10.2.1至10.2.16必须作为10.2节内部子章节，不得提升为第10章其他一级子项",
+            "必须包含安全文明施工和绿色施工",
+            "必须包含危险源辨识、风险分级管控和应急响应闭环",
+            "地域、设备、标准、数字化能力、绿色指标和承诺必须有招标文件、评分标准、标准库或企业资料来源",
+        ),
+        prompt_template_path=SAFETY_GREEN_PROMPT_PATH,
     ),
     "10.3": TechnicalChapterStrategy(
         key="schedule_assurance",
-        purpose="响应工期目标并说明里程碑、关键路径、资源保障和纠偏机制。",
-        sections=(
-            ("里程碑计划", "将总工期分解为准备、施工、调试、验收、移交等里程碑并明确完成标准。"),
-            ("关键路径与资源保障", "围绕关键工序配置人员、设备、材料和协调资源，保障连续施工。"),
-            ("进度预警与纠偏机制", "建立日跟踪、周分析、节点预警和资源加倍投入等纠偏措施。"),
-        ),
-        required_facts=("construction_period", "schedule_constraints"),
+        purpose="按第10章第10.3节《工程进度计划及保证措施》提示词，响应工期目标并系统说明里程碑、关键路径、资源匹配、外部协调和纠偏闭环。",
+        sections=SCHEDULE_ASSURANCE_SECTIONS,
+        required_facts=("construction_period", "schedule_constraints", "milestones", "outage_windows", "material_lead_times", "site_conditions"),
         required_standards=("schedule_management",),
         required_charts=("schedule_gantt",),
-        innovation_slots=("节点预警清单", "资源动态调配机制"),
-        self_check_rules=("必须响应工期目标", "必须包含纠偏措施"),
+        innovation_slots=("节点预警清单", "资源动态调配机制", "进度数据看板", "影像留痕", "多项目调度机制"),
+        self_check_rules=(
+            "10.3.1至10.3.15必须作为10.3节内部子章节，不得输出第6章或提升为第10章其他一级子项",
+            "工期目标、里程碑、停电窗口、外部许可和赶工承诺必须有招标文件或用户确认来源",
+            "必须与第8.7节进度摘要、第10.1节质量控制、第10.2节安全许可和绿色施工要求一致",
+            "不得输出内部评分提示语、价格信息、硬编码地域、无来源数值或具体软件品牌",
+        ),
+        prompt_template_path=SCHEDULE_PROMPT_PATH,
     ),
     "12": TechnicalChapterStrategy(
         key="technical_scoring_materials",
@@ -163,6 +265,7 @@ for _heading, _body in CHAPTER_8_SECTIONS:
             "地域、设备、标准、创新和服务承诺必须有招标文件、评分标准、标准库或企业资料来源",
             "不得输出内部评分提示语、虚构参数或无佐证领先性表述",
         ),
+        prompt_template_path=CHAPTER_8_PROMPT_PATH,
     )
 
 
@@ -173,3 +276,24 @@ def strategy_for_chapter(chapter_code: str | None) -> TechnicalChapterStrategy |
 def chart_recommendations_for_chapter(chapter_code: str | None) -> list[str]:
     strategy = strategy_for_chapter(chapter_code)
     return list(strategy.required_charts) if strategy else []
+
+
+@lru_cache(maxsize=16)
+def prompt_template_for_chapter(chapter_code: str | None) -> dict[str, str] | None:
+    strategy = strategy_for_chapter(chapter_code)
+    if strategy is None or not strategy.prompt_template_path:
+        return None
+    path = REPO_ROOT / strategy.prompt_template_path
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return {
+            "path": strategy.prompt_template_path,
+            "content_md": "",
+            "status": "missing",
+        }
+    return {
+        "path": strategy.prompt_template_path,
+        "content_md": content,
+        "status": "loaded",
+    }
