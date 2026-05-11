@@ -118,6 +118,11 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
                 "standard_clauses": [],
                 "recommended_charts": ["quality_system"],
                 "chart_assets": [],
+                "generation_controls": {
+                    "target_pages": 80,
+                    "target_pages_source": "default",
+                    "prompt_overlay_md": "本次生成目标篇幅为 80 页左右 A4。",
+                },
                 "strategy": {"key": "quality_assurance", "prompt_template_path": "docs/samples/配网质量保证措施提示词.md"},
                 "prompt_template": {
                     "path": "docs/samples/配网质量保证措施提示词.md",
@@ -179,9 +184,84 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
     assert captured["prompt_inputs"]["strategy"]["key"] == "quality_assurance"
     assert captured["metadata"]["context_hash"]
     assert captured["metadata"]["prompt_contract"]["input_policy"] == "normalized_context_and_strategy_only"
+    assert captured["metadata"]["prompt_contract"]["generation_controls"]["target_pages"] == 80
     assert "constraint_ids" in captured["metadata"]["prompt_contract"]["required_output"]["trace_metadata"]
     assert captured["metadata"]["source_trace"]["chart_placeholder_keys"] == ["quality_system"]
     assert captured["metadata"]["self_check"]["chart_placeholder_count"] == 1
     assert captured["metadata"]["prompt_template"]["path"] == "docs/samples/配网质量保证措施提示词.md"
     assert captured["metadata"]["prompt_template"]["status"] == "loaded"
     assert captured["metadata"]["prompt_template"]["content_hash"]
+
+
+def test_technical_writer_allows_target_pages_override(monkeypatch) -> None:
+    from uuid import uuid4
+
+    project_id = uuid4()
+    outline_id = uuid4()
+    chapter_id = uuid4()
+    captured = {}
+
+    class _Writer(TechnicalBidWriter):
+        def _confirmed_outline(self, conn, *, project_id):
+            return {"id": outline_id, "project_id": project_id, "status": "confirmed"}
+
+        def _chapter(self, conn, *, project_id, chapter_id):
+            return {"id": chapter_id, "project_id": project_id, "chapter_code": "10.1", "chapter_title": "质量保证措施", "volume_type": "technical"}
+
+        def _create_run(self, conn, **kwargs):
+            captured.update(kwargs)
+            return {"id": uuid4(), "prompt_inputs_json": kwargs["prompt_inputs"]}
+
+    class _ContextBuilder:
+        def build(self, conn, *, project_id, chapter_id):
+            return {
+                "chapter": {"id": chapter_id, "chapter_code": "10.1", "chapter_title": "质量保证措施", "volume_type": "technical"},
+                "constraints": [],
+                "standard_clauses": [],
+                "recommended_charts": [],
+                "chart_assets": [],
+                "generation_controls": {"target_pages": 80, "target_pages_source": "default"},
+                "strategy": {"key": "quality_assurance"},
+                "prompt_template": {"status": "loaded", "content_md": "质量提示词"},
+            }
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "INSERT INTO chapter_draft" in query:
+                self.result = [
+                    {
+                        "id": uuid4(),
+                        "project_id": params[1],
+                        "volume_type": params[2],
+                        "chapter_code": params[3],
+                        "content_md": params[4],
+                        "referenced_chart_keys": params[5],
+                    }
+                ]
+            return self
+
+        def fetchone(self):
+            return self.result[0] if getattr(self, "result", []) else None
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
+
+    _Writer().generate_chapter(_Conn(), project_id=project_id, chapter_id=chapter_id, target_pages=96)
+
+    assert captured["prompt_inputs"]["generation_controls"]["target_pages"] == 96
+    assert captured["prompt_inputs"]["generation_controls"]["target_pages_source"] == "request"
+    assert "96 页左右 A4" in captured["prompt_inputs"]["generation_controls"]["prompt_overlay_md"]
+    assert "质量提示词" in captured["prompt_inputs"]["prompt_template"]["effective_content_md"]
+    assert "96 页左右 A4" in captured["prompt_inputs"]["prompt_template"]["effective_content_md"]

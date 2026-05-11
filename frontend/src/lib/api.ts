@@ -795,6 +795,7 @@ export interface BidChapter {
   volume_type: string;
   sort_order: number;
   requirement_ids?: string[];
+  metadata_json?: Record<string, unknown>;
 }
 
 export interface BidOutline {
@@ -886,6 +887,24 @@ export function fetchBidOutline(
   });
 }
 
+export function updateBidChapter(
+  chapterId: string,
+  data: {
+    chapter_code?: string;
+    chapter_title?: string;
+    volume_type?: string;
+    sort_order?: number;
+    outline_md?: string;
+    metadata_json?: Record<string, unknown>;
+  },
+): Promise<BidChapter> {
+  return request<BidChapter>(`/bid-outline/chapters/${chapterId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
 export function previewBidOutlineReconciliation(
   projectId: string,
   options?: { signal?: AbortSignal },
@@ -924,11 +943,15 @@ export function fetchTechnicalWritingPlan(
   });
 }
 
-export function generateTechnicalChapter(projectId: string, chapterId: string): Promise<Record<string, unknown>> {
+export function generateTechnicalChapter(
+  projectId: string,
+  chapterId: string,
+  data?: { rewrite_note?: string | null; target_pages?: number | null },
+): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>(`/projects/${projectId}/technical-bid/chapters/${chapterId}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(data ?? {}),
   });
 }
 

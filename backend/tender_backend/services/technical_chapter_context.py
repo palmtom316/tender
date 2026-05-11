@@ -30,6 +30,7 @@ class TechnicalChapterContextBuilder:
         return {
             "project_id": str(project_id),
             "chapter": chapter,
+            "generation_controls": generation_controls_for_chapter(chapter),
             "constraint_set": _compact_constraint_set(constraint_set),
             "constraints": constraints,
             "tender_summary": tender_summary,
@@ -287,6 +288,63 @@ def _matched_site_condition_keywords(tender_summary: dict[str, Any]) -> list[str
     return [keyword for keyword in SITE_CONDITION_KEYWORDS if keyword in source_text]
 
 
+_DEFAULT_TARGET_PAGES = {
+    "8": 100,
+    "9": 50,
+    "10.1": 80,
+    "10.2": 50,
+    "10.3": 50,
+}
+
+
+def generation_controls_for_chapter(chapter: dict[str, Any]) -> dict[str, Any]:
+    metadata = chapter.get("metadata_json") if isinstance(chapter.get("metadata_json"), dict) else {}
+    chapter_code = str(chapter.get("chapter_code") or "")
+    configured = _coerce_target_pages(metadata.get("target_pages"))
+    default_pages = _DEFAULT_TARGET_PAGES.get(chapter_code)
+    target_pages = configured or default_pages
+    source = "user" if configured else "default" if default_pages else "none"
+    controls: dict[str, Any] = {
+        "target_pages": target_pages,
+        "target_pages_source": source,
+        "page_tolerance": 0.2,
+    }
+    if target_pages:
+        controls["prompt_overlay_md"] = _target_pages_overlay(target_pages)
+    return controls
+
+
+def with_target_pages_override(context: dict[str, Any], target_pages: int | None) -> dict[str, Any]:
+    normalized = _coerce_target_pages(target_pages)
+    if normalized is None:
+        return context
+    next_context = dict(context)
+    controls = dict(next_context.get("generation_controls") or {})
+    controls["target_pages"] = normalized
+    controls["target_pages_source"] = "request"
+    controls["page_tolerance"] = controls.get("page_tolerance", 0.2)
+    controls["prompt_overlay_md"] = _target_pages_overlay(normalized)
+    next_context["generation_controls"] = controls
+    return next_context
+
+
+def _target_pages_overlay(target_pages: int) -> str:
+    return (
+        "## 本次生成篇幅要求\n\n"
+        f"本章/本节目标篇幅为 {target_pages} 页左右 A4（含图表、表格、清单和必要留白）。"
+        "生成内容必须以系统上下文、招标约束、评分项、标准条款、企业资料和已确认图表为依据；"
+        "不得通过重复套话、无来源承诺或机械扩写凑页。若系统按子章节分批生成，应按目标页数比例展开。"
+    )
+
+
+def _coerce_target_pages(value: Any) -> int | None:
+    try:
+        pages = int(value)
+    except (TypeError, ValueError):
+        return None
+    return min(max(pages, 1), 300)
+
+
 def _flatten_text(value: Any) -> str:
     if isinstance(value, dict):
         return " ".join(_flatten_text(item) for item in value.values())
@@ -297,4 +355,4 @@ def _flatten_text(value: Any) -> str:
     return str(value)
 
 
-__all__ = ["TechnicalChapterContextBuilder"]
+__all__ = ["TechnicalChapterContextBuilder", "generation_controls_for_chapter", "with_target_pages_override"]

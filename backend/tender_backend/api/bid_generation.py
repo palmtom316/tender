@@ -25,6 +25,7 @@ _CHAPTER_PROJECT_QUERY = "SELECT project_id FROM bid_chapter WHERE id = %s"
 
 class TechnicalGenerateBody(BaseModel):
     rewrite_note: str | None = None
+    target_pages: int | None = None
 
 
 @router.post("/projects/{project_id}/business-bid/assemble")
@@ -76,6 +77,7 @@ async def generate_technical_chapter(
             project_id=project_id,
             chapter_id=chapter_id,
             rewrite_note=payload.rewrite_note if payload else None,
+            target_pages=payload.target_pages if payload else None,
             created_by=user.display_name,
         )
     except ValueError as exc:

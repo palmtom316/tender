@@ -14,10 +14,13 @@ import {
   generateTechnicalChapter,
   listChartAssets,
   previewBidOutlineReconciliation,
+  updateBidChapter,
   updateDraft,
 } from "../../lib/api";
+import type { BidChapter } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
+import { Badge } from "../../components/ui/Badge";
 
 const CHART_TYPE_OPTIONS = [
   { value: "org_chart", label: "项目组织机构图" },
@@ -36,6 +39,14 @@ const CHART_TYPE_OPTIONS = [
   { value: "data_flow", label: "数据流转图" },
   { value: "critical_path", label: "关键路径图" },
 ] as const;
+
+const DEFAULT_TARGET_PAGES_BY_CHAPTER: Record<string, number> = {
+  "8": 100,
+  "9": 50,
+  "10.1": 80,
+  "10.2": 50,
+  "10.3": 50,
+};
 
 function chartTitle(chartType: string) {
   return CHART_TYPE_OPTIONS.find((option) => option.value === chartType)?.label ?? "技术图表";
@@ -75,12 +86,59 @@ function recommendedChartKeys(context: Record<string, unknown> | undefined) {
   });
 }
 
+function chartAssetStatusVariant(status: string): "default" | "success" | "warning" | "danger" | "info" {
+  if (status === "approved") return "success";
+  if (status === "failed" || status === "rejected") return "danger";
+  if (status === "draft" || status === "needs_review") return "warning";
+  return "default";
+}
+
+function normalizeTargetPages(value: unknown) {
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isFinite(parsed)) return null;
+  return Math.min(300, Math.max(1, Math.round(parsed)));
+}
+
+function targetPagesFromContext(context: Record<string, unknown> | undefined) {
+  const controls = context?.generation_controls;
+  if (!controls || typeof controls !== "object") return null;
+  return normalizeTargetPages((controls as Record<string, unknown>).target_pages);
+}
+
+function defaultTargetPagesForChapter(chapterCode: string) {
+  return DEFAULT_TARGET_PAGES_BY_CHAPTER[chapterCode] ?? null;
+}
+
+function targetPagesInputValue(
+  chapter: BidChapter | null | undefined,
+  context: Record<string, unknown> | undefined,
+  editedValues: Record<string, string>,
+) {
+  if (!chapter) return "";
+  if (editedValues[chapter.id] !== undefined) return editedValues[chapter.id];
+  const metadataPages = normalizeTargetPages(chapter.metadata_json?.target_pages);
+  if (metadataPages !== null) return String(metadataPages);
+  const contextPages = targetPagesFromContext(context);
+  if (contextPages !== null) return String(contextPages);
+  const defaultPages = defaultTargetPagesForChapter(chapter.chapter_code);
+  return defaultPages === null ? "" : String(defaultPages);
+}
+
+function targetPagesForChapter(
+  chapter: BidChapter,
+  context: Record<string, unknown> | undefined,
+  editedValues: Record<string, string>,
+) {
+  return normalizeTargetPages(targetPagesInputValue(chapter, context, editedValues));
+}
+
 export function EditorContent() {
   const { projectId } = useNavigation();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [chartType, setChartType] = useState<string>("quality_system");
+  const [targetPagesByChapter, setTargetPagesByChapter] = useState<Record<string, string>>({});
 
   const { data: drafts = [], isLoading } = useQuery({
     queryKey: ["drafts", projectId],
@@ -147,6 +205,8 @@ export function EditorContent() {
   const pendingChartCount = chartAssets.filter((asset) => asset.status !== "approved").length;
   const approvedChartCount = chartAssets.length - pendingChartCount;
   const recommendedCharts = recommendedChartKeys(chapterContext);
+  const selectedTargetPagesValue = targetPagesInputValue(selectedOutlineChapter, chapterContext, targetPagesByChapter);
+  const selectedTargetPages = normalizeTargetPages(selectedTargetPagesValue);
 
   const save = useMutation({
     mutationFn: ({ id, content }: { id: string; content: string }) =>
@@ -197,12 +257,30 @@ export function EditorContent() {
   });
 
   const generateTechnical = useMutation({
-    mutationFn: (chapterId: string) => {
+    mutationFn: ({ chapterId, targetPages }: { chapterId: string; targetPages?: number | null }) => {
       if (!projectId) throw new Error("No project selected");
-      return generateTechnicalChapter(projectId, chapterId);
+      return generateTechnicalChapter(projectId, chapterId, targetPages ? { target_pages: targetPages } : undefined);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
+    },
+  });
+
+  const updateTargetPages = useMutation({
+    mutationFn: ({ chapter, targetPages }: { chapter: BidChapter; targetPages: number }) =>
+      updateBidChapter(chapter.id, {
+        metadata_json: {
+          ...(chapter.metadata_json ?? {}),
+          target_pages: targetPages,
+        },
+      }),
+    onSuccess: (_updatedChapter, variables) => {
+      setTargetPagesByChapter((current) => ({
+        ...current,
+        [variables.chapter.id]: String(variables.targetPages),
+      }));
+      queryClient.invalidateQueries({ queryKey: ["bid-outline", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["technical-chapter-context", projectId, variables.chapter.id] });
     },
   });
 
@@ -337,7 +415,7 @@ export function EditorContent() {
                     <strong>{asset.title}</strong>
                     <span>{asset.chart_type}</span>
                   </div>
-                  <span className={`status-pill status-pill--${asset.status}`}>{asset.status}</span>
+                  <Badge variant={chartAssetStatusVariant(asset.status)}>{asset.status}</Badge>
                 </div>
                 {asset.rendered_svg && (
                   <div className="chart-asset-card__preview">
@@ -416,6 +494,39 @@ export function EditorContent() {
             <span>业绩：{companyAssetCount(chapterContext, "performances")}</span>
             <span>证书：{companyAssetCount(chapterContext, "certificates")}</span>
           </div>
+          <div className="chapter-target-pages" aria-label="章节篇幅设置">
+            <label>
+              <span>目标页数</span>
+              <input
+                className="clay-input"
+                type="number"
+                min={1}
+                max={300}
+                step={1}
+                value={selectedTargetPagesValue}
+                onChange={(event) => {
+                  if (!selectedOutlineChapter) return;
+                  setTargetPagesByChapter((current) => ({
+                    ...current,
+                    [selectedOutlineChapter.id]: event.target.value,
+                  }));
+                }}
+                aria-label={`${selectedOutlineChapter.chapter_code} 目标页数`}
+              />
+            </label>
+            <ClayButton
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (!selectedOutlineChapter || selectedTargetPages === null) return;
+                updateTargetPages.mutate({ chapter: selectedOutlineChapter, targetPages: selectedTargetPages });
+              }}
+              disabled={!selectedOutlineChapter || selectedTargetPages === null || updateTargetPages.isPending}
+            >
+              {updateTargetPages.isPending ? "保存中..." : "保存篇幅"}
+            </ClayButton>
+            <span>生成时注入篇幅要求</span>
+          </div>
           {recommendedCharts.length > 0 && (
             <div className="template-conflict-list" aria-label="图表占位映射">
               <strong>图表占位映射</strong>
@@ -446,7 +557,11 @@ export function EditorContent() {
                 size="sm"
                 onClick={() => {
                   if (chapter.volume_type === "technical" && outline?.status === "confirmed") {
-                    generateTechnical.mutate(chapter.id);
+                    const context = chapter.id === selectedOutlineChapter?.id ? chapterContext : undefined;
+                    generateTechnical.mutate({
+                      chapterId: chapter.id,
+                      targetPages: targetPagesForChapter(chapter, context, targetPagesByChapter),
+                    });
                   } else {
                     generateChapter.mutate(chapter.id);
                   }
@@ -474,7 +589,7 @@ export function EditorContent() {
               <span className="outline-date">
                 {new Date(d.updated_at).toLocaleDateString("zh-CN")}
               </span>
-              {d.is_stale && <span className="status-pill status-pill--needs_review">stale</span>}
+              {d.is_stale && <Badge variant="danger">stale</Badge>}
             </div>
           ))}
           {!isLoading && drafts.length === 0 && (
@@ -491,7 +606,7 @@ export function EditorContent() {
             <>
               <div className="editor-toolbar">
                 <h2>{selected.chapter_code}</h2>
-                {selected.is_stale && <span className="status-pill status-pill--needs_review">{selected.stale_reason || "内容已过期"}</span>}
+                {selected.is_stale && <Badge variant="danger">{selected.stale_reason || "内容已过期"}</Badge>}
                 <ClayButton
                   onClick={() => save.mutate({ id: selected.id, content: editContent })}
                   disabled={save.isPending}

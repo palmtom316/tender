@@ -67,7 +67,7 @@ class _Conn:
             "chapter_code": "10.1",
             "chapter_title": "质量保证措施",
             "volume_type": "technical",
-            "metadata_json": {"requirement_count": 1},
+            "metadata_json": {"requirement_count": 1, "target_pages": 88},
         }
         self.summary = {
             "project_name": "配网改造工程",
@@ -165,6 +165,9 @@ def test_technical_chapter_context_builder_collects_traceable_inputs():
     assert context["prompt_template"]["status"] == "loaded"
     assert context["prompt_template"]["path"] == "docs/samples/配网质量保证措施提示词.md"
     assert "10.1.15 地域特殊质量保证措施" in context["prompt_template"]["content_md"]
+    assert context["generation_controls"]["target_pages"] == 88
+    assert context["generation_controls"]["target_pages_source"] == "user"
+    assert "88 页左右 A4" in context["generation_controls"]["prompt_overlay_md"]
 
 
 def test_technical_chapter_context_builder_handles_empty_optional_data():
@@ -190,6 +193,16 @@ def test_technical_chapter_context_builder_handles_empty_optional_data():
     assert "quality_system" in context["recommended_charts"]
     assert context["matched_keywords"] == []
     assert context["prompt_template"]["status"] == "loaded"
+
+
+def test_technical_chapter_context_uses_default_target_pages_when_missing():
+    conn = _Conn()
+    conn.chapter["metadata_json"] = {}
+
+    context = TechnicalChapterContextBuilder().build(conn, project_id=conn.project_id, chapter_id=conn.chapter_id)
+
+    assert context["generation_controls"]["target_pages"] == 80
+    assert context["generation_controls"]["target_pages_source"] == "default"
 
 
 def test_technical_chapter_context_matches_site_condition_keywords_from_location_and_raw_facts():

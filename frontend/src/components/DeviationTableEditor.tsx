@@ -144,7 +144,7 @@ export function DeviationTableEditor({
                       onChange={(e) =>
                         updateDeviationItem(index, "seq_number", parseInt(e.target.value) || 0)
                       }
-                      className="form-input form-input--sm"
+                      className="clay-input deviation-table-editor__field"
                     />
                   </td>
                   <td>
@@ -154,7 +154,7 @@ export function DeviationTableEditor({
                       onChange={(e) =>
                         updateDeviationItem(index, "procurement_clause_number", e.target.value)
                       }
-                      className="form-input form-input--sm"
+                      className="clay-input deviation-table-editor__field"
                       placeholder="条目号"
                     />
                   </td>
@@ -164,7 +164,7 @@ export function DeviationTableEditor({
                       onChange={(e) =>
                         updateDeviationItem(index, "procurement_clause", e.target.value)
                       }
-                      className="form-input form-input--sm"
+                      className="clay-textarea deviation-table-editor__field deviation-table-editor__field--textarea"
                       placeholder="采购文件条款"
                       rows={2}
                     />
@@ -175,7 +175,7 @@ export function DeviationTableEditor({
                       onChange={(e) =>
                         updateDeviationItem(index, "response_clause", e.target.value)
                       }
-                      className="form-input form-input--sm"
+                      className="clay-textarea deviation-table-editor__field deviation-table-editor__field--textarea"
                       placeholder="应答文件条款"
                       rows={2}
                     />
@@ -186,7 +186,7 @@ export function DeviationTableEditor({
                       onChange={(e) =>
                         updateDeviationItem(index, "deviation_note", e.target.value)
                       }
-                      className="form-input form-input--sm"
+                      className="clay-textarea deviation-table-editor__field deviation-table-editor__field--textarea"
                       placeholder="偏差说明"
                       rows={2}
                     />

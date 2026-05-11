@@ -5,6 +5,7 @@ import type { ExportMode } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
+import { Icon } from "../../components/ui/Icon";
 
 const EXPORT_MODE_OPTIONS: { value: ExportMode; label: string; description: string }[] = [
   {
@@ -26,9 +27,11 @@ const EXPORT_MODE_OPTIONS: { value: ExportMode; label: string; description: stri
 
 function GateIndicator({ passed, label, detail }: { passed: boolean; label: string; detail: string }) {
   return (
-    <Card className="gate-card" style={{ borderColor: passed ? "var(--color-success)" : "var(--color-danger)" }}>
+    <Card className={`gate-card ${passed ? "gate-card--passed" : "gate-card--blocked"}`}>
       <div className="gate-header">
-        <span className="gate-icon">{passed ? "\u2705" : "\u274C"}</span>
+        <span className="gate-icon">
+          <Icon name={passed ? "check-circle" : "x-circle"} size={15} />
+        </span>
         <strong>{label}</strong>
       </div>
       <p className="gate-detail">{detail}</p>
@@ -173,16 +176,13 @@ export function ExportGateContent() {
         </div>
       )}
 
-      <fieldset
-        className="export-mode-picker"
-        style={{ margin: "var(--space-6) 0", border: "none", padding: 0 }}
-      >
-        <legend style={{ fontWeight: 600, marginBottom: "var(--space-3)" }}>输出模式</legend>
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+      <fieldset className="export-mode-picker">
+        <legend>输出模式</legend>
+        <div className="export-mode-picker__options">
           {EXPORT_MODE_OPTIONS.map((option) => (
             <label
               key={option.value}
-              style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-3)", cursor: "pointer" }}
+              className="export-mode-picker__option"
             >
               <input
                 type="radio"
@@ -194,7 +194,7 @@ export function ExportGateContent() {
               />
               <span>
                 <strong>{option.label}</strong>
-                <span style={{ display: "block", color: "var(--color-text-muted)", fontSize: "0.85em" }}>
+                <span className="export-mode-picker__description">
                   {option.description}
                 </span>
               </span>

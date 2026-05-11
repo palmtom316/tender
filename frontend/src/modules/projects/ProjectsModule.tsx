@@ -88,15 +88,15 @@ export function ProjectsModule() {
 
   return (
     <div>
-      <div className="flex items-center justify-between" style={{ marginBottom: "var(--space-5)" }}>
-        <h1 className="section-heading" style={{ marginBottom: 0 }}>投标项目</h1>
+      <div className="page-header">
+        <h1 className="section-heading">投标项目</h1>
         <ClayButton onClick={() => setShowForm(!showForm)}>
           {showForm ? "取消" : "新建项目"}
         </ClayButton>
       </div>
 
       {showForm && (
-        <Card style={{ marginBottom: "var(--space-5)" }}>
+        <Card className="feedback-card">
           <form className="project-create-form" onSubmit={handleSubmit}>
             <input
               className="clay-input"
@@ -135,7 +135,7 @@ export function ProjectsModule() {
             </ClayButton>
           </form>
           {mutation.isError && (
-            <p className="text-error" style={{ marginTop: "var(--space-2)" }}>
+            <p className="text-error form-message">
               {(mutation.error as Error).message}
             </p>
           )}
@@ -152,12 +152,9 @@ export function ProjectsModule() {
             clickable
             onClick={() => handleProjectClick(p)}
             className="project-card"
-            style={{ cursor: "pointer" }}
           >
             <div className="project-card__header">
-              <h2 style={{ fontSize: "var(--text-lg)", marginBottom: 0 }}>
-                {p.name}
-              </h2>
+              <h2 className="project-card__title">{p.name}</h2>
               <ClayButton
                 type="button"
                 variant="ghost"
@@ -173,7 +170,7 @@ export function ProjectsModule() {
               <Badge variant={p.status === "completed" ? "success" : "primary"}>
                 {p.workflow_status ?? p.status ?? "created"}
               </Badge>
-              <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-xs)" }}>
+              <span className="project-card__date">
                 {new Date(p.created_at).toLocaleDateString("zh-CN")}
               </span>
             </div>

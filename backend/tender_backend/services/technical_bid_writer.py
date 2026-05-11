@@ -14,7 +14,7 @@ from psycopg.types.json import Jsonb
 
 from tender_backend.services.bid_chapter_generation import generate_bid_chapter_draft
 from tender_backend.services.chart_generation_service import ChartGenerationService
-from tender_backend.services.technical_chapter_context import TechnicalChapterContextBuilder
+from tender_backend.services.technical_chapter_context import TechnicalChapterContextBuilder, with_target_pages_override
 
 
 class TechnicalBidWriter:
@@ -45,6 +45,7 @@ class TechnicalBidWriter:
         chapter_id: UUID,
         created_by: str | None = None,
         rewrite_note: str | None = None,
+        target_pages: int | None = None,
     ) -> dict[str, Any]:
         outline = self._confirmed_outline(conn, project_id=project_id)
         if outline is None:
@@ -52,9 +53,16 @@ class TechnicalBidWriter:
         chapter = self._chapter(conn, project_id=project_id, chapter_id=chapter_id)
         if chapter is None or chapter["volume_type"] != "technical":
             raise ValueError("technical chapter not found")
-        context = TechnicalChapterContextBuilder().build(conn, project_id=project_id, chapter_id=chapter_id)
+        context = with_target_pages_override(
+            TechnicalChapterContextBuilder().build(conn, project_id=project_id, chapter_id=chapter_id),
+            target_pages,
+        )
         self._ensure_recommended_charts(conn, project_id=project_id, chapter=chapter, context=context)
-        context = TechnicalChapterContextBuilder().build(conn, project_id=project_id, chapter_id=chapter_id)
+        context = with_target_pages_override(
+            TechnicalChapterContextBuilder().build(conn, project_id=project_id, chapter_id=chapter_id),
+            target_pages,
+        )
+        context = _with_effective_prompt_template(context)
         draft = generate_bid_chapter_draft(conn, project_id=project_id, chapter_id=chapter_id, context=context, rewrite_note=rewrite_note)
         self_check = self._self_check(draft.get("content_md") or "")
         run = self._create_run(
@@ -329,8 +337,10 @@ def _technical_prompt_contract(context: dict[str, Any]) -> dict[str, Any]:
             "chart_assets",
             "strategy",
             "prompt_template",
+            "generation_controls",
         ],
         "strategy_key": strategy.get("key"),
+        "generation_controls": context.get("generation_controls") or {},
         "required_output": {
             "format": "structured_markdown",
             "headings": headings,
@@ -354,9 +364,24 @@ def _technical_prompt_contract(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _with_effective_prompt_template(context: dict[str, Any]) -> dict[str, Any]:
+    prompt_template = context.get("prompt_template")
+    if not isinstance(prompt_template, dict):
+        return context
+    base_content = str(prompt_template.get("content_md") or "").strip()
+    overlay = str((context.get("generation_controls") or {}).get("prompt_overlay_md") or "").strip()
+    if not overlay:
+        return context
+    next_context = dict(context)
+    next_template = dict(prompt_template)
+    next_template["effective_content_md"] = "\n\n".join(part for part in (base_content, overlay) if part)
+    next_context["prompt_template"] = next_template
+    return next_context
+
+
 def _prompt_template_trace(context: dict[str, Any]) -> dict[str, Any]:
     prompt_template = context.get("prompt_template") if isinstance(context.get("prompt_template"), dict) else {}
-    content = str(prompt_template.get("content_md") or "")
+    content = str(prompt_template.get("effective_content_md") or prompt_template.get("content_md") or "")
     return {
         "path": prompt_template.get("path"),
         "status": prompt_template.get("status"),

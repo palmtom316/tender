@@ -33,6 +33,13 @@ const icons: Record<string, () => ReactNode> = {
       <polyline points="22 4 12 14.01 9 11.01" />
     </>
   ),
+  "x-circle": () => (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+    </>
+  ),
   download: () => (
     <>
       <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />

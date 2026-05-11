@@ -19,6 +19,7 @@ const {
   assembleBusinessBidMock,
   generateBidChapterMock,
   generateTechnicalChapterMock,
+  updateBidChapterMock,
 } = vi.hoisted(() => ({
   useNavigationMock: vi.fn(),
   fetchDraftsMock: vi.fn(),
@@ -35,6 +36,7 @@ const {
   assembleBusinessBidMock: vi.fn(),
   generateBidChapterMock: vi.fn(),
   generateTechnicalChapterMock: vi.fn(),
+  updateBidChapterMock: vi.fn(),
 }));
 
 vi.mock("../../lib/NavigationContext", () => ({
@@ -59,6 +61,7 @@ vi.mock("../../lib/api", async () => {
     assembleBusinessBid: assembleBusinessBidMock,
     generateBidChapter: generateBidChapterMock,
     generateTechnicalChapter: generateTechnicalChapterMock,
+    updateBidChapter: updateBidChapterMock,
   };
 });
 
@@ -100,6 +103,7 @@ describe("EditorContent chart workflow", () => {
           chapter_title: "质量保证措施",
           volume_type: "technical",
           sort_order: 1,
+          metadata_json: { target_pages: 80 },
         },
       ],
     });
@@ -132,6 +136,7 @@ describe("EditorContent chart workflow", () => {
       equipment_selections: [{ id: "equipment-1" }],
       chart_assets: [{ id: "asset-1" }],
       recommended_charts: ["quality_system", "response_matrix", "critical_path"],
+      generation_controls: { target_pages: 80, target_pages_source: "user" },
       company_assets: { performances: [{ id: "perf-1" }], certificates: [{ id: "cert-1" }] },
     });
     listChartAssetsMock.mockResolvedValue([
@@ -156,6 +161,7 @@ describe("EditorContent chart workflow", () => {
       status: "draft",
     });
     approveChartAssetMock.mockResolvedValue({ id: "asset-1", status: "approved" });
+    updateBidChapterMock.mockResolvedValue({ id: "chapter-1", metadata_json: { target_pages: 96 } });
     updateDraftMock.mockResolvedValue({});
   });
 
@@ -171,6 +177,7 @@ describe("EditorContent chart workflow", () => {
     expect(screen.getByText((_, element) => element?.textContent === "评分：1")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "标准：1")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "业绩：1")).toBeInTheDocument();
+    expect(screen.getByLabelText("10.1 目标页数")).toHaveValue(80);
     const placeholderMap = screen.getByLabelText("图表占位映射");
     expect(within(placeholderMap).getByText("图表占位映射")).toBeInTheDocument();
     expect(within(placeholderMap).getByText("quality_system")).toBeInTheDocument();
@@ -213,6 +220,30 @@ describe("EditorContent chart workflow", () => {
         chart_type: "critical_path",
         title: "关键路径图",
         placeholder_key: "critical_path",
+      })),
+    );
+  });
+
+  it("saves target pages and passes them to technical generation", async () => {
+    render(withClient(<EditorContent />));
+
+    const chapterLabels = await screen.findAllByText("10.1");
+    fireEvent.click(chapterLabels[1]);
+    const targetInput = await screen.findByLabelText("10.1 目标页数");
+    fireEvent.change(targetInput, { target: { value: "96" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存篇幅" }));
+
+    await waitFor(() =>
+      expect(updateBidChapterMock).toHaveBeenCalledWith("chapter-1", expect.objectContaining({
+        metadata_json: expect.objectContaining({ target_pages: 96 }),
+      })),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "技术生成" }));
+
+    await waitFor(() =>
+      expect(generateTechnicalChapterMock).toHaveBeenCalledWith("proj-1", "chapter-1", expect.objectContaining({
+        target_pages: 96,
       })),
     );
   });

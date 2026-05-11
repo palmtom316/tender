@@ -111,20 +111,20 @@ function UserManagement() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-6)" }}>
-        <h1 className="section-heading" style={{ margin: 0 }}>用户管理</h1>
+      <div className="page-header">
+        <h1 className="section-heading">用户管理</h1>
         <ClayButton onClick={() => { setShowForm(true); setEditingUser(null); }}>
-          <span style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <span className="inline-icon-label">
             <Icon name="plus" size={16} />
             添加用户
           </span>
         </ClayButton>
       </div>
 
-      {loading && <p style={{ color: "var(--color-text-muted)" }}>加载中...</p>}
+      {loading && <p className="muted-copy">加载中...</p>}
       {error && (
         <Card>
-          <p style={{ color: "var(--color-danger)" }}>加载失败: {error}</p>
+          <p className="text-error">加载失败: {error}</p>
           <ClayButton onClick={() => loadUsers()}>重试</ClayButton>
         </Card>
       )}
@@ -137,17 +137,17 @@ function UserManagement() {
         />
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+      <div className="card-stack">
         {users.map((user) => (
-          <Card key={user.id} style={{ maxWidth: 680 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+          <Card key={user.id} className="card-narrow">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
                 <div className="avatar-circle" style={{ width: 36, height: 36 }}>
                   {user.display_name.charAt(0)}
                 </div>
                 <div>
                   <div style={{ fontWeight: 600 }}>{user.display_name}</div>
-                  <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
+                  <div className="muted-copy">
                     @{user.username}
                   </div>
                 </div>
@@ -156,23 +156,29 @@ function UserManagement() {
                 </Badge>
                 {!user.enabled && <Badge variant="default">已禁用</Badge>}
               </div>
-              <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                <button
-                  className="user-menu-item"
-                  style={{ padding: "var(--space-1) var(--space-2)", width: "auto" }}
+              <div className="flex items-center gap-2">
+                <ClayButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="clay-btn--icon"
                   onClick={() => { setEditingUser(user); setShowForm(false); }}
                   title="编辑"
+                  aria-label={`编辑用户 ${user.display_name}`}
                 >
                   <Icon name="edit" size={16} />
-                </button>
-                <button
-                  className="user-menu-item user-menu-danger"
-                  style={{ padding: "var(--space-1) var(--space-2)", width: "auto" }}
+                </ClayButton>
+                <ClayButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  className="clay-btn--icon"
                   onClick={() => setPendingDeleteUser(user)}
                   title="删除"
+                  aria-label={`删除用户 ${user.display_name}`}
                 >
                   <Icon name="trash" size={16} />
-                </button>
+                </ClayButton>
               </div>
             </div>
           </Card>
@@ -245,8 +251,8 @@ function UserForm({ user, onSaved, onCancel }: UserFormProps) {
   };
 
   return (
-    <Card style={{ maxWidth: 680, marginBottom: "var(--space-6)" }}>
-      <h3 style={{ marginBottom: "var(--space-4)" }}>{isEdit ? "编辑用户" : "添加用户"}</h3>
+    <Card className="card-narrow settings-form-card">
+      <h3 className="settings-form-card__title">{isEdit ? "编辑用户" : "添加用户"}</h3>
       {!isEdit && (
         <div className="form-group">
           <label className="form-label">用户名</label>
@@ -271,13 +277,13 @@ function UserForm({ user, onSaved, onCancel }: UserFormProps) {
       </div>
       {isEdit && (
         <div className="form-group">
-          <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", cursor: "pointer" }}>
+          <label className="checkbox-row">
             <input type="checkbox" aria-label="启用账号" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            <span className="form-label" style={{ margin: 0 }}>启用账号</span>
+            <span className="form-label">启用账号</span>
           </label>
         </div>
       )}
-      {error && <p style={{ color: "var(--color-danger)", fontSize: "var(--text-sm)", marginBottom: "var(--space-3)" }}>{error}</p>}
+      {error && <p className="text-error form-group--tight">{error}</p>}
       <div className="flex items-center gap-3">
         <ClayButton onClick={handleSubmit} disabled={saving}>{saving ? "保存中..." : "保存"}</ClayButton>
         <ClayButton onClick={onCancel}>取消</ClayButton>
@@ -324,11 +330,13 @@ function AISettings() {
 
   return (
     <div>
-      <h1 className="section-heading">AI Agent 配置</h1>
-      {loading && <p style={{ color: "var(--color-text-muted)" }}>加载中...</p>}
+      <div className="page-header">
+        <h1 className="section-heading">AI Agent 配置</h1>
+      </div>
+      {loading && <p className="muted-copy">加载中...</p>}
       {error && (
-        <Card>
-          <p style={{ color: "var(--color-danger)" }}>加载失败: {error}</p>
+        <Card className="feedback-card">
+          <p className="text-error">加载失败: {error}</p>
           <ClayButton onClick={() => loadConfigs()}>重试</ClayButton>
         </Card>
       )}
@@ -421,34 +429,32 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
   const isOcr = config.agent_type === "ocr";
 
   return (
-    <Card>
-      {/* Header */}
-      <div className="flex items-center gap-2" style={{ marginBottom: "var(--space-3)" }}>
-        <strong>{config.display_name}</strong>
+    <Card className="agent-config-card">
+      <div className="agent-config-card__header">
+        <strong className="agent-config-card__title">{config.display_name}</strong>
         <Badge variant={isOcr ? "warning" : "info"}>
           {isOcr ? "OCR" : "LLM"}
         </Badge>
       </div>
       {config.description && (
-        <p style={{ color: "var(--color-text-muted)", fontSize: "var(--text-xs)", marginBottom: "var(--space-3)", lineHeight: 1.3 }}>
+        <p className="agent-config-card__description">
           {config.description}
         </p>
       )}
 
-      {/* Primary config — 2 column layout */}
       <div className="agent-form-grid">
-        <div className="form-group" style={{ margin: 0 }}>
+        <div className="form-group">
           <label className="form-label">Base URL</label>
-          <input className="clay-input" aria-label={`${config.display_name} Base URL`} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" style={{ fontSize: "var(--text-sm)" }} />
+          <input className="clay-input" aria-label={`${config.display_name} Base URL`} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" />
         </div>
-        <div className="form-group" style={{ margin: 0 }}>
+        <div className="form-group">
           <label className="form-label">API Key</label>
-          <input className="clay-input" aria-label={`${config.display_name} API Key`} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={config.api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
+          <input className="clay-input" aria-label={`${config.display_name} API Key`} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={config.api_key_display || "sk-..."} />
         </div>
         {!isOcr && (
-          <div className="form-group" style={{ margin: 0 }}>
+          <div className="form-group">
             <label className="form-label">主模型</label>
-            <select className="clay-input" aria-label={`${config.display_name} 主模型`} value={primaryModel} onChange={(e) => setPrimaryModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
+            <select className="clay-input" aria-label={`${config.display_name} 主模型`} value={primaryModel} onChange={(e) => setPrimaryModel(e.target.value)}>
               <option value="">-- 选择 --</option>
               {MODEL_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -458,24 +464,23 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
         )}
       </div>
 
-      {/* Fallback config — collapsible for LLM agents */}
       {!isOcr && (
-        <details style={{ marginTop: "var(--space-2)" }}>
-          <summary style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", cursor: "pointer", userSelect: "none" }}>
+        <details className="agent-fallback">
+          <summary className="agent-fallback__summary">
             备选模型 (Fallback)
           </summary>
-          <div className="agent-form-grid" style={{ marginTop: "var(--space-2)" }}>
-            <div className="form-group" style={{ margin: 0 }}>
+          <div className="agent-form-grid agent-form-grid--spaced">
+            <div className="form-group">
               <label className="form-label">Fallback URL</label>
-              <input className="clay-input" aria-label={`${config.display_name} Fallback URL`} value={fallbackBaseUrl} onChange={(e) => setFallbackBaseUrl(e.target.value)} placeholder="https://..." style={{ fontSize: "var(--text-sm)" }} />
+              <input className="clay-input" aria-label={`${config.display_name} Fallback URL`} value={fallbackBaseUrl} onChange={(e) => setFallbackBaseUrl(e.target.value)} placeholder="https://..." />
             </div>
-            <div className="form-group" style={{ margin: 0 }}>
+            <div className="form-group">
               <label className="form-label">Fallback Key</label>
-              <input className="clay-input" aria-label={`${config.display_name} Fallback Key`} type="password" value={fallbackApiKey} onChange={(e) => setFallbackApiKey(e.target.value)} placeholder={config.fallback_api_key_display || "sk-..."} style={{ fontSize: "var(--text-sm)" }} />
+              <input className="clay-input" aria-label={`${config.display_name} Fallback Key`} type="password" value={fallbackApiKey} onChange={(e) => setFallbackApiKey(e.target.value)} placeholder={config.fallback_api_key_display || "sk-..."} />
             </div>
-            <div className="form-group" style={{ margin: 0 }}>
+            <div className="form-group">
               <label className="form-label">备选模型</label>
-              <select className="clay-input" aria-label={`${config.display_name} 备选模型`} value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)} style={{ fontSize: "var(--text-sm)" }}>
+              <select className="clay-input" aria-label={`${config.display_name} 备选模型`} value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)}>
                 <option value="">-- 选择 --</option>
                 {MODEL_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -486,8 +491,7 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
         </details>
       )}
 
-      {/* Actions + feedback */}
-      <div className="flex items-center gap-2" style={{ marginTop: "var(--space-3)" }}>
+      <div className="agent-config-card__actions">
         <ClayButton onClick={handleSave} disabled={saving} size="sm">
           {saving ? "..." : "保存"}
         </ClayButton>
@@ -495,14 +499,7 @@ function AgentConfigCard({ config, onUpdate }: AgentConfigCardProps) {
           {testing ? "测试中..." : "测试连接"}
         </ClayButton>
         {feedback && (
-          <span style={{
-            color: feedback.type === "success" ? "var(--color-success)" : "var(--color-danger)",
-            fontSize: "var(--text-xs)",
-            flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}>
+          <span className={`agent-config-card__feedback agent-config-card__feedback--${feedback.type}`}>
             {feedback.msg}
           </span>
         )}
@@ -581,10 +578,10 @@ function SkillsSettings() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-6)", gap: "var(--space-3)", flexWrap: "wrap" }}>
-        <div>
-          <h1 className="section-heading" style={{ margin: 0 }}>Skills</h1>
-          <p style={{ marginTop: "var(--space-2)", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>
+      <div className="page-header">
+        <div className="page-header__copy">
+          <h1 className="section-heading">Skills</h1>
+          <p className="page-header__description">
             将工作流能力和 repo-local skill catalog 接入 Tender 系统，支持同步、启停与维护。
           </p>
         </div>
@@ -599,15 +596,15 @@ function SkillsSettings() {
       </div>
 
       {feedback && (
-        <Card style={{ marginBottom: "var(--space-4)" }}>
-          <p style={{ color: "var(--color-success)", margin: 0 }}>{feedback}</p>
+        <Card className="feedback-card">
+          <p className="success-message">{feedback}</p>
         </Card>
       )}
 
-      {loading && <p style={{ color: "var(--color-text-muted)" }}>加载中...</p>}
+      {loading && <p className="muted-copy">加载中...</p>}
       {error && (
-        <Card style={{ marginBottom: "var(--space-4)" }}>
-          <p style={{ color: "var(--color-danger)" }}>加载失败: {error}</p>
+        <Card className="feedback-card">
+          <p className="text-error">加载失败: {error}</p>
           <ClayButton onClick={() => loadSkills()}>重试</ClayButton>
         </Card>
       )}
@@ -620,12 +617,12 @@ function SkillsSettings() {
         />
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+      <div className="card-stack">
         {skills.map((skill) => (
-          <Card key={skill.skill_name} style={{ maxWidth: 820 }}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "var(--space-3)" }}>
-              <div style={{ flex: 1 }}>
-                <div className="flex items-center gap-2" style={{ marginBottom: "var(--space-2)", flexWrap: "wrap" }}>
+          <Card key={skill.skill_name} className="card-wide">
+            <div className="skill-card">
+              <div className="skill-card__body">
+                <div className="skill-card__header">
                   <strong>{skill.skill_name}</strong>
                   <Badge variant={skill.active ? "info" : "default"}>
                     {skill.active ? "已启用" : "已停用"}
@@ -635,24 +632,22 @@ function SkillsSettings() {
                     <Badge variant="default">Prompt 已关联</Badge>
                   )}
                 </div>
-                <p style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)", marginBottom: "var(--space-3)" }}>
+                <p className="muted-copy skill-card__description">
                   {skill.description || "暂无描述"}
                 </p>
-                <div style={{ fontSize: "var(--text-sm)", marginBottom: "var(--space-2)" }}>
-                  <strong>工具链：</strong>
-                </div>
-                <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                <div className="skill-card__tools-title">工具链：</div>
+                <div className="skill-card__tool-list">
                   {skill.tool_names.length > 0 ? skill.tool_names.map((tool) => (
                     <Badge key={tool} variant="default">{tool}</Badge>
                   )) : (
-                    <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>未配置</span>
+                    <span className="muted-copy">未配置</span>
                   )}
                 </div>
-                <div style={{ marginTop: "var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                <div className="muted-copy muted-copy--xs skill-card__timestamp">
                   创建时间：{new Date(skill.created_at).toLocaleString()}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="skill-card__actions">
                 <ClayButton
                   size="sm"
                   variant="secondary"
@@ -762,8 +757,8 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
   };
 
   return (
-    <Card style={{ maxWidth: 820, marginBottom: "var(--space-6)" }}>
-      <h3 style={{ marginBottom: "var(--space-4)" }}>{isEdit ? "编辑 Skill" : "新增 Skill"}</h3>
+    <Card className="card-wide settings-form-card">
+      <h3 className="settings-form-card__title">{isEdit ? "编辑 Skill" : "新增 Skill"}</h3>
       <div className="form-group">
         <label className="form-label">Skill 名称</label>
           <input
@@ -798,7 +793,7 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
         />
       </div>
       <div className="agent-form-grid">
-        <div className="form-group" style={{ margin: 0 }}>
+        <div className="form-group">
           <label className="form-label">Prompt Template ID</label>
           <input
             className="clay-input"
@@ -808,7 +803,7 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
             placeholder="可选 UUID"
           />
         </div>
-        <div className="form-group" style={{ margin: 0 }}>
+        <div className="form-group">
           <label className="form-label">版本</label>
           <input
             className="clay-input"
@@ -820,12 +815,12 @@ function SkillDefinitionForm({ skill, onSaved, onCancel }: SkillDefinitionFormPr
         </div>
       </div>
       <div className="form-group">
-        <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", cursor: "pointer" }}>
+        <label className="checkbox-row">
           <input type="checkbox" aria-label="启用 Skill" checked={active} onChange={(e) => setActive(e.target.checked)} />
-          <span className="form-label" style={{ margin: 0 }}>启用 Skill</span>
+          <span className="form-label">启用 Skill</span>
         </label>
       </div>
-      {error && <p style={{ color: "var(--color-danger)", fontSize: "var(--text-sm)", marginBottom: "var(--space-3)" }}>{error}</p>}
+      {error && <p className="text-error form-group--tight">{error}</p>}
       <div className="flex items-center gap-3">
         <ClayButton onClick={handleSubmit} disabled={saving}>
           {saving ? "保存中..." : "保存"}
