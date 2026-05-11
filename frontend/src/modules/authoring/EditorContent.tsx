@@ -28,6 +28,13 @@ const CHART_TYPE_OPTIONS = [
   { value: "risk_matrix", label: "风险分级管控矩阵" },
   { value: "emergency_org", label: "应急组织图" },
   { value: "schedule_gantt", label: "施工进度横道图" },
+  { value: "response_matrix", label: "条款响应矩阵" },
+  { value: "indicator_table", label: "指标台账" },
+  { value: "interface_table", label: "协调接口表" },
+  { value: "equipment_table", label: "设备配置表" },
+  { value: "closure_flow", label: "闭环流程图" },
+  { value: "data_flow", label: "数据流转图" },
+  { value: "critical_path", label: "关键路径图" },
 ] as const;
 
 function chartTitle(chartType: string) {
@@ -54,6 +61,18 @@ function companyAssetCount(context: Record<string, unknown> | undefined, key: st
   if (!assets || typeof assets !== "object") return 0;
   const value = (assets as Record<string, unknown>)[key];
   return Array.isArray(value) ? value.length : 0;
+}
+
+function recommendedChartKeys(context: Record<string, unknown> | undefined) {
+  const charts = context?.recommended_charts;
+  if (!Array.isArray(charts)) return [];
+  return charts.flatMap((chart) => {
+    if (typeof chart === "string" && chart.trim()) return [chart];
+    if (!chart || typeof chart !== "object") return [];
+    const record = chart as Record<string, unknown>;
+    const key = record.placeholder_key ?? record.chart_type ?? record.key;
+    return typeof key === "string" && key.trim() ? [key] : [];
+  });
 }
 
 export function EditorContent() {
@@ -125,6 +144,9 @@ export function EditorContent() {
     enabled: !!projectId && !!selectedOutlineChapter?.id && selectedOutlineChapter.volume_type === "technical",
     retry: false,
   });
+  const pendingChartCount = chartAssets.filter((asset) => asset.status !== "approved").length;
+  const approvedChartCount = chartAssets.length - pendingChartCount;
+  const recommendedCharts = recommendedChartKeys(chapterContext);
 
   const save = useMutation({
     mutationFn: ({ id, content }: { id: string; content: string }) =>
@@ -303,6 +325,10 @@ export function EditorContent() {
             <strong>图表资产</strong>
             <p>模板中使用占位符插入图表，正式导出只使用已审批图表。</p>
           </div>
+          <div className="workflow-gate-panel__chips">
+            <span>待审批：{pendingChartCount}</span>
+            <span>已审批：{approvedChartCount}</span>
+          </div>
           <div className="chart-asset-grid">
             {chartAssets.map((asset) => (
               <article key={asset.id} className="chart-asset-card">
@@ -390,6 +416,22 @@ export function EditorContent() {
             <span>业绩：{companyAssetCount(chapterContext, "performances")}</span>
             <span>证书：{companyAssetCount(chapterContext, "certificates")}</span>
           </div>
+          {recommendedCharts.length > 0 && (
+            <div className="template-conflict-list" aria-label="图表占位映射">
+              <strong>图表占位映射</strong>
+              {recommendedCharts.map((key) => {
+                const asset = chartAssets.find((item) => chartPlaceholder(item) === key || item.chart_type === key);
+                return (
+                  <article key={key} className="template-conflict-item">
+                    <strong>{key}</strong>
+                    <span>{asset ? chartTitle(asset.chart_type) : chartTitle(key)}</span>
+                    <code>{`{{chart:${key}}}`}</code>
+                    <span>{asset ? `状态：${asset.status}` : "状态：未生成"}</span>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 

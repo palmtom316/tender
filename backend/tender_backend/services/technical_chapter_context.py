@@ -9,6 +9,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from tender_backend.services.technical_chapter_strategies import (
+    SITE_CONDITION_KEYWORDS,
     chart_recommendations_for_chapter,
     prompt_template_for_chapter,
     strategy_for_chapter,
@@ -25,12 +26,14 @@ class TechnicalChapterContextBuilder:
         constraints = self._constraints_for_chapter(constraint_set, chapter_code=chapter["chapter_code"])
         requirement_ids = [item["requirement_id"] for item in constraints if item.get("requirement_id")]
         strategy = strategy_for_chapter(chapter.get("chapter_code"))
+        tender_summary = self._tender_summary(conn, project_id=project_id)
         return {
             "project_id": str(project_id),
             "chapter": chapter,
             "constraint_set": _compact_constraint_set(constraint_set),
             "constraints": constraints,
-            "tender_summary": self._tender_summary(conn, project_id=project_id),
+            "tender_summary": tender_summary,
+            "matched_keywords": _matched_site_condition_keywords(tender_summary),
             "scoring_items": self._scoring_items(conn, project_id=project_id, chapter=chapter),
             "standard_clauses": self._standard_clauses(conn, requirement_ids=requirement_ids),
             "personnel_selections": self._personnel_selections(conn, project_id=project_id),
@@ -270,6 +273,28 @@ def _strategy_to_dict(strategy: Any) -> dict[str, Any]:
         "forbidden_terms": list(strategy.forbidden_terms),
         "prompt_template_path": strategy.prompt_template_path,
     }
+
+
+def _matched_site_condition_keywords(tender_summary: dict[str, Any]) -> list[str]:
+    if not tender_summary:
+        return []
+    source_text = " ".join(
+        [
+            str(tender_summary.get("project_location") or ""),
+            _flatten_text(tender_summary.get("raw_facts_json") or {}),
+        ]
+    )
+    return [keyword for keyword in SITE_CONDITION_KEYWORDS if keyword in source_text]
+
+
+def _flatten_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return " ".join(_flatten_text(item) for item in value.values())
+    if isinstance(value, list):
+        return " ".join(_flatten_text(item) for item in value)
+    if value is None:
+        return ""
+    return str(value)
 
 
 __all__ = ["TechnicalChapterContextBuilder"]

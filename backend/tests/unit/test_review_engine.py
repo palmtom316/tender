@@ -142,6 +142,12 @@ def test_review_draft_accepts_complete_strategy_skeleton():
     ### 10.1.15 地域特殊质量保证措施
     对已确认环境条件采取针对性质量保障措施。
     {{chart:quality_system}}
+    {{chart:indicator_table}}
+    {{chart:response_matrix}}
+    {{chart:construction_flow}}
+    {{chart:closure_flow}}
+    {{chart:data_flow}}
+    {{chart:interface_table}}
     本章还包括资料同步、标准条款响应、责任岗位和检查频次，确保内容充分。
     """
 

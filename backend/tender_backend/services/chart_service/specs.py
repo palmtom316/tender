@@ -11,11 +11,18 @@ SUPPORTED_CHART_TYPES = {
     "org_chart",
     "construction_flow",
     "schedule_gantt",
+    "critical_path",
     "responsibility_matrix",
     "risk_matrix",
     "quality_system",
     "safety_system",
     "emergency_org",
+    "response_matrix",
+    "indicator_table",
+    "interface_table",
+    "equipment_table",
+    "closure_flow",
+    "data_flow",
 }
 
 FLOW_CHART_TYPES = {
@@ -24,6 +31,15 @@ FLOW_CHART_TYPES = {
     "quality_system",
     "safety_system",
     "emergency_org",
+    "closure_flow",
+    "data_flow",
+}
+
+TABLE_CHART_TYPES = {
+    "response_matrix",
+    "indicator_table",
+    "interface_table",
+    "equipment_table",
 }
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
@@ -74,7 +90,7 @@ class ChartEdge(BaseModel):
 
 
 class FlowChartSpec(BaseModel):
-    chart_type: Literal["org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org"]
+    chart_type: Literal["org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org", "closure_flow", "data_flow"]
     title: str = Field(min_length=1, max_length=100)
     placeholder_key: str | None = None
     direction: Literal["TB", "TD", "BT", "LR", "RL"] = "TB"
@@ -108,6 +124,7 @@ class GanttTask(BaseModel):
     start: date
     end: date
     group: str | None = Field(default=None, max_length=60)
+    is_critical: bool = False
 
     @field_validator("id")
     @classmethod
@@ -141,7 +158,7 @@ class GanttDependency(BaseModel):
 
 
 class GanttChartSpec(BaseModel):
-    chart_type: Literal["schedule_gantt"]
+    chart_type: Literal["schedule_gantt", "critical_path"]
     title: str = Field(min_length=1, max_length=100)
     placeholder_key: str | None = None
     date_format: Literal["YYYY-MM-DD"] = "YYYY-MM-DD"
@@ -274,7 +291,50 @@ class ResponsibilityMatrixSpec(BaseModel):
         return self
 
 
-ChartSpec = FlowChartSpec | GanttChartSpec | RiskMatrixSpec | ResponsibilityMatrixSpec
+class TableRow(BaseModel):
+    cells: list[str] = Field(min_length=1, max_length=12)
+
+    @field_validator("cells")
+    @classmethod
+    def plain_cells(cls, values: list[str]) -> list[str]:
+        return [_plain_text(value) for value in values]
+
+
+class TableChartSpec(BaseModel):
+    chart_type: Literal["response_matrix", "indicator_table", "interface_table", "equipment_table"]
+    title: str = Field(min_length=1, max_length=100)
+    placeholder_key: str | None = None
+    columns: list[str] = Field(min_length=1, max_length=12)
+    rows: list[TableRow] = Field(min_length=1, max_length=80)
+    caption_title: str | None = Field(default=None, max_length=100)
+    figure_no: str | None = Field(default=None, max_length=30)
+    chapter_code: str | None = Field(default=None, max_length=20)
+
+    @field_validator("title", "caption_title", "figure_no", "chapter_code")
+    @classmethod
+    def plain_text(cls, value: str | None) -> str | None:
+        return _plain_text(value) if value is not None else None
+
+    @field_validator("columns")
+    @classmethod
+    def plain_columns(cls, values: list[str]) -> list[str]:
+        return [_plain_text(value) for value in values]
+
+    @field_validator("placeholder_key")
+    @classmethod
+    def safe_placeholder(cls, value: str | None) -> str | None:
+        return _safe_placeholder(value)
+
+    @model_validator(mode="after")
+    def check_width(self) -> TableChartSpec:
+        width = len(self.columns)
+        for row in self.rows:
+            if len(row.cells) != width:
+                raise ValueError("row cells must match columns")
+        return self
+
+
+ChartSpec = FlowChartSpec | GanttChartSpec | RiskMatrixSpec | ResponsibilityMatrixSpec | TableChartSpec
 
 
 def parse_chart_spec(spec_json: dict[str, Any]) -> ChartSpec:
@@ -282,12 +342,14 @@ def parse_chart_spec(spec_json: dict[str, Any]) -> ChartSpec:
     try:
         if chart_type in FLOW_CHART_TYPES:
             return FlowChartSpec.model_validate(spec_json)
-        if chart_type == "schedule_gantt":
+        if chart_type in {"schedule_gantt", "critical_path"}:
             return GanttChartSpec.model_validate(spec_json)
         if chart_type == "risk_matrix":
             return RiskMatrixSpec.model_validate(spec_json)
         if chart_type == "responsibility_matrix":
             return ResponsibilityMatrixSpec.model_validate(spec_json)
+        if chart_type in TABLE_CHART_TYPES:
+            return TableChartSpec.model_validate(spec_json)
     except ValidationError as exc:
         raise ChartValidationError(_validation_issues(exc)) from exc
     raise ChartValidationError([{"code": "unsupported_chart_type", "message": f"unsupported chart type: {chart_type}"}])

@@ -228,9 +228,18 @@ def test_generate_bid_chapter_draft_persists_referenced_chart_keys() -> None:
     generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
 
     insert_query, insert_params = conn.queries[-1]
+    expected_chart_keys = [
+        "closure_flow",
+        "construction_flow",
+        "data_flow",
+        "indicator_table",
+        "interface_table",
+        "quality_system",
+        "response_matrix",
+    ]
     assert "referenced_chart_keys" in insert_query
-    assert insert_params[-1] == ["quality_system"]
-    assert conn.saved["referenced_chart_keys"] == ["quality_system"]
+    assert insert_params[-1] == expected_chart_keys
+    assert conn.saved["referenced_chart_keys"] == expected_chart_keys
 
 
 def test_generate_bid_chapter_draft_can_render_from_normalized_context() -> None:

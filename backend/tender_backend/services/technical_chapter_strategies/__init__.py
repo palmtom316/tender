@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .registry import (
     CHAPTER_STRATEGIES,
+    SITE_CONDITION_KEYWORDS,
     TechnicalChapterStrategy,
     chart_recommendations_for_chapter,
     prompt_template_for_chapter,
@@ -12,6 +13,7 @@ from .registry import (
 
 __all__ = [
     "CHAPTER_STRATEGIES",
+    "SITE_CONDITION_KEYWORDS",
     "TechnicalChapterStrategy",
     "chart_recommendations_for_chapter",
     "prompt_template_for_chapter",

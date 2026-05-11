@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import signal
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -35,11 +36,149 @@ def test_native_risk_matrix_renders_svg_and_png(tmp_path: Path) -> None:
     assert png.stat().st_size > 0
 
 
+def test_flow_fallback_renders_declared_edges_and_labels() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "quality_system",
+            "title": "质量管理体系图",
+            "nodes": [
+                {"id": "manager", "label": "项目经理"},
+                {"id": "quality", "label": "质量负责人"},
+                {"id": "team", "label": "施工班组"},
+            ],
+            "edges": [
+                {"from": "manager", "to": "quality", "label": "监督"},
+                {"from": "manager", "to": "team", "label": "部署"},
+            ],
+        }
+    )
+
+    rendered = render_chart_spec(spec)
+
+    assert rendered.engine == "system_mermaid_fallback"
+    assert "监督" in rendered.svg
+    assert "部署" in rendered.svg
+    assert "data-edge='manager-quality'" in rendered.svg
+    assert "data-edge='manager-team'" in rendered.svg
+
+
+def test_flow_fallback_handles_cycles_without_hanging() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "closure_flow",
+            "title": "问题闭环流程图",
+            "nodes": [
+                {"id": "check", "label": "检查"},
+                {"id": "rectify", "label": "整改"},
+            ],
+            "edges": [
+                {"from": "check", "to": "rectify"},
+                {"from": "rectify", "to": "check"},
+            ],
+        }
+    )
+
+    def _timeout(_signum, _frame):
+        raise TimeoutError("flow layout did not terminate")
+
+    previous = signal.signal(signal.SIGALRM, _timeout)
+    signal.setitimer(signal.ITIMER_REAL, 1)
+    try:
+        rendered = render_chart_spec(spec)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+    assert "data-edge='check-rectify'" in rendered.svg
+    assert "data-edge='rectify-check'" in rendered.svg
+
+
+def test_gantt_fallback_renders_ticks_dependencies_sections_and_critical_path() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "schedule_gantt",
+            "title": "施工进度计划图",
+            "tasks": [
+                {
+                    "id": "prepare",
+                    "label": "施工准备",
+                    "start": "2026-06-01",
+                    "end": "2026-06-05",
+                    "group": "准备阶段",
+                },
+                {
+                    "id": "install",
+                    "label": "设备安装",
+                    "start": "2026-06-06",
+                    "end": "2026-06-20",
+                    "group": "实施阶段",
+                    "is_critical": True,
+                },
+            ],
+            "dependencies": [{"from": "prepare", "to": "install"}],
+        }
+    )
+
+    rendered = render_chart_spec(spec)
+
+    assert rendered.engine == "system_mermaid_fallback"
+    assert "准备阶段" in rendered.svg
+    assert "实施阶段" in rendered.svg
+    assert "data-tick=" in rendered.svg
+    assert "data-dependency='prepare-install'" in rendered.svg
+    assert "stroke='#d92d20'" in rendered.svg
+
+
+def test_table_chart_renderer_outputs_grid_cells() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "indicator_table",
+            "title": "绿色施工指标表",
+            "columns": ["指标", "来源", "记录"],
+            "rows": [{"cells": ["节水", "招标文件", "台账"]}],
+        }
+    )
+
+    rendered = render_chart_spec(spec)
+
+    assert rendered.engine == "native_svg"
+    assert "绿色施工指标表" in rendered.svg
+    assert "节水" in rendered.svg
+    assert "招标文件" in rendered.svg
+
+
+def test_risk_matrix_summarizes_dense_cells() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "risk_matrix",
+            "title": "风险矩阵",
+            "rows": ["高影响"],
+            "columns": ["高概率"],
+            "cells": [
+                {
+                    "row": "高影响",
+                    "column": "高概率",
+                    "items": ["风险1", "风险2", "风险3", "风险4"],
+                    "level": "critical",
+                }
+            ],
+        }
+    )
+
+    rendered = render_chart_spec(spec)
+
+    assert "4项·极高" in rendered.svg
+    assert "风险4" not in rendered.svg
+
+
 def test_figure_numbering_uses_chapter_prefix() -> None:
     numbering = FigureNumbering()
 
-    assert numbering.next_number(chapter_code="8.1") == "图8-1"
-    assert numbering.next_number(chapter_code="8.2") == "图8-2"
+    assert numbering.next_number(chapter_code="8.1") == "图8.1-1"
+    assert numbering.next_number(chapter_code="8.2") == "图8.2-1"
+    assert numbering.next_number(chapter_code="10.1.3") == "图10.1-1"
+    assert numbering.next_number(chapter_code="10.1.8") == "图10.1-2"
+    assert numbering.next_number(chapter_code="10.3.5") == "图10.3-1"
     assert numbering.next_number(chapter_code="9") == "图9-1"
     assert numbering.next_number(chapter_code="9", explicit="图A-1") == "图A-1"
 
@@ -88,5 +227,5 @@ def test_chart_asset_injector_replaces_placeholder_with_image_and_caption(tmp_pa
 
     assert count == 1
     assert "{{chart:" not in text
-    assert "图8-1 施工流程图" in text
+    assert "图8.1-1 施工流程图" in text
     assert len(rendered.inline_shapes) == 1

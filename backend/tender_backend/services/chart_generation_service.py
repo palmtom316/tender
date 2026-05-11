@@ -18,6 +18,7 @@ from tender_backend.db.repositories.chart_asset_repo import (
 )
 from tender_backend.services.chart_service.png_converter import svg_to_png
 from tender_backend.services.chart_service.renderers import render_chart_spec
+from tender_backend.services.chart_service.redactor import redact_context_for_chart, scan_blind_bid_keywords
 from tender_backend.services.chart_service.specs import (
     SUPPORTED_CHART_TYPES,
     ChartValidationError,
@@ -40,12 +41,19 @@ class ChartGenerationService:
         title: str,
         spec_json: dict[str, Any],
         outline_node_id: UUID | None = None,
+        chapter_code: str | None = None,
     ) -> dict[str, Any]:
         if chart_type not in SUPPORTED_CHART_TYPES:
             raise ValueError(f"unsupported chart type: {chart_type}")
         payload = _prepare_payload(chart_type=chart_type, title=title, spec_json=spec_json)
         payload["chart_type"] = chart_type
         payload["title"] = title
+        if chapter_code and not payload.get("chapter_code"):
+            payload["chapter_code"] = chapter_code
+        if not payload.get("caption_title"):
+            payload["caption_title"] = title
+        persisted_payload = _strip_blind_bid_blacklist(payload)
+        is_default_spec = bool(payload.pop("_default_spec", False))
         validation = self.validate(chart_type=chart_type, spec_json=payload)
         if not validation["valid"]:
             row = self._repo.create(
@@ -54,13 +62,36 @@ class ChartGenerationService:
                 outline_node_id=outline_node_id,
                 chart_type=chart_type,
                 title=title,
-                spec_json=payload,
+                spec_json=persisted_payload,
                 rendered_svg=None,
                 rendered_png_path=None,
                 placeholder_key=_placeholder_from_spec(payload),
                 mermaid_source=None,
                 status="needs_review",
                 metadata_json={"validation": validation},
+            )
+            return chart_asset_to_dict(row)
+
+        blind_bid_issues = _blind_bid_issues(payload)
+        if blind_bid_issues:
+            persisted_payload = _strip_blind_bid_blacklist(payload)
+            row = self._repo.create(
+                conn,
+                project_id=project_id,
+                outline_node_id=outline_node_id,
+                chart_type=chart_type,
+                title=title,
+                spec_json=persisted_payload,
+                rendered_svg=None,
+                rendered_png_path=None,
+                placeholder_key=_placeholder_from_spec(payload),
+                mermaid_source=None,
+                status="needs_review",
+                metadata_json={
+                    "validation": validation,
+                    "blind_bid_scan": {"issues": blind_bid_issues},
+                    "source_kind": "json_spec",
+                },
             )
             return chart_asset_to_dict(row)
 
@@ -72,6 +103,8 @@ class ChartGenerationService:
             placeholder_key=_placeholder_from_spec(normalized) or chart_type,
             svg=rendered.svg,
         )
+        status = "needs_review" if is_default_spec else "draft"
+        source_context = {"chapter_code": payload.get("chapter_code")} if payload.get("chapter_code") else {}
         row = self._repo.create(
             conn,
             project_id=project_id,
@@ -83,11 +116,12 @@ class ChartGenerationService:
             rendered_png_path=str(png_path),
             placeholder_key=_placeholder_from_spec(normalized),
             mermaid_source=rendered.mermaid_source,
-            status="draft",
+            status=status,
             metadata_json={
                 "validation": validation,
                 "render_engine": rendered.engine,
-                "source_kind": "json_spec",
+                "source_kind": "default_spec" if is_default_spec else "json_spec",
+                "source_context": source_context,
             },
         )
         return chart_asset_to_dict(row)
@@ -157,10 +191,11 @@ def _prepare_payload(*, chart_type: str, title: str, spec_json: dict[str, Any]) 
     payload["chart_type"] = chart_type
     if title:
         payload["title"] = title
-    if chart_type in {"org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org"}:
+    if chart_type in {"org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org", "closure_flow", "data_flow"}:
         payload["nodes"] = _normalize_flow_nodes(payload.get("nodes") or payload.get("steps") or [])
         if "edges" not in payload:
-            payload["edges"] = [
+            parent_edges = _flow_parent_edges(payload["nodes"])
+            payload["edges"] = parent_edges or [
                 {"from": payload["nodes"][index]["id"], "to": payload["nodes"][index + 1]["id"]}
                 for index in range(max(len(payload["nodes"]) - 1, 0))
             ]
@@ -175,10 +210,23 @@ def _normalize_flow_nodes(value: object) -> list[dict[str, str]]:
         if isinstance(item, dict):
             label = str(item.get("label") or item.get("name") or item.get("id") or f"节点{index}")
             node_id = str(item.get("id") or f"n{index}")
-            nodes.append({"id": node_id, "label": label})
+            node = {"id": node_id, "label": label}
+            if item.get("parent"):
+                node["parent"] = str(item["parent"])
+            nodes.append(node)
         else:
             nodes.append({"id": f"n{index}", "label": str(item)})
     return nodes
+
+
+def _flow_parent_edges(nodes: list[dict[str, str]]) -> list[dict[str, str]]:
+    node_ids = {node["id"] for node in nodes}
+    edges: list[dict[str, str]] = []
+    for node in nodes:
+        parent = node.get("parent")
+        if parent and parent in node_ids:
+            edges.append({"from": parent, "to": node["id"]})
+    return edges
 
 
 def _safe_filename(value: str) -> str:
@@ -186,14 +234,15 @@ def _safe_filename(value: str) -> str:
 
 
 def default_chart_spec(*, chart_type: str, title: str, placeholder_key: str | None = None) -> dict[str, Any]:
-    base: dict[str, Any] = {"placeholder_key": placeholder_key or f"{chart_type}_main"}
-    if chart_type == "schedule_gantt":
+    base: dict[str, Any] = {"placeholder_key": placeholder_key or f"{chart_type}_main", "_default_spec": True}
+    if chart_type in {"schedule_gantt", "critical_path"}:
         return {
             **base,
             "tasks": [
-                {"id": "prepare", "label": "施工准备", "start": "2026-06-01", "end": "2026-06-05", "group": "准备阶段"},
-                {"id": "execute", "label": "组织实施", "start": "2026-06-06", "end": "2026-06-20", "group": "实施阶段"},
+                {"id": "prepare", "label": "施工准备", "start": "2026-06-01", "end": "2026-06-05", "group": "准备阶段", "is_critical": True},
+                {"id": "execute", "label": "组织实施", "start": "2026-06-06", "end": "2026-06-20", "group": "实施阶段", "is_critical": True},
             ],
+            "dependencies": [{"from": "prepare", "to": "execute"}],
         }
     if chart_type == "risk_matrix":
         return {
@@ -212,6 +261,12 @@ def default_chart_spec(*, chart_type: str, title: str, placeholder_key: str | No
                 {"role": "技术负责人", "activity": "技术交底", "level": "负责"},
                 {"role": "安全负责人", "activity": "安全检查", "level": "负责"},
             ],
+        }
+    if chart_type in {"response_matrix", "indicator_table", "interface_table", "equipment_table"}:
+        return {
+            **base,
+            "columns": ["事项", "来源", "措施"],
+            "rows": [{"cells": [title, "待补充来源", "按确认要求执行"]}],
         }
     return {
         **base,
@@ -234,6 +289,7 @@ def _generate_spec_with_ai(
     settings = get_settings()
     if not settings.ai_gateway_url:
         return None
+    is_blind_bid = bool(context.get("is_blind_bid") or context.get("blind_bid") or context.get("tender_summary", {}).get("is_blind_bid"))
     prompt = (
         "你是投标文件图表规划助手。只输出 JSON，不要 Markdown。"
         "字段必须符合 tender chart spec。AI 只生成结构化 spec，不生成代码。"
@@ -242,7 +298,7 @@ def _generate_spec_with_ai(
         "chart_type": chart_type,
         "title": title,
         "placeholder_key": placeholder_key or f"{chart_type}_main",
-        "context": context,
+        "context": redact_context_for_chart(context, is_blind_bid=is_blind_bid),
     }
     payload = {
         "task_type": "generate_chart_spec",
@@ -274,6 +330,28 @@ def _generate_spec_with_ai(
         return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+def _blind_bid_issues(spec_json: dict[str, Any]) -> list[dict[str, str]]:
+    metadata = spec_json.get("metadata_json")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    is_blind_bid = bool(metadata.get("is_blind_bid") or spec_json.get("is_blind_bid"))
+    if not is_blind_bid:
+        return []
+    blacklist = metadata.get("blind_bid_blacklist") or spec_json.get("blind_bid_blacklist") or []
+    return scan_blind_bid_keywords(_strip_blind_bid_blacklist(spec_json), [str(value) for value in blacklist])
+
+
+def _strip_blind_bid_blacklist(spec_json: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(spec_json)
+    payload.pop("blind_bid_blacklist", None)
+    metadata = payload.get("metadata_json")
+    if isinstance(metadata, dict) and "blind_bid_blacklist" in metadata:
+        safe_metadata = dict(metadata)
+        safe_metadata.pop("blind_bid_blacklist", None)
+        payload["metadata_json"] = safe_metadata
+    return payload
 
 
 __all__ = ["ChartGenerationService", "SUPPORTED_CHART_TYPES"]

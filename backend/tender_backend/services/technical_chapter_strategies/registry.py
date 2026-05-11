@@ -28,6 +28,19 @@ QUALITY_PROMPT_PATH = "docs/samples/配网质量保证措施提示词.md"
 SAFETY_GREEN_PROMPT_PATH = "docs/samples/配网安全与绿色施工保障措施提示词.md"
 SCHEDULE_PROMPT_PATH = "docs/samples/配网工程进度计划及保证措施提示词.md"
 
+SITE_CONDITION_KEYWORDS: tuple[str, ...] = (
+    "高温",
+    "雨季",
+    "汛期",
+    "山地",
+    "城区受限",
+    "地下管线密集",
+    "交通管制",
+    "高湿",
+    "酸雨",
+    "雾天",
+)
+
 
 CHAPTER_8_SECTIONS: tuple[tuple[str, str], ...] = (
     ("8.1 编制依据与标准", "基于招标文件、已确认约束和本地标准库建立标准-条款-响应矩阵；未匹配到来源的标准只列为待补充依据。"),
@@ -49,12 +62,15 @@ CHAPTER_8_SECTIONS: tuple[tuple[str, str], ...] = (
 
 
 CHAPTER_8_CHILD_CHARTS: dict[str, tuple[str, ...]] = {
+    "8.1": ("response_matrix",),
     "8.2": ("risk_matrix",),
     "8.3": ("construction_flow",),
     "8.4": ("construction_flow", "risk_matrix"),
     "8.5": ("quality_system",),
     "8.6": ("safety_system", "risk_matrix"),
     "8.7": ("schedule_gantt",),
+    "8.11": ("closure_flow",),
+    "8.13": ("equipment_table",),
 }
 
 
@@ -149,7 +165,7 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         sections=CHAPTER_8_SECTIONS,
         required_facts=("project_scope", "project_location", "construction_period", "quality_requirement"),
         required_standards=("construction_process", "construction_technical", "acceptance", "sgcc_management"),
-        required_charts=("construction_flow", "risk_matrix", "quality_system", "safety_system", "schedule_gantt"),
+        required_charts=("construction_flow", "risk_matrix", "quality_system", "safety_system", "schedule_gantt", "response_matrix", "equipment_table", "closure_flow"),
         innovation_slots=("标准化SOP", "FMEA风险矩阵", "WBS进度分解", "数字化施工留痕", "装配化施工条件化应用"),
         self_check_rules=(
             "15项必须作为第8章内部子目录，不得提升为技术标一级章节",
@@ -164,7 +180,7 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         sections=WORK_PLAN_SECTIONS,
         required_facts=("project_scope", "project_location", "construction_period", "owner_management_requirements", "external_coordination_constraints"),
         required_standards=("project_management", "sgcc_management"),
-        required_charts=("responsibility_matrix", "risk_matrix"),
+        required_charts=("responsibility_matrix", "risk_matrix", "response_matrix", "interface_table", "indicator_table"),
         innovation_slots=("工作任务矩阵", "协调接口清单", "风险治理台账", "跨章节索引", "标准化项目部规划"),
         self_check_rules=(
             "9.1至9.8必须作为第9章内部子章节，不得误写为第7章、第8章或第10章",
@@ -180,7 +196,7 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         sections=QUALITY_ASSURANCE_SECTIONS,
         required_facts=("quality_requirement", "quality_constraints"),
         required_standards=("quality_acceptance", "sgcc_quality"),
-        required_charts=("quality_system",),
+        required_charts=("quality_system", "indicator_table", "response_matrix", "construction_flow", "closure_flow", "data_flow", "interface_table"),
         innovation_slots=("质量问题销项看板", "首件样板引路", "一设备一档案", "数字化质量追溯", "质量负面清单"),
         self_check_rules=(
             "10.1.1至10.1.15必须作为10.1节内部子章节，不得提升为第10章其他一级子项",
@@ -196,7 +212,7 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         sections=SAFETY_GREEN_SECTIONS,
         required_facts=("safety_constraints", "site_conditions"),
         required_standards=("safety", "green_construction"),
-        required_charts=("safety_system", "risk_matrix"),
+        required_charts=("safety_system", "risk_matrix", "indicator_table", "emergency_org", "data_flow", "interface_table"),
         innovation_slots=("风险四色看板", "班前会移动签到", "隐患闭环看板", "数字化安全巡检", "绿色施工台账"),
         self_check_rules=(
             "10.2.1至10.2.16必须作为10.2节内部子章节，不得提升为第10章其他一级子项",
@@ -212,7 +228,7 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         sections=SCHEDULE_ASSURANCE_SECTIONS,
         required_facts=("construction_period", "schedule_constraints", "milestones", "outage_windows", "material_lead_times", "site_conditions"),
         required_standards=("schedule_management",),
-        required_charts=("schedule_gantt",),
+        required_charts=("schedule_gantt", "responsibility_matrix", "critical_path", "indicator_table", "interface_table", "closure_flow", "data_flow"),
         innovation_slots=("节点预警清单", "资源动态调配机制", "进度数据看板", "影像留痕", "多项目调度机制"),
         self_check_rules=(
             "10.3.1至10.3.15必须作为10.3节内部子章节，不得输出第6章或提升为第10章其他一级子项",

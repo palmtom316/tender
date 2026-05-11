@@ -106,6 +106,7 @@ class TechnicalBidWriter:
                     title=_chart_title(chart_type, chapter),
                     spec_json=spec,
                     outline_node_id=chapter.get("id"),
+                    chapter_code=chapter.get("chapter_code"),
                 )
             )
         return created
@@ -291,6 +292,13 @@ def _chart_title(chart_type: str, chapter: dict[str, Any]) -> str:
         "risk_matrix": "风险分级管控矩阵",
         "emergency_org": "应急组织架构图",
         "schedule_gantt": "施工进度计划图",
+        "critical_path": "关键路径图",
+        "response_matrix": "条款响应矩阵",
+        "indicator_table": "指标台账",
+        "interface_table": "协调接口表",
+        "equipment_table": "设备配置表",
+        "closure_flow": "闭环流程图",
+        "data_flow": "数据流转图",
     }
     return names.get(chart_type, f"{chapter.get('chapter_title') or '技术章节'}图表")
 

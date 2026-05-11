@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   useNavigationMock,
@@ -63,6 +63,10 @@ vi.mock("../../lib/api", async () => {
 });
 
 import { EditorContent } from "./EditorContent";
+
+afterEach(() => {
+  cleanup();
+});
 
 function withClient(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -127,6 +131,7 @@ describe("EditorContent chart workflow", () => {
       personnel_selections: [{ id: "person-1" }],
       equipment_selections: [{ id: "equipment-1" }],
       chart_assets: [{ id: "asset-1" }],
+      recommended_charts: ["quality_system", "response_matrix", "critical_path"],
       company_assets: { performances: [{ id: "perf-1" }], certificates: [{ id: "cert-1" }] },
     });
     listChartAssetsMock.mockResolvedValue([
@@ -166,6 +171,11 @@ describe("EditorContent chart workflow", () => {
     expect(screen.getByText((_, element) => element?.textContent === "评分：1")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "标准：1")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "业绩：1")).toBeInTheDocument();
+    const placeholderMap = screen.getByLabelText("图表占位映射");
+    expect(within(placeholderMap).getByText("图表占位映射")).toBeInTheDocument();
+    expect(within(placeholderMap).getByText("quality_system")).toBeInTheDocument();
+    expect(within(placeholderMap).getByText("response_matrix")).toBeInTheDocument();
+    expect(within(placeholderMap).getByText("critical_path")).toBeInTheDocument();
     fireEvent.change(await screen.findByLabelText("图表类型"), { target: { value: "risk_matrix" } });
     fireEvent.click(screen.getByRole("button", { name: "生成图表草案" }));
 
@@ -188,5 +198,22 @@ describe("EditorContent chart workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "审批图表" }));
 
     await waitFor(() => expect(approveChartAssetMock).toHaveBeenCalledWith("asset-1"));
+  });
+
+  it("shows extended chart type options and approval summary", async () => {
+    render(withClient(<EditorContent />));
+
+    expect(await screen.findByText("图表资产")).toBeInTheDocument();
+    expect(screen.getByText("待审批：1")).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText("图表类型"), { target: { value: "critical_path" } });
+    fireEvent.click(screen.getByRole("button", { name: "生成图表草案" }));
+
+    await waitFor(() =>
+      expect(generateChartAssetMock).toHaveBeenCalledWith("proj-1", expect.objectContaining({
+        chart_type: "critical_path",
+        title: "关键路径图",
+        placeholder_key: "critical_path",
+      })),
+    );
   });
 });

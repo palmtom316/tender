@@ -141,6 +141,7 @@ class _Conn:
 
 def test_technical_chapter_context_builder_collects_traceable_inputs():
     conn = _Conn()
+    conn.summary["raw_facts_json"]["site_conditions"] = "雨季施工，城区受限，地下管线密集。"
 
     context = TechnicalChapterContextBuilder().build(conn, project_id=conn.project_id, chapter_id=conn.chapter_id)
 
@@ -157,7 +158,9 @@ def test_technical_chapter_context_builder_collects_traceable_inputs():
     assert context["company_assets"]["performances"][0]["project_name"] == "10kV配网改造"
     assert context["company_assets"]["evidence_assets"][0]["asset_name"] == "质量体系认证证书"
     assert context["chart_assets"][0]["placeholder_key"] == "quality_system"
-    assert context["recommended_charts"] == ["quality_system"]
+    assert "quality_system" in context["recommended_charts"]
+    assert "response_matrix" in context["recommended_charts"]
+    assert context["matched_keywords"] == ["雨季", "城区受限", "地下管线密集"]
     assert context["strategy"]["prompt_template_path"] == "docs/samples/配网质量保证措施提示词.md"
     assert context["prompt_template"]["status"] == "loaded"
     assert context["prompt_template"]["path"] == "docs/samples/配网质量保证措施提示词.md"
@@ -184,5 +187,16 @@ def test_technical_chapter_context_builder_handles_empty_optional_data():
     assert context["constraints"] == []
     assert context["standard_clauses"] == []
     assert context["company_assets"]["company_profiles"] == []
-    assert context["recommended_charts"] == ["quality_system"]
+    assert "quality_system" in context["recommended_charts"]
+    assert context["matched_keywords"] == []
     assert context["prompt_template"]["status"] == "loaded"
+
+
+def test_technical_chapter_context_matches_site_condition_keywords_from_location_and_raw_facts():
+    conn = _Conn()
+    conn.summary["project_location"] = "山地高湿片区"
+    conn.summary["raw_facts_json"] = {"site_conditions": ["高温作业", "雾天管控"], "other": {"note": "交通管制"}}
+
+    context = TechnicalChapterContextBuilder().build(conn, project_id=conn.project_id, chapter_id=conn.chapter_id)
+
+    assert context["matched_keywords"] == ["高温", "山地", "交通管制", "高湿", "雾天"]

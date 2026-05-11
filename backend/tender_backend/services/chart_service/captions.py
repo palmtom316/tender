@@ -33,5 +33,5 @@ def add_caption_after(paragraph, *, figure_no: str, title: str):
 def _chapter_segment(chapter_code: str | None) -> str:
     if not chapter_code:
         return "1"
-    match = re.search(r"\d+", chapter_code)
+    match = re.search(r"\d+(?:\.\d+)?", chapter_code)
     return match.group(0) if match else "1"

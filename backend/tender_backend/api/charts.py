@@ -24,6 +24,7 @@ class ChartAssetBody(BaseModel):
     title: str
     spec_json: dict[str, Any]
     outline_node_id: UUID | None = None
+    chapter_code: str | None = None
 
 
 class ChartApprovalBody(BaseModel):
@@ -64,6 +65,7 @@ async def create_chart_asset(
             title=payload.title,
             spec_json=payload.spec_json,
             outline_node_id=payload.outline_node_id,
+            chapter_code=payload.chapter_code,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

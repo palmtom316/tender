@@ -130,8 +130,8 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
         def generate_spec(self, *, chart_type, title, placeholder_key=None, context=None):
             return {"placeholder_key": placeholder_key, "nodes": ["质量负责人", "施工班组"]}
 
-        def create_or_update(self, conn, *, project_id, chart_type, title, spec_json, outline_node_id=None):
-            created_charts.append((chart_type, title, spec_json, outline_node_id))
+        def create_or_update(self, conn, *, project_id, chart_type, title, spec_json, outline_node_id=None, chapter_code=None):
+            created_charts.append((chart_type, title, spec_json, outline_node_id, chapter_code))
             return {"id": uuid4(), "chart_type": chart_type, "placeholder_key": spec_json["placeholder_key"], "status": "draft"}
 
     class _Cursor:
@@ -174,6 +174,7 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
     result = _Writer().generate_chapter(_Conn(), project_id=project_id, chapter_id=chapter_id, created_by="Tester")
 
     assert created_charts[0][0] == "quality_system"
+    assert created_charts[0][4] == "10.1"
     assert "{{chart:quality_system}}" in result["draft"]["content_md"]
     assert captured["prompt_inputs"]["strategy"]["key"] == "quality_assurance"
     assert captured["metadata"]["context_hash"]
