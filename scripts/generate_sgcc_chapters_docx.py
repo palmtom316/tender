@@ -17,8 +17,20 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 from openai import OpenAI
 
-
 ROOT = Path(__file__).resolve().parents[1]
+BACKEND = ROOT / "backend"
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+
+from tender_backend.services.deepseek_api import (
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_V4_MAX_REASONING_EFFORT,
+    DEEPSEEK_V4_PRO_MODEL,
+    deepseek_v4_openai_sdk_options,
+    is_deepseek_v4_model,
+)
+
+
 SAMPLES = ROOT / "docs" / "samples"
 
 PROMPT_FILES = {
@@ -36,8 +48,8 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def compact_prompt(text: str, limit: int = 18000) -> str:
-    if len(text) <= limit:
+def compact_prompt(text: str, limit: int | None = None) -> str:
+    if limit is None or len(text) <= limit:
         return text
     marker = "## 六、"
     head, _, tail = text.partition(marker)
@@ -91,12 +103,26 @@ def build_messages(project_name: str, section_key: str, catalog: str, prompt_tex
     ]
 
 
-def call_deepseek(client: OpenAI, model: str, messages: list[dict[str, str]], max_tokens: int) -> tuple[str, object]:
+def call_deepseek(
+    client: OpenAI,
+    model: str,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    *,
+    reasoning_effort: str | None = None,
+    thinking_enabled: bool | None = None,
+) -> tuple[str, object]:
+    extra_options = {}
+    if is_deepseek_v4_model(model):
+        extra_options = deepseek_v4_openai_sdk_options(
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+        )
     response = client.chat.completions.create(
         model=model,
         messages=messages,
-        temperature=0.25,
         max_tokens=max_tokens,
+        **extra_options,
     )
     content = response.choices[0].message.content or ""
     return content.strip(), response.usage
@@ -226,10 +252,12 @@ def write_docx(project_name: str, outputs: dict[str, str], output_path: Path) ->
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project-name", required=True)
-    parser.add_argument("--model", default=os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro"))
-    parser.add_argument("--base-url", default=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
+    parser.add_argument("--model", default=os.environ.get("DEEPSEEK_MODEL", DEEPSEEK_V4_PRO_MODEL))
+    parser.add_argument("--base-url", default=os.environ.get("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL))
     parser.add_argument("--output", required=True)
-    parser.add_argument("--max-tokens", type=int, default=12000)
+    parser.add_argument("--max-tokens", type=int, default=64000)
+    parser.add_argument("--reasoning-effort", default=os.environ.get("DEEPSEEK_REASONING_EFFORT", DEEPSEEK_V4_MAX_REASONING_EFFORT))
+    parser.add_argument("--disable-thinking", action="store_true")
     parser.add_argument("--sleep", type=float, default=1.0)
     return parser.parse_args()
 
@@ -254,6 +282,8 @@ def main() -> int:
             args.model,
             build_messages(args.project_name, key, catalog, prompts[key]),
             args.max_tokens,
+            reasoning_effort=args.reasoning_effort,
+            thinking_enabled=False if args.disable_thinking else True,
         )
         outputs[key] = content
         usage_summary[key] = {

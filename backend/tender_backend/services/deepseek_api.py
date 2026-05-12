@@ -16,6 +16,11 @@ DEEPSEEK_V4_REASONING_EFFORTS = {
     DEEPSEEK_V4_HIGH_REASONING_EFFORT,
     DEEPSEEK_V4_MAX_REASONING_EFFORT,
 }
+_DEEPSEEK_V4_COMPAT_REASONING_EFFORTS = {
+    "low": DEEPSEEK_V4_HIGH_REASONING_EFFORT,
+    "medium": DEEPSEEK_V4_HIGH_REASONING_EFFORT,
+    "xhigh": DEEPSEEK_V4_MAX_REASONING_EFFORT,
+}
 
 
 def is_deepseek_v4_model(model: str | None) -> bool:
@@ -26,6 +31,7 @@ def normalize_deepseek_v4_reasoning_effort(reasoning_effort: str | None) -> str 
     value = (reasoning_effort or "").strip()
     if not value:
         return None
+    value = _DEEPSEEK_V4_COMPAT_REASONING_EFFORTS.get(value, value)
     if value not in DEEPSEEK_V4_REASONING_EFFORTS:
         raise ValueError(f"unsupported DeepSeek V4 reasoning_effort: {value}")
     return value
@@ -47,6 +53,25 @@ def deepseek_v4_thinking_options(
     if normalized is not None:
         payload["reasoning_effort"] = normalized
     return payload
+
+
+def deepseek_v4_openai_sdk_options(
+    *,
+    thinking_enabled: bool | None = None,
+    reasoning_effort: str | None = None,
+) -> dict[str, Any]:
+    """Return DeepSeek V4 thinking options in OpenAI Python SDK shape."""
+    options = deepseek_v4_thinking_options(
+        thinking_enabled=thinking_enabled,
+        reasoning_effort=reasoning_effort,
+    )
+    sdk_options: dict[str, Any] = {}
+    thinking = options.get("thinking")
+    if thinking is not None:
+        sdk_options["extra_body"] = {"thinking": thinking}
+    if options.get("reasoning_effort") is not None:
+        sdk_options["reasoning_effort"] = options["reasoning_effort"]
+    return sdk_options
 
 
 def apply_deepseek_v4_thinking_options(

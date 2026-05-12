@@ -1,6 +1,11 @@
 from uuid import uuid4
 
-from tender_backend.services.chart_generation_service import ChartGenerationService, _prepare_payload
+from tender_backend.services.chart_generation_service import (
+    ChartGenerationService,
+    _chart_spec_system_prompt,
+    _prepare_payload,
+    default_chart_spec,
+)
 from tender_backend.services.chart_service.redactor import redact_context_for_chart, scan_blind_bid_keywords
 
 
@@ -167,6 +172,136 @@ def test_create_or_update_marks_default_specs_as_needs_review() -> None:
 
     assert result["status"] == "needs_review"
     assert rows[0]["metadata_json"]["source_kind"] == "default_spec"
+
+
+def test_default_schedule_spec_does_not_invent_dates() -> None:
+    spec = default_chart_spec(chart_type="schedule_gantt", title="施工进度计划图", placeholder_key="schedule_gantt")
+
+    assert spec["_default_spec"] is True
+    assert "tasks" not in spec
+    assert spec["columns"] == ["阶段/工序", "计划开始条件", "计划完成条件", "衔接关系", "来源"]
+    assert "缺少已确认日期" in spec["fallback_reason"]
+
+
+def test_create_or_update_blocks_dated_schedule_without_source_trace() -> None:
+    rows = []
+
+    class _Repo:
+        def create(self, _conn, **kwargs):
+            rows.append(kwargs)
+
+            class _Row:
+                id = uuid4()
+                project_id = kwargs["project_id"]
+                outline_node_id = kwargs.get("outline_node_id")
+                chart_type = kwargs["chart_type"]
+                title = kwargs["title"]
+                spec_json = kwargs["spec_json"]
+                rendered_svg = kwargs["rendered_svg"]
+                rendered_path = None
+                placeholder_key = kwargs["placeholder_key"]
+                mermaid_source = kwargs["mermaid_source"]
+                rendered_png_path = kwargs["rendered_png_path"]
+                status = kwargs["status"]
+                version = 1
+                metadata_json = kwargs["metadata_json"]
+
+                class _Time:
+                    def isoformat(self):
+                        return "2026-05-11T00:00:00"
+
+                created_at = _Time()
+                updated_at = _Time()
+
+            return _Row()
+
+    service = ChartGenerationService(repo=_Repo())
+    result = service.create_or_update(
+        object(),
+        project_id=uuid4(),
+        chart_type="schedule_gantt",
+        title="施工进度计划图",
+        spec_json={
+            "placeholder_key": "schedule_gantt",
+            "tasks": [{"id": "prepare", "label": "施工准备", "start": "2026-06-01", "end": "2026-06-05"}],
+        },
+        chapter_code="10.3",
+    )
+
+    assert result["status"] == "needs_review"
+    assert rows[0]["rendered_svg"] is None
+    assert rows[0]["metadata_json"]["provenance"]["issues"][0]["code"] == "missing_source_trace"
+    assert rows[0]["metadata_json"]["source_context"]["chapter_code"] == "10.3"
+
+
+def test_create_or_update_allows_dated_schedule_with_source_trace(monkeypatch) -> None:
+    rows = []
+
+    class _Repo:
+        def create(self, _conn, **kwargs):
+            rows.append(kwargs)
+
+            class _Row:
+                id = uuid4()
+                project_id = kwargs["project_id"]
+                outline_node_id = kwargs.get("outline_node_id")
+                chart_type = kwargs["chart_type"]
+                title = kwargs["title"]
+                spec_json = kwargs["spec_json"]
+                rendered_svg = kwargs["rendered_svg"]
+                rendered_path = None
+                placeholder_key = kwargs["placeholder_key"]
+                mermaid_source = kwargs["mermaid_source"]
+                rendered_png_path = kwargs["rendered_png_path"]
+                status = kwargs["status"]
+                version = 1
+                metadata_json = kwargs["metadata_json"]
+
+                class _Time:
+                    def isoformat(self):
+                        return "2026-05-11T00:00:00"
+
+                created_at = _Time()
+                updated_at = _Time()
+
+            return _Row()
+
+    monkeypatch.setattr("tender_backend.services.chart_generation_service.svg_to_png", lambda _svg, path: path)
+    service = ChartGenerationService(repo=_Repo())
+    result = service.create_or_update(
+        object(),
+        project_id=uuid4(),
+        chart_type="schedule_gantt",
+        title="施工进度计划图",
+        spec_json={
+            "placeholder_key": "schedule_gantt",
+            "tasks": [
+                {
+                    "id": "prepare",
+                    "label": "施工准备",
+                    "start": "2026-06-01",
+                    "end": "2026-06-05",
+                    "source_refs": [{"constraint_id": "c-1"}],
+                }
+            ],
+            "source_refs": [{"constraint_id": "c-1"}],
+        },
+        chapter_code="10.3",
+    )
+
+    assert result["status"] == "draft"
+    assert rows[0]["rendered_svg"]
+    assert rows[0]["metadata_json"]["source_context"]["source_refs"] == [{"constraint_id": "c-1"}]
+    assert rows[0]["metadata_json"]["source_context"]["nested_source_refs"] == [[{"constraint_id": "c-1"}]]
+
+
+def test_chart_spec_system_prompt_includes_json_example_and_source_rules() -> None:
+    prompt = _chart_spec_system_prompt("schedule_gantt")
+
+    assert "合法 json object" in prompt
+    assert "source_refs" in prompt
+    assert "constraint_id" in prompt
+    assert "缺少来源时不要输出甘特图任务" in prompt
 
 
 def test_create_or_update_populates_caption_and_chapter_metadata(monkeypatch) -> None:

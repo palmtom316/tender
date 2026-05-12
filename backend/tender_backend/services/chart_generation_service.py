@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import urllib.error
 import urllib.request
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -26,6 +27,20 @@ from tender_backend.services.chart_service.specs import (
     validate_chart_spec,
 )
 from tender_backend.services.ai_gateway_client import ai_gateway_headers
+
+
+SOURCE_REQUIRED_CHART_TYPES = {"schedule_gantt", "critical_path"}
+SOURCE_TRACE_KEYS = {
+    "constraint_id",
+    "constraint_ids",
+    "source_chunk_id",
+    "source_chunk_ids",
+    "standard_clause_id",
+    "standard_clause_ids",
+    "user_confirmed_by",
+    "manual_confirmation_id",
+    "confirmed_by",
+}
 
 
 class ChartGenerationService:
@@ -68,7 +83,11 @@ class ChartGenerationService:
                 placeholder_key=_placeholder_from_spec(payload),
                 mermaid_source=None,
                 status="needs_review",
-                metadata_json={"validation": validation},
+                metadata_json={
+                    "validation": validation,
+                    "source_kind": "default_spec" if is_default_spec else "json_spec",
+                    "source_context": _source_context(payload),
+                },
             )
             return chart_asset_to_dict(row)
 
@@ -95,6 +114,29 @@ class ChartGenerationService:
             )
             return chart_asset_to_dict(row)
 
+        provenance_issues = _provenance_issues(payload)
+        if provenance_issues:
+            row = self._repo.create(
+                conn,
+                project_id=project_id,
+                outline_node_id=outline_node_id,
+                chart_type=chart_type,
+                title=title,
+                spec_json=persisted_payload,
+                rendered_svg=None,
+                rendered_png_path=None,
+                placeholder_key=_placeholder_from_spec(payload),
+                mermaid_source=None,
+                status="needs_review",
+                metadata_json={
+                    "validation": validation,
+                    "provenance": {"issues": provenance_issues},
+                    "source_kind": "json_spec",
+                    "source_context": _source_context(payload),
+                },
+            )
+            return chart_asset_to_dict(row)
+
         spec = parse_chart_spec(payload)
         normalized = spec.model_dump(by_alias=True, mode="json")
         rendered = render_chart_spec(spec)
@@ -104,7 +146,7 @@ class ChartGenerationService:
             svg=rendered.svg,
         )
         status = "needs_review" if is_default_spec else "draft"
-        source_context = {"chapter_code": payload.get("chapter_code")} if payload.get("chapter_code") else {}
+        source_context = _source_context(payload)
         row = self._repo.create(
             conn,
             project_id=project_id,
@@ -238,11 +280,12 @@ def default_chart_spec(*, chart_type: str, title: str, placeholder_key: str | No
     if chart_type in {"schedule_gantt", "critical_path"}:
         return {
             **base,
-            "tasks": [
-                {"id": "prepare", "label": "施工准备", "start": "2026-06-01", "end": "2026-06-05", "group": "准备阶段", "is_critical": True},
-                {"id": "execute", "label": "组织实施", "start": "2026-06-06", "end": "2026-06-20", "group": "实施阶段", "is_critical": True},
+            "columns": ["阶段/工序", "计划开始条件", "计划完成条件", "衔接关系", "来源"],
+            "rows": [
+                {"cells": ["施工准备", "待补充确认", "待补充确认", "按发包人确认计划衔接", "待补充来源"]},
+                {"cells": ["组织实施", "待补充确认", "待补充确认", "按发包人确认计划衔接", "待补充来源"]},
             ],
-            "dependencies": [{"from": "prepare", "to": "execute"}],
+            "fallback_reason": "缺少已确认日期、工期或里程碑，暂不生成甘特图。",
         }
     if chart_type == "risk_matrix":
         return {
@@ -290,10 +333,7 @@ def _generate_spec_with_ai(
     if not settings.ai_gateway_url:
         return None
     is_blind_bid = bool(context.get("is_blind_bid") or context.get("blind_bid") or context.get("tender_summary", {}).get("is_blind_bid"))
-    prompt = (
-        "你是投标文件图表规划助手。只输出 JSON，不要 Markdown。"
-        "字段必须符合 tender chart spec。AI 只生成结构化 spec，不生成代码。"
-    )
+    prompt = _chart_spec_system_prompt(chart_type)
     user_content = {
         "chart_type": chart_type,
         "title": title,
@@ -306,7 +346,6 @@ def _generate_spec_with_ai(
             {"role": "system", "content": prompt},
             {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)},
         ],
-        "temperature": 0.1,
         "max_tokens": 1600,
         "response_format": {"type": "json_object"},
     }
@@ -330,6 +369,148 @@ def _generate_spec_with_ai(
         return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+def _chart_spec_system_prompt(chart_type: str) -> str:
+    schemas = {
+        "schedule_gantt": {
+            "chart_type": "schedule_gantt",
+            "placeholder_key": "schedule_gantt",
+            "tasks": [
+                {
+                    "id": "prepare",
+                    "label": "施工准备",
+                    "start": "YYYY-MM-DD",
+                    "end": "YYYY-MM-DD",
+                    "group": "准备阶段",
+                    "is_critical": True,
+                    "source_refs": [{"constraint_id": "..."}],
+                }
+            ],
+            "dependencies": [{"from": "prepare", "to": "next_task"}],
+        },
+        "risk_matrix": {
+            "chart_type": "risk_matrix",
+            "placeholder_key": "risk_matrix",
+            "rows": ["低影响", "中影响", "高影响"],
+            "columns": ["低概率", "中概率", "高概率"],
+            "cells": [{"row": "高影响", "column": "高概率", "items": ["风险场景"], "level": "high"}],
+        },
+        "responsibility_matrix": {
+            "chart_type": "responsibility_matrix",
+            "placeholder_key": "responsibility_matrix",
+            "roles": ["项目经理", "技术负责人"],
+            "activities": ["施工准备"],
+            "assignments": [{"role": "项目经理", "activity": "施工准备", "level": "负责"}],
+        },
+    }
+    example = schemas.get(
+        chart_type,
+        {
+            "chart_type": chart_type,
+            "placeholder_key": f"{chart_type}_main",
+            "nodes": [{"id": "prepare", "label": "施工准备"}, {"id": "review", "label": "检查确认"}],
+            "edges": [{"from": "prepare", "to": "review"}],
+        },
+    )
+    return (
+        "你是投标文件图表规划助手。只输出 JSON，不要 Markdown。"
+        "输出必须是合法 json object，并符合 tender chart spec。"
+        "AI 只生成结构化 spec，不生成代码。"
+        "不得编造日期、天数、人员姓名、证书编号、设备型号、风险等级、量化指标或许可结果。"
+        "schedule_gantt/critical_path 的每个任务日期必须来自 context 中已确认的工期、里程碑或约束，"
+        "并在任务 source_refs 中写入 constraint_id/source_chunk_id/user_confirmed_by 等来源；缺少来源时不要输出甘特图任务。"
+        "risk_matrix 的 cells[].level 只能使用 low/medium/high/critical。"
+        "示例 JSON："
+        + json.dumps(example, ensure_ascii=False)
+    )
+
+
+def _source_context(spec_json: dict[str, Any]) -> dict[str, Any]:
+    source: dict[str, Any] = {}
+    if spec_json.get("chapter_code"):
+        source["chapter_code"] = spec_json.get("chapter_code")
+    metadata = spec_json.get("metadata_json")
+    if isinstance(metadata, dict):
+        refs = metadata.get("source_refs") or metadata.get("source_trace")
+        if refs:
+            source["source_refs"] = refs
+    refs = spec_json.get("source_refs") or spec_json.get("source_trace")
+    if refs:
+        source["source_refs"] = refs
+    nested_refs = _nested_source_refs(spec_json)
+    if nested_refs:
+        source["nested_source_refs"] = nested_refs
+    return source
+
+
+def _nested_source_refs(spec_json: dict[str, Any]) -> list[Any]:
+    refs: list[Any] = []
+    for key in ("tasks", "nodes", "cells", "rows", "assignments"):
+        values = spec_json.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            item_refs = item.get("source_refs") or item.get("source_trace")
+            if item_refs:
+                refs.append(item_refs)
+    return refs
+
+
+def _provenance_issues(spec_json: dict[str, Any]) -> list[dict[str, str]]:
+    chart_type = str(spec_json.get("chart_type") or "")
+    if chart_type not in SOURCE_REQUIRED_CHART_TYPES:
+        return []
+    issues: list[dict[str, str]] = []
+    tasks = spec_json.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return []
+    for index, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        has_dates = _is_iso_date(task.get("start")) and _is_iso_date(task.get("end"))
+        if has_dates and not _has_source_trace(task, spec_json):
+            label = str(task.get("label") or task.get("id") or index + 1)
+            issues.append(
+                {
+                    "code": "missing_source_trace",
+                    "message": f"{chart_type} task {label} has dates without source trace",
+                }
+            )
+    return issues
+
+
+def _is_iso_date(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _has_source_trace(*items: dict[str, Any]) -> bool:
+    for item in items:
+        if any(item.get(key) for key in SOURCE_TRACE_KEYS):
+            return True
+        refs = item.get("source_refs") or item.get("source_trace")
+        if _refs_have_source_trace(refs):
+            return True
+        metadata = item.get("metadata_json")
+        if isinstance(metadata, dict) and _has_source_trace(metadata):
+            return True
+    return False
+
+
+def _refs_have_source_trace(refs: object) -> bool:
+    if isinstance(refs, dict):
+        return any(refs.get(key) for key in SOURCE_TRACE_KEYS)
+    if isinstance(refs, list):
+        return any(isinstance(ref, dict) and any(ref.get(key) for key in SOURCE_TRACE_KEYS) for ref in refs)
+    return False
 
 
 def _blind_bid_issues(spec_json: dict[str, Any]) -> list[dict[str, str]]:
