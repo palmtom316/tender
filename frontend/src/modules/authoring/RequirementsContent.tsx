@@ -22,7 +22,11 @@ import {
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { LoadingState } from "../../components/ui/LoadingState";
 import { ProgressBar, type ProgressMeta } from "../../components/ui/ProgressBar";
+import { SegmentedTabs } from "../../components/ui/SegmentedTabs";
+import { Toolbar } from "../../components/ui/Toolbar";
 import { AiExtractionRunPanel } from "./AiExtractionRunPanel";
 import { EquipmentSelectionWorkbench } from "./EquipmentSelectionWorkbench";
 import { PersonnelSelectionWorkbench } from "./PersonnelSelectionWorkbench";
@@ -344,11 +348,12 @@ export function RequirementsContent() {
 
   if (!projectId) {
     return (
-      <div className="empty-state">
-        <span className="empty-state__icon">项</span>
-        <p className="empty-state__title">先选择投标项目</p>
-        <p className="empty-state__description">选择项目后，可核对废标红线、资格商务硬条件和递交清单。</p>
-      </div>
+      <EmptyState
+        icon="项"
+        title="先选择投标项目"
+        description="选择项目后，可核对废标红线、资格商务硬条件和递交清单。"
+        spacious
+      />
     );
   }
 
@@ -428,7 +433,7 @@ export function RequirementsContent() {
             <span>阻断：{workbench.stats.blocking_count}</span>
             <span>冲突：{workbench.stats.conflict_count}</span>
           </div>
-          <div className="toolbar-row" style={{ margin: 0 }}>
+          <Toolbar className="toolbar-row--flush">
             <ClayButton
               variant="secondary"
               onClick={() => buildConstraints.mutate()}
@@ -442,7 +447,7 @@ export function RequirementsContent() {
             >
               {constraintSetStatus === "confirmed" ? "约束集已确认" : confirmConstraints.isPending ? "确认中..." : "确认约束集"}
             </ClayButton>
-          </div>
+          </Toolbar>
         </section>
       )}
 
@@ -617,34 +622,26 @@ export function RequirementsContent() {
       )}
 
       <div className="requirement-workbench__tabs">
-        <button className={`filter-chip ${activeLane === "all" ? "active" : ""}`} onClick={() => setActiveLane("all")}>
-          全部工作项
-        </button>
-        {laneTabs.map((lane) => (
-          <button
-            key={lane.id}
-            className={`filter-chip ${activeLane === lane.id ? "active" : ""}`}
-            onClick={() => setActiveLane(lane.id)}
-          >
-            {lane.label} · {lane.packages.length}
-          </button>
-        ))}
+        <SegmentedTabs
+          ariaLabel="要求确认筛选"
+          value={activeLane}
+          onChange={setActiveLane}
+          items={[
+            { id: "all", label: "全部工作项", count: workbench?.packages.length ?? 0 },
+            ...laneTabs.map((lane) => ({ id: lane.id, label: lane.label, count: lane.packages.length })),
+          ]}
+        />
       </div>
 
-      {isLoading && (
-        <div className="skeleton-stack" aria-label="关键条款加载中">
-          <div className="skeleton-card" />
-          <div className="skeleton-card" />
-          <div className="skeleton-card" />
-        </div>
-      )}
+      {isLoading && <LoadingState label="关键条款加载中" rows={3} />}
 
       {!isLoading && workbench?.packages.length === 0 && (
-        <div className="empty-state">
-          <span className="empty-state__icon">条</span>
-          <p className="empty-state__title">暂无解析条款</p>
-          <p className="empty-state__description">上传并解析招标文件后，系统会先合并相似条款，再生成关键确认队列。</p>
-        </div>
+        <EmptyState
+          icon="条"
+          title="暂无解析条款"
+          description="上传并解析招标文件后，系统会先合并相似条款，再生成关键确认队列。"
+          tone="info"
+        />
       )}
 
       {workbench && workbench.packages.length > 0 && (
@@ -757,10 +754,11 @@ export function RequirementsContent() {
                 </div>
               </>
             ) : (
-              <div className="empty-state">
-                <p className="empty-state__title">选择一个条款包</p>
-                <p className="empty-state__description">右侧会显示原文、来源页码、冲突字段和处理记录。</p>
-              </div>
+              <EmptyState
+                title="选择一个条款包"
+                description="右侧会显示原文、来源页码、冲突字段和处理记录。"
+                icon="源"
+              />
             )}
           </aside>
         </div>
