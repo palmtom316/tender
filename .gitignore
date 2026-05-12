@@ -35,3 +35,5 @@ backend/rerun_missing_files.py
 .codex
 docs/国网招标文件/
 docs/投标文件样板/
+
+.worktrees/
