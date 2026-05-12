@@ -1,6 +1,7 @@
 import type { CompanyAssetType, CompanyAssetWithAttachments, EvidenceAsset } from "../../../../lib/api";
 import { Badge } from "../../../../components/ui/Badge";
 import { ClayButton } from "../../../../components/ui/ClayButton";
+import { EmptyState } from "../../../../components/ui/EmptyState";
 import { ASSET_TYPE_SCHEMAS } from "../../schemas/assetTypeSchemas";
 import { ExpiryBadge } from "./expiryBadge";
 
@@ -43,7 +44,7 @@ export function AssetTable({ assetType, assets, onEdit, onRetire, onDelete, onOp
   const schema = ASSET_TYPE_SCHEMAS[assetType];
 
   if (assets.length === 0) {
-    return <div className="template-strip-empty">当前分类还没有资产记录。</div>;
+    return <EmptyState icon="资" title="当前分类还没有资产记录" description="新增资产后，会在这里展示规格、附件、有效期和状态。" />;
   }
 
   return (

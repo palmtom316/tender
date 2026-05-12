@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Badge } from "../../components/ui/Badge";
 import { ClayButton } from "../../components/ui/ClayButton";
+import { SegmentedTabs } from "../../components/ui/SegmentedTabs";
 import type { CompanyAssetType } from "../../lib/api";
 import {
   confirmProjectEquipmentSelections,
@@ -142,18 +143,16 @@ export function EquipmentSelectionWorkbench({ projectId }: EquipmentSelectionWor
       </div>
 
       <div className="asset-toolbar">
-        <div className="asset-tabs" role="tablist" aria-label="设备分类">
-          {ASSET_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              className={`asset-tab ${assetType === tab.key ? "is-active" : ""}`}
-              onClick={() => setAssetType(tab.key)}
-            >
-              <span>{tab.label}</span>
-            </button>
-          ))}
-        </div>
+        <SegmentedTabs
+          ariaLabel="设备分类"
+          value={assetType}
+          onChange={setAssetType}
+          items={ASSET_TABS.map((tab) => ({
+            id: tab.key,
+            label: tab.label,
+            count: (selectionsQuery.data ?? []).filter((row) => row.asset_type === tab.key).length,
+          }))}
+        />
         <div className="asset-toolbar__filters">
           <input
             className="clay-input"

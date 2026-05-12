@@ -204,7 +204,7 @@ export function AssetFormDrawer({
             </p>
           </div>
 
-          <textarea className="clay-input asset-drawer__notes" aria-label="备注" placeholder="备注" value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
+          <textarea className="clay-textarea asset-drawer__notes" aria-label="备注" placeholder="备注" value={form.notes} onChange={(event) => updateField("notes", event.target.value)} />
 
           <div className="asset-drawer__actions">
             <ClayButton type="button" variant="outline" onClick={onClose}>取消</ClayButton>

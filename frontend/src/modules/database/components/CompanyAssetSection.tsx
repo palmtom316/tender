@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { Badge } from "../../../components/ui/Badge";
 import { Card } from "../../../components/ui/Card";
 import { ClayButton } from "../../../components/ui/ClayButton";
+import { SegmentedTabs } from "../../../components/ui/SegmentedTabs";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import type { CompanyAsset, CompanyAssetPayload, CompanyAssetStatus, CompanyAssetType, CompanyAssetWithAttachments, EvidenceAsset } from "../../../lib/api";
 import {
@@ -166,19 +166,16 @@ export function CompanyAssetSection({ libraryCompanyId, companyName, onError }: 
       </div>
 
       <div className="asset-toolbar">
-        <div className="asset-tabs" role="tablist" aria-label="资产分类">
-          {ASSET_TABS.map((type) => (
-            <button
-              key={type}
-              type="button"
-              className={`asset-tab ${activeType === type ? "is-active" : ""}`}
-              onClick={() => setActiveType(type)}
-            >
-              <span>{ASSET_TYPE_SCHEMAS[type].label}</span>
-              <Badge variant={activeType === type ? "primary" : "default"}>{counts[type]}</Badge>
-            </button>
-          ))}
-        </div>
+        <SegmentedTabs
+          ariaLabel="资产分类"
+          value={activeType}
+          onChange={setActiveType}
+          items={ASSET_TABS.map((type) => ({
+            id: type,
+            label: ASSET_TYPE_SCHEMAS[type].label,
+            count: counts[type],
+          }))}
+        />
 
         <div className="asset-toolbar__filters">
           <input

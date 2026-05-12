@@ -410,7 +410,7 @@ export function PersonnelLibraryWorkbench() {
                         {person.attachments.length > 0 ? (
                           <div className="asset-table__attachments">
                             {person.attachments.map((asset) => (
-                              <button key={asset.id} type="button" className="asset-table__attachment-link" onClick={() => void openAttachment(asset)}>
+                              <button key={asset.id} type="button" className="attachment-link asset-table__attachment-link" onClick={() => void openAttachment(asset)}>
                                 {CATEGORY_LABELS[asset.asset_category] ?? asset.asset_category}: {asset.file_name}
                               </button>
                             ))}
@@ -474,7 +474,7 @@ export function PersonnelLibraryWorkbench() {
                   <div className="asset-drawer__attachment-list">
                     {editingPerson.attachments.map((asset) => (
                       <div key={asset.id} className="asset-drawer__attachment-row">
-                        <button type="button" className="asset-drawer__attachment-link" onClick={() => void openAttachment(asset)}>
+                        <button type="button" className="attachment-link asset-drawer__attachment-link" onClick={() => void openAttachment(asset)}>
                           {CATEGORY_LABELS[asset.asset_category] ?? asset.asset_category}: {asset.file_name}
                         </button>
                         <div className="asset-drawer__attachment-actions">
