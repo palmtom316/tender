@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchComplianceMatrix } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Badge } from "../../components/ui/Badge";
+import { EmptyState } from "../../components/ui/EmptyState";
 
 const COVERAGE_MAP: Record<string, { variant: "success" | "warning" | "danger"; label: string }> = {
   covered: { variant: "success", label: "已覆盖" },
@@ -22,11 +23,11 @@ export function ComplianceContent() {
   });
 
   if (!projectId) {
-    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+    return <EmptyState icon="项" title="请先选择投标项目" description="选择项目后，可查看审校、合规或导出状态。" />;
   }
 
   if (isLoading) return <div className="spinner" />;
-  if (entries.length === 0) return <p className="empty-state">暂无响应矩阵数据</p>;
+  if (entries.length === 0) return <EmptyState icon="矩" title="暂无响应矩阵数据" description="生成响应矩阵后，可在这里核对条款响应状态。" />;
 
   return (
     <div>

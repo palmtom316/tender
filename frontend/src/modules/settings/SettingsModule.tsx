@@ -142,11 +142,11 @@ function UserManagement() {
           <Card key={user.id} className="card-narrow">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="avatar-circle" style={{ width: 36, height: 36 }}>
+                <div className="avatar-circle avatar-circle--md">
                   {user.display_name.charAt(0)}
                 </div>
                 <div>
-                  <div style={{ fontWeight: 600 }}>{user.display_name}</div>
+                  <div className="font-semibold">{user.display_name}</div>
                   <div className="muted-copy">
                     @{user.username}
                   </div>
@@ -836,7 +836,7 @@ function SystemSettings() {
     <div>
       <h1 className="section-heading">系统设置</h1>
       <Card>
-        <div className="empty-state" style={{ padding: "var(--space-12)" }}>
+        <div className="empty-state empty-state--spacious">
           <p style={{ color: "var(--color-text-muted)" }}>
             系统设置功能正在开发中
           </p>

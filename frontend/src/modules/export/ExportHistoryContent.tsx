@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { deliveryPackageDownloadUrl, fetchDeliveryPackages, fetchExports } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Badge } from "../../components/ui/Badge";
+import { EmptyState } from "../../components/ui/EmptyState";
 
 export function ExportHistoryContent() {
   const { projectId } = useNavigation();
@@ -25,7 +26,7 @@ export function ExportHistoryContent() {
   });
 
   if (!projectId) {
-    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+    return <EmptyState icon="项" title="请先选择投标项目" description="选择项目后，可查看审校、合规或导出状态。" />;
   }
 
   return (
@@ -33,7 +34,7 @@ export function ExportHistoryContent() {
       <h1 className="section-heading">导出历史</h1>
       <h2 className="subsection-heading">交付包</h2>
       {packages.length === 0 ? (
-        <p className="empty-state">暂无交付包</p>
+        <EmptyState icon="包" title="暂无交付包" description="满足导出门禁后，可生成投标交付包。" />
       ) : (
         <table className="data-table">
           <thead>
@@ -60,7 +61,7 @@ export function ExportHistoryContent() {
       {isLoading && <div className="spinner" />}
 
       {exports.length === 0 ? (
-        <p className="empty-state">暂无导出记录</p>
+        <EmptyState icon="导" title="暂无导出记录" description="导出完成后会在这里保留历史记录。" />
       ) : (
         <table className="data-table">
           <thead>

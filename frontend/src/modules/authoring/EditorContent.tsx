@@ -21,6 +21,8 @@ import type { BidChapter } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { LoadingState } from "../../components/ui/LoadingState";
 
 const CHART_TYPE_OPTIONS = [
   { value: "org_chart", label: "项目组织机构图" },
@@ -308,11 +310,11 @@ export function EditorContent() {
 
   if (!projectId) {
     return (
-      <div className="empty-state">
-        <span className="empty-state__icon">项</span>
-        <p className="empty-state__title">先选择投标项目</p>
-        <p className="empty-state__description">选择项目后，可编辑生成的章节草稿。</p>
-      </div>
+      <EmptyState
+        icon="项"
+        title="先选择投标项目"
+        description="选择项目后，可编辑生成的章节草稿。"
+      />
     );
   }
 
@@ -572,13 +574,7 @@ export function EditorContent() {
               </ClayButton>
             </div>
           ))}
-          {isLoading && (
-            <div className="skeleton-stack" aria-label="章节草稿加载中">
-              <div className="skeleton-line" />
-              <div className="skeleton-line" />
-              <div className="skeleton-line" />
-            </div>
-          )}
+          {isLoading && <LoadingState label="章节草稿加载中" rows={3} compact />}
           {drafts.map((d) => (
             <div
               key={d.id}
@@ -593,11 +589,11 @@ export function EditorContent() {
             </div>
           ))}
           {!isLoading && drafts.length === 0 && (
-            <div className="empty-state">
-              <span className="empty-state__icon">章</span>
-              <p className="empty-state__title">暂无章节草稿</p>
-              <p className="empty-state__description">完成解析和要求确认后，生成的章节草稿会出现在这里。</p>
-            </div>
+            <EmptyState
+              icon="章"
+              title="暂无章节草稿"
+              description="完成解析和要求确认后，生成的章节草稿会出现在这里。"
+            />
           )}
         </aside>
 
@@ -622,11 +618,11 @@ export function EditorContent() {
               />
             </>
           ) : (
-            <div className="empty-state">
-              <span className="empty-state__icon">编</span>
-              <p className="empty-state__title">选择章节开始编辑</p>
-              <p className="empty-state__description">左侧选择章节后，可在这里调整正文并保存。</p>
-            </div>
+            <EmptyState
+              icon="编"
+              title="选择章节开始编辑"
+              description="左侧选择章节后，可在这里调整正文并保存。"
+            />
           )}
         </main>
       </div>

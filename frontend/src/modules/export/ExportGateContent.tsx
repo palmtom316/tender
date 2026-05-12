@@ -6,6 +6,7 @@ import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Icon } from "../../components/ui/Icon";
+import { EmptyState } from "../../components/ui/EmptyState";
 
 const EXPORT_MODE_OPTIONS: { value: ExportMode; label: string; description: string }[] = [
   {
@@ -74,7 +75,7 @@ export function ExportGateContent() {
   });
 
   if (!projectId) {
-    return <p className="empty-state">请先从「投标项目」模块选择一个项目</p>;
+    return <EmptyState icon="项" title="请先选择投标项目" description="选择项目后，可查看审校、合规或导出状态。" />;
   }
 
   const gates = gatesData?.gates;

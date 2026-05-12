@@ -6,6 +6,7 @@ import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { EmptyState } from "../../components/ui/EmptyState";
 
 export function ProjectsModule() {
   const { tab, projectId, setProjectId, setDocumentId, navigate } = useNavigation();
@@ -182,7 +183,12 @@ export function ProjectsModule() {
           </Card>
         ))}
         {!isLoading && filtered.length === 0 && (
-          <p className="empty-state">暂无项目，请点击"新建项目"开始</p>
+          <EmptyState
+            icon="项"
+            title="暂无项目"
+            description="点击新建项目后，可上传招标文件并启动解析。"
+            action={<ClayButton type="button" onClick={() => setShowForm(true)}>新建项目</ClayButton>}
+          />
         )}
       </div>
 
