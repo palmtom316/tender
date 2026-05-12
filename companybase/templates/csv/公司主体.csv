@@ -1,0 +1,2 @@
+company_key,company_name,company_type,enabled,metadata_json
+main_company,某某电力工程有限公司,bidder,TRUE,"{""source"":""companybase"",""version"":""demo""}"

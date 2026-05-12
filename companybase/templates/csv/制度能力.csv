@@ -1,0 +1,3 @@
+unique_key,company_key,capability_domain,title,summary,applicable_chapters,evidence_file_path,metadata_json
+method_quality_management_system,main_company,quality,质量管理制度,覆盖材料进场、工序交接、隐蔽验收、质量问题闭环和资料归档。,"8;10.1",files/methods/质量管理制度_现行版.pdf,"{""usable_in_blind_bid"":true}"
+method_safety_risk_control,main_company,safety,安全风险分级管控制度,覆盖施工风险辨识、班前会、安全交底、现场检查、隐患整改和应急处置。,"8;9;10.2",files/methods/安全风险分级管控制度_现行版.pdf,"{""usable_in_blind_bid"":true}"

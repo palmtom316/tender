@@ -1,0 +1,3 @@
+unique_key,company_key,certificate_name,certificate_type,certificate_no,holder_name,grade,specialty,issued_by,valid_from,valid_to,status,metadata_json
+cert_safety_production_license,main_company,安全生产许可证,safety_license,渝JZ安许证字示例,某某电力工程有限公司,,建筑施工,重庆市住房和城乡建设主管部门,2024-01-01,2027-01-01,active,"{""usage"":""安全资格响应""}"
+cert_power_facility_license_level3,main_company,承装（修、试）电力设施许可证,license,许可证示例编号,某某电力工程有限公司,三级,承装/承修/承试,国家能源局派出机构,2023-08-15,2029-08-14,active,"{""usage"":""国网配网施工资格响应""}"

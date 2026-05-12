@@ -1,0 +1,4 @@
+unique_key,company_key,asset_type,name,spec_model,serial_no,manufacturer,quantity,unit,ownership,acquired_at,expires_at,technical_condition,status,location,extras,notes
+asset_vehicle_pickup_001,main_company,vehicle,工程抢修车,皮卡,渝A00000,示例厂家,1,辆,self,2023-05-01,2026-05-01,良好,active,公司基地,"{""intended_work"":""现场巡检、材料转运""}",证照和保险见附件
+asset_tool_insulation_resistance_tester_001,main_company,tool,绝缘电阻测试仪,2500V,IR-001,示例仪器厂,1,台,self,2024-03-01,2026-03-01,良好,active,试验班组,"{""applicable_process"":""电缆绝缘测试、设备交接试验""}",检定证书见附件
+asset_safety_grounding_set_001,main_company,safety,接地线成套装置,10kV,GD-001,示例厂家,3,套,self,2024-01-01,2026-01-01,良好,active,安全工器具库,"{""applicable_process"":""停电验电接地""}",周期试验报告见附件

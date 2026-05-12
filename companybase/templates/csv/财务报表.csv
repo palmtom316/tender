@@ -1,0 +1,2 @@
+unique_key,company_key,fiscal_year,statement_type,statement_data,source_note
+finance_2025_audit,main_company,2025,audit_report,"{""total_assets"":""待填写"",""revenue"":""待填写"",""net_profit"":""待填写""}",2025年度审计报告摘要，金额类字段技术标慎用

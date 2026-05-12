@@ -1,0 +1,3 @@
+unique_key,company_key,full_name,gender,age,education,title,role_name,specialty,years_experience,phone,email,resume_text,profile_json
+person_project_manager_001,main_company,张三,男,38,本科,工程师,项目经理,机电工程,12,13800000001,pm@example.com,长期从事10kV及以下配网工程施工管理，熟悉国网现场标准化管理。,"{""blind_bid_alias"":""项目经理"",""certificate_summary"":""建造师证、安全B证待附件佐证""}"
+person_safety_manager_001,main_company,李四,男,35,本科,工程师,安全负责人,电力工程,10,13800000002,safety@example.com,长期从事配网施工安全管理，熟悉风险分级管控和班组安全管理。,"{""blind_bid_alias"":""安全负责人""}"

@@ -1,0 +1,2 @@
+unique_key,company_key,company_name,company_code,unified_social_credit_code,registered_address,contact_name,contact_phone,contact_email,website,registered_capital,company_type,business_scope,profile_json
+profile_main_company,main_company,某某电力工程有限公司,MC-001,91500000000000000X,重庆市某区某路1号,联系人,13800000000,contact@example.com,https://example.com,5000万元,有限责任公司,电力工程施工；输变电工程；配电网工程施工,"{""blind_bid_alias"":""投标人""}"

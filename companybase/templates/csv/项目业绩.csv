@@ -1,0 +1,2 @@
+unique_key,company_key,project_name,client_name,contract_amount,currency,started_on,ended_on,project_status,service_scope,peak_staffing,average_staffing,contact_name,contact_phone,evidence_summary,metadata_json
+perf_2025_distribution_rebuild_001,main_company,2025年某区10kV配网改造工程,某供电公司,,CNY,2025-03-01,2025-10-30,completed,10kV及以下线路、电缆、配变及接地系统施工,35,20,业主联系人,13800000003,合同关键页和竣工验收证明齐备,"{""project_type"":""distribution_network"",""blind_bid_sensitive"":true}"
