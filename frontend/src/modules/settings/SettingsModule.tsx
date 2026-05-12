@@ -5,6 +5,7 @@ import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { Icon } from "../../components/ui/Icon";
+import { EmptyState } from "../../components/ui/EmptyState";
 import {
   fetchAgentConfigs,
   updateAgentConfig,
@@ -836,11 +837,12 @@ function SystemSettings() {
     <div>
       <h1 className="section-heading">系统设置</h1>
       <Card>
-        <div className="empty-state empty-state--spacious">
-          <p style={{ color: "var(--color-text-muted)" }}>
-            系统设置功能正在开发中
-          </p>
-        </div>
+        <EmptyState
+          icon="设"
+          title="系统设置功能正在开发中"
+          description="后续会在这里集中管理系统级配置。"
+          spacious
+        />
       </Card>
     </div>
   );
