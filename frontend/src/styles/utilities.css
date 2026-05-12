@@ -4057,3 +4057,7 @@
 .font-semibold {
   font-weight: 650;
 }
+
+.toolbar-row--flush {
+  margin: 0;
+}
