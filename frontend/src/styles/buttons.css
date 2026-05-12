@@ -4,13 +4,13 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  padding: 0 var(--space-4);
+  padding: 0 var(--control-padding-x-md);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   font-weight: 650;
   white-space: nowrap;
-  min-height: 34px;
+  min-height: var(--control-height-md);
   line-height: 1;
   letter-spacing: 0;
   cursor: pointer;
@@ -95,16 +95,16 @@
 /* Sizes */
 .clay-btn--sm {
   min-width: 56px;
-  min-height: 30px;
-  padding: 0 var(--space-3);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--control-padding-x-sm);
   font-size: var(--text-xs);
   border-radius: var(--radius-xs);
 }
 
 .clay-btn--lg {
-  padding: 0 var(--space-6);
+  padding: 0 var(--control-padding-x-lg);
   font-size: var(--text-base);
-  min-height: 40px;
+  min-height: var(--control-height-lg);
 }
 
 .clay-btn--icon {
@@ -129,4 +129,25 @@
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+.clay-btn__spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-full);
+  animation: clay-spin 0.75s linear infinite;
+}
+
+@keyframes clay-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clay-btn,
+  .clay-btn__spinner {
+    transition: none;
+    animation: none;
+  }
 }

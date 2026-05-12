@@ -4010,3 +4010,118 @@
     padding: var(--space-4);
   }
 }
+
+/* ── Shared design-system contract utilities ── */
+.empty-state__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.empty-state--default .empty-state__icon {
+  width: var(--state-icon-size);
+  height: var(--state-icon-size);
+  background: var(--color-primary-tint);
+  color: var(--color-primary);
+}
+
+.empty-state--info .empty-state__icon {
+  width: var(--state-icon-size);
+  height: var(--state-icon-size);
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.empty-state--success .empty-state__icon {
+  width: var(--state-icon-size);
+  height: var(--state-icon-size);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.empty-state--warning .empty-state__icon {
+  width: var(--state-icon-size);
+  height: var(--state-icon-size);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.empty-state--danger .empty-state__icon {
+  width: var(--state-icon-size);
+  height: var(--state-icon-size);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.skeleton-stack--compact {
+  gap: var(--space-2);
+}
+
+.skeleton-stack--compact .skeleton-line {
+  height: 10px;
+}
+
+.skeleton-stack--compact .skeleton-card {
+  height: 48px;
+}
+
+.toolbar-row {
+  gap: var(--toolbar-gap);
+}
+
+.toolbar-row--between {
+  justify-content: space-between;
+}
+
+.toolbar-row--end {
+  justify-content: flex-end;
+}
+
+.toolbar-row--center {
+  align-items: center;
+}
+
+.toolbar-row--tight {
+  margin-bottom: var(--space-3);
+}
+
+.toolbar-row--plain {
+  margin-bottom: 0;
+}
+
+.attachment-link,
+.asset-table__attachment-link,
+.asset-drawer__attachment-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 650;
+  line-height: 1.4;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.attachment-link:hover,
+.asset-table__attachment-link:hover,
+.asset-drawer__attachment-link:hover {
+  color: var(--color-primary-hover);
+}
+
+.attachment-link:focus-visible,
+.asset-table__attachment-link:focus-visible,
+.asset-drawer__attachment-link:focus-visible {
+  outline: none;
+  border-radius: var(--radius-xs);
+  box-shadow: var(--focus-ring);
+}
