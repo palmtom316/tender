@@ -694,7 +694,7 @@ export function TemplateFieldWorkbench() {
               </p>
             </div>
             {selectedItem && (
-              <div className="template-summary">
+              <div className="template-summary summary-pill-row">
                 <div className="template-summary__pill">
                   <span>绑定规则</span>
                   <strong>{itemBindingsQuery.data?.length ?? 0}</strong>
@@ -1173,7 +1173,7 @@ export function TemplateFieldWorkbench() {
                     {itemContext?.ready ? "ready" : "draft"}
                   </Badge>
                 </div>
-                <div className="template-preview-tabs">
+                <div className="template-preview-tabs segmented-tabs">
                   <div className="template-preview-block">
                     <h3>Context</h3>
                     <pre>{itemContextPreview}</pre>

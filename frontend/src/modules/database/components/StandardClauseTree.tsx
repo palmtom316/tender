@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { Badge } from "../../../components/ui/Badge";
+import { EmptyState } from "../../../components/ui/EmptyState";
 import { Icon } from "../../../components/ui/Icon";
 import type { StandardClauseNode } from "../../../lib/api";
 import { getStandardClauseMarker, getStandardClauseTitle } from "./standardClausePresentation";
@@ -134,7 +135,7 @@ export function StandardClauseTree({
   onSelectClause,
 }: StandardClauseTreeProps) {
   if (nodes.length === 0) {
-    return <div className="empty-state">暂无可展示条款</div>;
+    return <EmptyState icon="条" title="暂无可展示条款" description="规范解析完成后，条款树会显示在这里。" />;
   }
 
   return (
