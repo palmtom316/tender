@@ -110,15 +110,9 @@
 }
 
 .clay-input[aria-invalid="true"],
-.clay-input.is-invalid,
 .clay-textarea[aria-invalid="true"],
-.clay-textarea.is-invalid,
-input[aria-invalid="true"],
-input.is-invalid,
-select[aria-invalid="true"],
-select.is-invalid,
-textarea[aria-invalid="true"],
-textarea.is-invalid {
+.clay-input.is-invalid,
+.clay-textarea.is-invalid {
   border-color: var(--color-danger);
   box-shadow: 0 0 0 3px var(--color-danger-bg);
 }
