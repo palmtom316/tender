@@ -23,6 +23,15 @@ import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingState } from "../../components/ui/LoadingState";
+import {
+  buildChartTaskCards,
+  buildMaterialSlots,
+  chapterDeliveryKind,
+  deliveryKindLabel,
+  readableContextCount,
+  type ChartTaskCard,
+  type MaterialSlotSummary,
+} from "./chapterDelivery";
 
 const CHART_TYPE_OPTIONS = [
   { value: "org_chart", label: "项目组织机构图" },
@@ -54,26 +63,10 @@ function chartTitle(chartType: string) {
   return CHART_TYPE_OPTIONS.find((option) => option.value === chartType)?.label ?? "技术图表";
 }
 
-function chartPlaceholder(asset: { placeholder_key?: string | null; chart_type: string }) {
-  return asset.placeholder_key || asset.chart_type;
-}
-
 function appendChartPlaceholder(content: string, key: string) {
   const placeholder = `{{chart:${key}}}`;
   if (content.includes(placeholder)) return content;
   return `${content}${content.trim().length > 0 ? "\n\n" : ""}${placeholder}`;
-}
-
-function contextCount(context: Record<string, unknown> | undefined, key: string) {
-  const value = context?.[key];
-  return Array.isArray(value) ? value.length : 0;
-}
-
-function companyAssetCount(context: Record<string, unknown> | undefined, key: string) {
-  const assets = context?.company_assets;
-  if (!assets || typeof assets !== "object") return 0;
-  const value = (assets as Record<string, unknown>)[key];
-  return Array.isArray(value) ? value.length : 0;
 }
 
 function recommendedChartKeys(context: Record<string, unknown> | undefined) {
@@ -91,7 +84,7 @@ function recommendedChartKeys(context: Record<string, unknown> | undefined) {
 function chartAssetStatusVariant(status: string): "default" | "success" | "warning" | "danger" | "info" {
   if (status === "approved") return "success";
   if (status === "failed" || status === "rejected") return "danger";
-  if (status === "draft" || status === "needs_review") return "warning";
+  if (status === "draft" || status === "needs_review" || status === "not_generated") return "warning";
   return "default";
 }
 
@@ -134,12 +127,166 @@ function targetPagesForChapter(
   return normalizeTargetPages(targetPagesInputValue(chapter, context, editedValues));
 }
 
+function MaterialSlotList({ slots }: { slots: MaterialSlotSummary[] }) {
+  return (
+    <section className="chapter-delivery-card" aria-label="资料位清单">
+      <div className="chapter-delivery-card__header">
+        <div>
+          <strong>资料位清单</strong>
+          <p>把公司、人员、业绩或附件绑定到固定资料位，避免自由插入导致格式失控。</p>
+        </div>
+        <Badge variant={slots.some((slot) => slot.status === "missing") ? "warning" : "success"}>
+          {slots.filter((slot) => slot.status === "missing").length} 项待补
+        </Badge>
+      </div>
+      <div className="material-slot-list">
+        {slots.map((slot) => (
+          <article key={slot.key} className="material-slot-item">
+            <div>
+              <strong>{slot.label}</strong>
+              <p>{slot.helpText}</p>
+            </div>
+            <div className="material-slot-item__meta">
+              <Badge variant={slot.status === "missing" ? "warning" : "success"}>
+                {slot.status === "missing" ? "待补资料" : "已匹配"}
+              </Badge>
+              <span>{slot.sourceLabel}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TechnicalWritingBrief({
+  chapterCode,
+  context,
+  targetPagesValue,
+  onTargetPagesChange,
+  onSaveTargetPages,
+  saveDisabled,
+  saveLabel,
+}: {
+  chapterCode: string;
+  context: Record<string, unknown> | undefined;
+  targetPagesValue: string;
+  onTargetPagesChange: (value: string) => void;
+  onSaveTargetPages: () => void;
+  saveDisabled: boolean;
+  saveLabel: string;
+}) {
+  return (
+    <section className="chapter-delivery-card" aria-label="章节写作要求">
+      <div className="chapter-delivery-card__header">
+        <div>
+          <strong>章节写作要求</strong>
+          <p>投标工程师优先调整业务要求；完整提示词保留在高级区。</p>
+        </div>
+      </div>
+      <div className="workflow-gate-panel__chips">
+        <span>{readableContextCount(context, "constraints")}</span>
+        <span>{readableContextCount(context, "scoring_items")}</span>
+        <span>{readableContextCount(context, "standard_clauses")}</span>
+        <span>{readableContextCount(context, "personnel_selections")}</span>
+        <span>{readableContextCount(context, "equipment_selections")}</span>
+        <span>{readableContextCount(context, "chart_assets")}</span>
+      </div>
+      <div className="chapter-target-pages" aria-label="章节篇幅设置">
+        <label>
+          <span>目标页数</span>
+          <input
+            className="clay-input"
+            type="number"
+            min={1}
+            max={300}
+            step={1}
+            value={targetPagesValue}
+            onChange={(event) => onTargetPagesChange(event.target.value)}
+            aria-label={`${chapterCode} 目标页数`}
+          />
+        </label>
+        <ClayButton size="sm" variant="secondary" onClick={onSaveTargetPages} disabled={saveDisabled}>
+          {saveLabel}
+        </ClayButton>
+        <span>生成时注入篇幅要求</span>
+      </div>
+    </section>
+  );
+}
+
+function ChartTaskCards({
+  tasks,
+  generating,
+  approving,
+  onGenerate,
+  onApprove,
+  onInsert,
+}: {
+  tasks: ChartTaskCard[];
+  generating: boolean;
+  approving: boolean;
+  onGenerate: (chartType: string) => void;
+  onApprove: (assetId: string) => void;
+  onInsert: (placeholderKey: string) => void;
+}) {
+  return (
+    <section className="chapter-delivery-card" aria-label="图表任务">
+      <div className="chapter-delivery-card__header">
+        <div>
+          <strong>图表任务</strong>
+          <p>按“任务 → 数据/结构 → 预览 → 审批 → 插入”处理图表，不自由生成不可校核图片。</p>
+        </div>
+        <Badge variant="info">{tasks.length}</Badge>
+      </div>
+      <div className="chart-task-list">
+        {tasks.map((task) => (
+          <article key={task.key} className="chart-task-card">
+            <div className="chart-task-card__header">
+              <div>
+                <strong>{task.title}</strong>
+                <span>{task.chartType}</span>
+              </div>
+              <Badge variant={chartAssetStatusVariant(task.status)}>
+                {task.status === "not_generated" ? "未生成" : task.status}
+              </Badge>
+            </div>
+            <p>{task.purpose}</p>
+            <p>来源：{task.sourceSummary}</p>
+            <code>{task.placeholder}</code>
+            {task.renderedSvg && (
+              <div className="chart-asset-card__preview">
+                <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(task.renderedSvg)}`} alt={task.title} />
+              </div>
+            )}
+            <div className="chart-task-card__actions">
+              <ClayButton size="sm" variant="secondary" onClick={() => onGenerate(task.chartType)} disabled={generating}>
+                {task.assetId ? "重新生成" : "生成图表草案"}
+              </ClayButton>
+              <ClayButton
+                size="sm"
+                variant="secondary"
+                onClick={() => task.assetId && onApprove(task.assetId)}
+                disabled={!task.assetId || task.status === "approved" || approving}
+              >
+                {task.status === "approved" ? "已审批" : "审批图表"}
+              </ClayButton>
+              <ClayButton size="sm" variant="ghost" onClick={() => onInsert(task.key)} disabled={!task.assetId}>
+                插入图表
+              </ClayButton>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function EditorContent() {
   const { projectId } = useNavigation();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
-  const [chartType, setChartType] = useState<string>("quality_system");
   const [targetPagesByChapter, setTargetPagesByChapter] = useState<Record<string, string>>({});
 
   const { data: drafts = [], isLoading } = useQuery({
@@ -204,15 +351,16 @@ export function EditorContent() {
     enabled: !!projectId && !!selectedOutlineChapter?.id && selectedOutlineChapter.volume_type === "technical",
     retry: false,
   });
+
   const pendingChartCount = chartAssets.filter((asset) => asset.status !== "approved").length;
   const approvedChartCount = chartAssets.length - pendingChartCount;
   const recommendedCharts = recommendedChartKeys(chapterContext);
   const selectedTargetPagesValue = targetPagesInputValue(selectedOutlineChapter, chapterContext, targetPagesByChapter);
   const selectedTargetPages = normalizeTargetPages(selectedTargetPagesValue);
-
+  const selectedDeliveryKind = chapterDeliveryKind(selectedOutlineChapter);
+  const selectedDeliveryLabel = deliveryKindLabel(selectedDeliveryKind);
   const save = useMutation({
-    mutationFn: ({ id, content }: { id: string; content: string }) =>
-      updateDraft(id, content),
+    mutationFn: ({ id, content }: { id: string; content: string }) => updateDraft(id, content),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["drafts", projectId] });
     },
@@ -247,6 +395,9 @@ export function EditorContent() {
       return assembleBusinessBid(projectId);
     },
   });
+
+  const selectedMaterialSlotsReal = buildMaterialSlots(selectedOutlineChapter, businessAssembly.data);
+  const chartTaskCards = buildChartTaskCards(recommendedCharts, chartAssets);
 
   const generateChapter = useMutation({
     mutationFn: (chapterId: string) => {
@@ -287,12 +438,12 @@ export function EditorContent() {
   });
 
   const generateChart = useMutation({
-    mutationFn: () => {
+    mutationFn: (nextChartType: string) => {
       if (!projectId) throw new Error("No project selected");
       return generateChartAsset(projectId, {
-        chart_type: chartType,
-        title: chartTitle(chartType),
-        placeholder_key: chartType,
+        chart_type: nextChartType,
+        title: chartTitle(nextChartType),
+        placeholder_key: nextChartType,
         outline_node_id: selectedOutlineChapter?.id ?? null,
       });
     },
@@ -399,181 +550,36 @@ export function EditorContent() {
         </section>
       )}
 
-      {chartAssets.length > 0 && (
-        <section className="workflow-gate-panel">
-          <div>
-            <strong>图表资产</strong>
-            <p>模板中使用占位符插入图表，正式导出只使用已审批图表。</p>
-          </div>
-          <div className="workflow-gate-panel__chips">
-            <span>待审批：{pendingChartCount}</span>
-            <span>已审批：{approvedChartCount}</span>
-          </div>
-          <div className="chart-asset-grid">
-            {chartAssets.map((asset) => (
-              <article key={asset.id} className="chart-asset-card">
-                <div className="chart-asset-card__header">
-                  <div>
-                    <strong>{asset.title}</strong>
-                    <span>{asset.chart_type}</span>
-                  </div>
-                  <Badge variant={chartAssetStatusVariant(asset.status)}>{asset.status}</Badge>
-                </div>
-                {asset.rendered_svg && (
-                  <div className="chart-asset-card__preview">
-                    <img
-                      src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(asset.rendered_svg)}`}
-                      alt={asset.title}
-                    />
-                  </div>
-                )}
-                <div className="chart-asset-card__meta">
-                  <code>{`{{chart:${asset.placeholder_key || asset.chart_type}}}`}</code>
-                  <span>v{asset.version ?? 1}</span>
-                </div>
-                <ClayButton
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => approveChart.mutate(asset.id)}
-                  disabled={asset.status === "approved" || approveChart.isPending}
-                >
-                  {asset.status === "approved" ? "已审批" : "审批图表"}
-                </ClayButton>
-                <ClayButton
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setEditContent((current) => appendChartPlaceholder(current, chartPlaceholder(asset)))}
-                  disabled={!selected}
-                >
-                  插入 {chartPlaceholder(asset)}
-                </ClayButton>
-              </article>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="workflow-gate-panel" aria-label="图表生成与插入">
-        <div>
-          <strong>图表生成与插入</strong>
-          <p>按技术章节选择图表类型，生成草案后用占位符插入正文，正式导出前审批引用图表。</p>
-        </div>
-        <div className="chart-control-row">
-          <label>
-            <span>图表类型</span>
-            <select
-              className="clay-input"
-              value={chartType}
-              onChange={(event) => setChartType(event.target.value)}
-              aria-label="图表类型"
-            >
-              {CHART_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <ClayButton onClick={() => generateChart.mutate()} disabled={generateChart.isPending}>
-            {generateChart.isPending ? "生成中..." : "生成图表草案"}
-          </ClayButton>
-        </div>
-      </section>
-
-      {selectedOutlineChapter?.volume_type === "technical" && (
-        <section className="workflow-gate-panel" aria-label="章节生成上下文">
-          <div>
-            <strong>章节生成上下文</strong>
-            <p>生成前核对约束、评分、标准、人员、设备、图表和企业资料输入。</p>
-          </div>
-          <div className="workflow-gate-panel__chips">
-            <span>约束：{contextCount(chapterContext, "constraints")}</span>
-            <span>评分：{contextCount(chapterContext, "scoring_items")}</span>
-            <span>标准：{contextCount(chapterContext, "standard_clauses")}</span>
-            <span>人员：{contextCount(chapterContext, "personnel_selections")}</span>
-            <span>设备：{contextCount(chapterContext, "equipment_selections")}</span>
-            <span>图表：{contextCount(chapterContext, "chart_assets")}</span>
-            <span>业绩：{companyAssetCount(chapterContext, "performances")}</span>
-            <span>证书：{companyAssetCount(chapterContext, "certificates")}</span>
-          </div>
-          <div className="chapter-target-pages" aria-label="章节篇幅设置">
-            <label>
-              <span>目标页数</span>
-              <input
-                className="clay-input"
-                type="number"
-                min={1}
-                max={300}
-                step={1}
-                value={selectedTargetPagesValue}
-                onChange={(event) => {
-                  if (!selectedOutlineChapter) return;
-                  setTargetPagesByChapter((current) => ({
-                    ...current,
-                    [selectedOutlineChapter.id]: event.target.value,
-                  }));
-                }}
-                aria-label={`${selectedOutlineChapter.chapter_code} 目标页数`}
-              />
-            </label>
-            <ClayButton
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                if (!selectedOutlineChapter || selectedTargetPages === null) return;
-                updateTargetPages.mutate({ chapter: selectedOutlineChapter, targetPages: selectedTargetPages });
-              }}
-              disabled={!selectedOutlineChapter || selectedTargetPages === null || updateTargetPages.isPending}
-            >
-              {updateTargetPages.isPending ? "保存中..." : "保存篇幅"}
-            </ClayButton>
-            <span>生成时注入篇幅要求</span>
-          </div>
-          {recommendedCharts.length > 0 && (
-            <div className="template-conflict-list" aria-label="图表占位映射">
-              <strong>图表占位映射</strong>
-              {recommendedCharts.map((key) => {
-                const asset = chartAssets.find((item) => chartPlaceholder(item) === key || item.chart_type === key);
-                return (
-                  <article key={key} className="template-conflict-item">
-                    <strong>{key}</strong>
-                    <span>{asset ? chartTitle(asset.chart_type) : chartTitle(key)}</span>
-                    <code>{`{{chart:${key}}}`}</code>
-                    <span>{asset ? `状态：${asset.status}` : "状态：未生成"}</span>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      )}
-
       <div className="editor-layout">
         <aside className="outline-panel">
           <h2>提纲</h2>
-          {outline?.chapters.map((chapter) => (
-            <div key={chapter.id} className="outline-item">
-              <span className="outline-code">{chapter.chapter_code}</span>
-              <span>{chapter.chapter_title}</span>
-              <ClayButton
-                size="sm"
-                onClick={() => {
-                  if (chapter.volume_type === "technical" && outline?.status === "confirmed") {
-                    const context = chapter.id === selectedOutlineChapter?.id ? chapterContext : undefined;
-                    generateTechnical.mutate({
-                      chapterId: chapter.id,
-                      targetPages: targetPagesForChapter(chapter, context, targetPagesByChapter),
-                    });
-                  } else {
-                    generateChapter.mutate(chapter.id);
-                  }
-                }}
-                disabled={generateChapter.isPending || generateTechnical.isPending}
-              >
-                {chapter.volume_type === "technical" && outline?.status === "confirmed" ? "技术生成" : "生成"}
-              </ClayButton>
-            </div>
-          ))}
+          {outline?.chapters.map((chapter) => {
+            const kind = chapterDeliveryKind(chapter);
+            return (
+              <div key={chapter.id} className="outline-item">
+                <span className="outline-code">{chapter.chapter_code}</span>
+                <span>{chapter.chapter_title}</span>
+                <Badge variant={kind === "ai_content" ? "info" : "success"}>{deliveryKindLabel(kind)}</Badge>
+                <ClayButton
+                  size="sm"
+                  onClick={() => {
+                    if (chapter.volume_type === "technical" && outline?.status === "confirmed") {
+                      const context = chapter.id === selectedOutlineChapter?.id ? chapterContext : undefined;
+                      generateTechnical.mutate({
+                        chapterId: chapter.id,
+                        targetPages: targetPagesForChapter(chapter, context, targetPagesByChapter),
+                      });
+                    } else {
+                      generateChapter.mutate(chapter.id);
+                    }
+                  }}
+                  disabled={generateChapter.isPending || generateTechnical.isPending}
+                >
+                  {chapter.volume_type === "technical" && outline?.status === "confirmed" ? "技术生成" : "生成"}
+                </ClayButton>
+              </div>
+            );
+          })}
           {isLoading && <LoadingState label="章节草稿加载中" rows={3} compact />}
           {drafts.map((d) => (
             <div
@@ -600,22 +606,69 @@ export function EditorContent() {
         <main className="editor-main">
           {selected ? (
             <>
-              <div className="editor-toolbar">
-                <h2>{selected.chapter_code}</h2>
-                {selected.is_stale && <Badge variant="danger">{selected.stale_reason || "内容已过期"}</Badge>}
+              <div className="editor-toolbar chapter-delivery-toolbar">
+                <div>
+                  <h2>{selected.chapter_code} {selectedOutlineChapter?.chapter_title ?? "章节草稿"}</h2>
+                  <div className="chapter-delivery-toolbar__meta">
+                    <Badge variant={selectedDeliveryKind === "ai_content" ? "info" : "success"}>{selectedDeliveryLabel}</Badge>
+                    {selected.is_stale && <Badge variant="danger">{selected.stale_reason || "内容已过期"}</Badge>}
+                  </div>
+                </div>
                 <ClayButton
                   onClick={() => save.mutate({ id: selected.id, content: editContent })}
                   disabled={save.isPending}
                 >
-                  {save.isPending ? "保存中..." : "保存"}
+                  {save.isPending ? "保存中..." : "保存正文"}
                 </ClayButton>
               </div>
-              <textarea
-                className="clay-textarea draft-editor"
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                aria-label={`${selected.chapter_code} 章节正文`}
-              />
+
+              <div className="chapter-delivery-controls">
+                {selectedDeliveryKind === "material_composition" && <MaterialSlotList slots={selectedMaterialSlotsReal} />}
+                {selectedDeliveryKind === "ai_content" && selectedOutlineChapter && (
+                  <>
+                    <TechnicalWritingBrief
+                      chapterCode={selectedOutlineChapter.chapter_code}
+                      context={chapterContext}
+                      targetPagesValue={selectedTargetPagesValue}
+                      onTargetPagesChange={(value) => {
+                        setTargetPagesByChapter((current) => ({
+                          ...current,
+                          [selectedOutlineChapter.id]: value,
+                        }));
+                      }}
+                      onSaveTargetPages={() => {
+                        if (!selectedOutlineChapter || selectedTargetPages === null) return;
+                        updateTargetPages.mutate({ chapter: selectedOutlineChapter, targetPages: selectedTargetPages });
+                      }}
+                      saveDisabled={!selectedOutlineChapter || selectedTargetPages === null || updateTargetPages.isPending}
+                      saveLabel={updateTargetPages.isPending ? "保存中..." : "保存篇幅"}
+                    />
+                    <ChartTaskCards
+                      tasks={chartTaskCards}
+                      generating={generateChart.isPending}
+                      approving={approveChart.isPending}
+                      onGenerate={(nextChartType) => generateChart.mutate(nextChartType)}
+                      onApprove={(assetId) => approveChart.mutate(assetId)}
+                      onInsert={(key) => setEditContent((current) => appendChartPlaceholder(current, key))}
+                    />
+                  </>
+                )}
+              </div>
+
+              <section className="chapter-delivery-card" aria-label="章节预览">
+                <div className="chapter-delivery-card__header">
+                  <div>
+                    <strong>{selectedDeliveryKind === "ai_content" ? "AI 生成正文" : "模板生成预览"}</strong>
+                    <p>{selectedDeliveryKind === "ai_content" ? "审阅生成内容，可直接修改后保存。" : "固定文字和资料位最终会装配到该章节。"}</p>
+                  </div>
+                </div>
+                <textarea
+                  className="clay-textarea draft-editor"
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  aria-label={`${selected.chapter_code} 章节正文`}
+                />
+              </section>
             </>
           ) : (
             <EmptyState

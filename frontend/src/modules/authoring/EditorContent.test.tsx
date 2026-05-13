@@ -165,55 +165,59 @@ describe("EditorContent chart workflow", () => {
     updateDraftMock.mockResolvedValue({});
   });
 
-  it("generates a selected chart type and inserts the placeholder into the current draft", async () => {
+  it("generates a chart task draft and inserts the placeholder into the current draft", async () => {
     render(withClient(<EditorContent />));
 
     expect(await screen.findByText("招标冲突覆盖")).toBeInTheDocument();
     expect(screen.getByText("技术规范书 p12")).toBeInTheDocument();
     const chapterLabels = await screen.findAllByText("10.1");
     fireEvent.click(chapterLabels[1]);
-    expect(await screen.findByText("章节生成上下文")).toBeInTheDocument();
+
+    expect(await screen.findByText("章节写作要求")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText((_, element) => element?.textContent === "约束：1")).toBeInTheDocument());
     expect(screen.getByText((_, element) => element?.textContent === "评分：1")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "标准：1")).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent === "业绩：1")).toBeInTheDocument();
     expect(screen.getByLabelText("10.1 目标页数")).toHaveValue(80);
-    const placeholderMap = screen.getByLabelText("图表占位映射");
-    expect(within(placeholderMap).getByText("图表占位映射")).toBeInTheDocument();
-    expect(within(placeholderMap).getByText("quality_system")).toBeInTheDocument();
-    expect(within(placeholderMap).getByText("response_matrix")).toBeInTheDocument();
-    expect(within(placeholderMap).getByText("critical_path")).toBeInTheDocument();
-    fireEvent.change(await screen.findByLabelText("图表类型"), { target: { value: "risk_matrix" } });
-    fireEvent.click(screen.getByRole("button", { name: "生成图表草案" }));
+
+    const taskRegion = await screen.findByLabelText("图表任务");
+    expect(within(taskRegion).getByText("质量管理体系图")).toBeInTheDocument();
+    expect(within(taskRegion).getByText("条款响应矩阵")).toBeInTheDocument();
+    expect(within(taskRegion).getByText("关键路径图")).toBeInTheDocument();
+
+    fireEvent.click(within(taskRegion).getAllByRole("button", { name: "生成图表草案" })[0]);
 
     await waitFor(() =>
       expect(generateChartAssetMock).toHaveBeenCalledWith("proj-1", expect.objectContaining({
-        chart_type: "risk_matrix",
-        title: "风险分级管控矩阵",
-        placeholder_key: "risk_matrix",
+        chart_type: "response_matrix",
+        title: "条款响应矩阵",
+        placeholder_key: "response_matrix",
         outline_node_id: "chapter-1",
       })),
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "插入 quality_system" }));
+    fireEvent.click(within(taskRegion).getAllByRole("button", { name: "插入图表" })[0]);
     expect((screen.getByLabelText("10.1 章节正文") as HTMLTextAreaElement).value).toContain("{{chart:quality_system}}");
   });
 
   it("approves a generated chart asset", async () => {
     render(withClient(<EditorContent />));
 
-    fireEvent.click(await screen.findByRole("button", { name: "审批图表" }));
+    const chapterLabels = await screen.findAllByText("10.1");
+    fireEvent.click(chapterLabels[1]);
+    const taskRegion = await screen.findByLabelText("图表任务");
+    fireEvent.click(within(taskRegion).getByRole("button", { name: "审批图表" }));
 
     await waitFor(() => expect(approveChartAssetMock).toHaveBeenCalledWith("asset-1"));
   });
 
-  it("shows extended chart type options and approval summary", async () => {
+  it("shows chart task options and generation summary", async () => {
     render(withClient(<EditorContent />));
 
-    expect(await screen.findByText("图表资产")).toBeInTheDocument();
-    expect(screen.getByText("待审批：1")).toBeInTheDocument();
-    fireEvent.change(await screen.findByLabelText("图表类型"), { target: { value: "critical_path" } });
-    fireEvent.click(screen.getByRole("button", { name: "生成图表草案" }));
+    const chapterLabels = await screen.findAllByText("10.1");
+    fireEvent.click(chapterLabels[1]);
+    const taskRegion = await screen.findByLabelText("图表任务");
+    await waitFor(() => expect(within(taskRegion).getByText("关键路径图")).toBeInTheDocument());
+    fireEvent.click(within(taskRegion).getAllByRole("button", { name: "生成图表草案" })[1]);
 
     await waitFor(() =>
       expect(generateChartAssetMock).toHaveBeenCalledWith("proj-1", expect.objectContaining({
@@ -247,4 +251,73 @@ describe("EditorContent chart workflow", () => {
       })),
     );
   });
+
+  it("shows material composition language for non-technical chapters", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        {
+          id: "chapter-business-1",
+          project_id: "proj-1",
+          outline_id: "outline-1",
+          chapter_code: "3",
+          chapter_title: "企业资信情况",
+          volume_type: "business",
+          sort_order: 1,
+          metadata_json: {},
+        },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      {
+        id: "draft-business-1",
+        project_id: "proj-1",
+        chapter_code: "3",
+        content_md: "## 企业资信情况\n我公司具备承担本项目的相关资质。",
+        updated_at: "2026-05-10T00:00:00Z",
+      },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({
+      project_id: "proj-1",
+      run: {},
+      chapters: [],
+      response_matrix: [],
+      missing_materials: [
+        { chapter_code: "3", material_name: "安全生产许可证", material_type: "certificate", reason: "缺少有效附件" },
+      ],
+      boundary: "商务资料装配完成，仍有缺失资料。",
+    });
+
+    render(withClient(<EditorContent />));
+
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(assembleBusinessBidMock).toHaveBeenCalled());
+    const chapterLabels = await screen.findAllByText("3");
+    fireEvent.click(chapterLabels[1]);
+
+    expect((await screen.findAllByText("资料编排")).length).toBeGreaterThan(0);
+    expect(screen.getByText("资料位清单")).toBeInTheDocument();
+    expect(screen.getByText("安全生产许可证")).toBeInTheDocument();
+    expect(await screen.findByText("缺少有效附件")).toBeInTheDocument();
+  });
+
+  it("shows chart task cards with purpose, source, approval and insert actions", async () => {
+    render(withClient(<EditorContent />));
+
+    const chapterLabels = await screen.findAllByText("10.1");
+    fireEvent.click(chapterLabels[1]);
+
+    const taskRegion = await screen.findByLabelText("图表任务");
+    expect(within(taskRegion).getByText("质量管理体系图")).toBeInTheDocument();
+    expect(within(taskRegion).getByText("响应质量保证体系要求，展示质量管理职责链路。")).toBeInTheDocument();
+    expect(within(taskRegion).getByText("{{chart:quality_system}}")).toBeInTheDocument();
+    expect(within(taskRegion).getByRole("button", { name: "审批图表" })).toBeInTheDocument();
+    expect(within(taskRegion).getByRole("button", { name: "插入图表" })).toBeInTheDocument();
+  });
+
 });

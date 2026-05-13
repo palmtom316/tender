@@ -172,7 +172,7 @@ export function buildChartTaskCards(recommendedChartKeys: string[], assets: Char
       chartType,
       purpose: CHART_PURPOSES[chartType] ?? "辅助说明本章技术响应内容。",
       sourceSummary: CHART_SOURCES[chartType] ?? "章节正文、招标要求和已选资料。",
-      placeholder: `{{chart:${key}}`,
+      placeholder: `{{chart:${key}}}`,
       status: asset?.status ?? "not_generated",
       assetId: asset?.id ?? null,
       renderedSvg: asset?.rendered_svg ?? null,
