@@ -8,17 +8,35 @@ import { Badge } from "../../components/ui/Badge";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../components/ui/EmptyState";
 
+const TEMPLATE_KINDS = [
+  { value: "sgcc_substation", label: "国网变电工程" },
+  { value: "sgcc_maintenance", label: "国网运维工程" },
+  { value: "sgcc_distribution", label: "国网配网工程" },
+  { value: "sgcc_low_voltage_distribution", label: "国网低压营配工程" },
+  { value: "user_distribution", label: "用户配电工程" },
+  { value: "user_maintenance", label: "用户运维工程" },
+] as const;
+
+function formatProjectDate(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}/${month}/${day}`;
+}
+
 export function ProjectsModule() {
   const { tab, projectId, setProjectId, setDocumentId, navigate } = useNavigation();
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [businessLine, setBusinessLine] = useState("10kV");
+  const [templateKind, setTemplateKind] = useState("sgcc_distribution");
   const [employerName, setEmployerName] = useState("");
   const [tenderPlatform, setTenderPlatform] = useState("ECP");
   const [submissionDeadline, setSubmissionDeadline] = useState("");
   const [voltageLevel, setVoltageLevel] = useState("10kV");
-  const [bidBondAmount, setBidBondAmount] = useState("");
   const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null);
 
   const { data: projects = [], isLoading, error } = useQuery({
@@ -33,7 +51,6 @@ export function ProjectsModule() {
       setName("");
       setEmployerName("");
       setSubmissionDeadline("");
-      setBidBondAmount("");
       setShowForm(false);
     },
   });
@@ -57,14 +74,14 @@ export function ProjectsModule() {
       mutation.mutate({
         name: name.trim(),
         industry: "power",
-        business_line: businessLine,
-        project_type: businessLine,
+        business_line: templateKind,
+        project_type: templateKind,
+        sub_type: templateKind,
         employer_name: employerName.trim() || undefined,
         tender_platform: tenderPlatform,
         submission_target: tenderPlatform === "线下" ? "paper" : "platform_manual_upload",
         submission_deadline: submissionDeadline || undefined,
         voltage_level: voltageLevel ? [voltageLevel] : [],
-        bid_bond_amount: bidBondAmount.trim() || undefined,
         procurement_type: "single",
       });
     }
@@ -108,11 +125,10 @@ export function ProjectsModule() {
               aria-label="项目名称"
               autoFocus
             />
-            <select className="clay-input" value={businessLine} onChange={(e) => setBusinessLine(e.target.value)} aria-label="业务线">
-              <option value="变电劳务及专业分包">变电劳务及专业分包</option>
-              <option value="10kV">10kV 项目</option>
-              <option value="电力运维">电力运维项目</option>
-              <option value="用户高低压供配电">用户高低压供配电工程</option>
+            <select className="clay-input" value={templateKind} onChange={(e) => setTemplateKind(e.target.value)} aria-label="招标文件模板种类">
+              {TEMPLATE_KINDS.map((kind) => (
+                <option key={kind.value} value={kind.value}>{kind.label}</option>
+              ))}
             </select>
             <select className="clay-input" value={voltageLevel} onChange={(e) => setVoltageLevel(e.target.value)} aria-label="电压等级">
               <option value="500kV">500kV</option>
@@ -130,7 +146,6 @@ export function ProjectsModule() {
               <option value="线下">线下递交</option>
             </select>
             <input className="clay-input" type="datetime-local" value={submissionDeadline} onChange={(e) => setSubmissionDeadline(e.target.value)} aria-label="递交截止时间" />
-            <input className="clay-input" type="text" placeholder="保证金，如 10万元" value={bidBondAmount} onChange={(e) => setBidBondAmount(e.target.value)} aria-label="保证金" />
             <ClayButton type="submit" disabled={mutation.isPending}>
               {mutation.isPending ? "创建中..." : "创建"}
             </ClayButton>
@@ -172,13 +187,13 @@ export function ProjectsModule() {
                 {p.workflow_status ?? p.status ?? "created"}
               </Badge>
               <span className="project-card__date">
-                {new Date(p.created_at).toLocaleDateString("zh-CN")}
+                {formatProjectDate(p.created_at)}
               </span>
             </div>
             <div className="project-card__meta">
               {p.business_line && <span>{p.business_line}</span>}
               {p.tender_platform && <span>{p.tender_platform}</span>}
-              {p.submission_deadline && <span>截止 {new Date(p.submission_deadline).toLocaleString("zh-CN")}</span>}
+              {p.submission_deadline && <span>截止 {formatProjectDate(p.submission_deadline)}</span>}
             </div>
           </Card>
         ))}

@@ -92,7 +92,7 @@ def upgrade() -> None:
       'sgcc_distribution_business_v1',
       '国网公司配网工程商务标目录',
       'outline',
-      'sgcc_10kv',
+      'sgcc_distribution',
       'docs/samples',
       '{"source_file":"国网公司配网工程商务标目录.md","volume_type":"business","outline_kind":"sgcc_distribution_business"}'::jsonb
     )

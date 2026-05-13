@@ -58,7 +58,7 @@ def upgrade() -> None:
       'sgcc_distribution_technical_v1',
       '国网公司配网工程技术标目录',
       'outline',
-      'sgcc_10kv',
+      'sgcc_distribution',
       'docs/samples',
       '{"source_file":"国网公司配网工程技术标目录.md","volume_type":"technical","outline_kind":"sgcc_distribution_technical"}'::jsonb
     )

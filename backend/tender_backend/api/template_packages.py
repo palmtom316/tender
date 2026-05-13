@@ -28,6 +28,47 @@ _selection = TemplateSelectionService(template_repo=_repo)
 _DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PACKAGE_KEY_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
+TENDER_TEMPLATE_CATEGORIES = [
+    {
+        "code": "sgcc_substation",
+        "display_name": "国网变电工程",
+        "description": "国家电网变电工程类项目模板",
+        "sort_order": 10,
+    },
+    {
+        "code": "sgcc_maintenance",
+        "display_name": "国网运维工程",
+        "description": "国家电网运维类项目模板",
+        "sort_order": 20,
+    },
+    {
+        "code": "sgcc_distribution",
+        "display_name": "国网配网工程",
+        "description": "国家电网配网工程类项目模板",
+        "sort_order": 30,
+    },
+    {
+        "code": "sgcc_low_voltage_distribution",
+        "display_name": "国网低压营配工程",
+        "description": "国家电网低压营配工程类项目模板",
+        "sort_order": 40,
+    },
+    {
+        "code": "user_distribution",
+        "display_name": "用户配电工程",
+        "description": "用户侧配电工程类项目模板",
+        "sort_order": 50,
+    },
+    {
+        "code": "user_maintenance",
+        "display_name": "用户运维工程",
+        "description": "用户侧运维工程类项目模板",
+        "sort_order": 60,
+    },
+]
+
+_VISIBLE_TEMPLATE_PACKAGE_TYPES = {"outline"}
+
 
 class TemplatePackageImportBody(BaseModel):
     source_dir: str = Field(min_length=1)
@@ -80,6 +121,19 @@ class TemplateSelectionConfirmBody(BaseModel):
 def _sanitize_package_key_part(value: str) -> str:
     cleaned = _PACKAGE_KEY_SAFE_RE.sub("-", value).strip("-._").lower()
     return cleaned or "template"
+
+
+def _list_visible_template_packages(
+    conn: Connection, *, category_code: str | None
+):
+    packages = [
+        package
+        for package in _repo.list_all(conn)
+        if package.package_type in _VISIBLE_TEMPLATE_PACKAGE_TYPES
+    ]
+    if category_code:
+        packages = [package for package in packages if package.category_code == category_code]
+    return packages
 
 
 async def _save_uploaded_template_docx(file: UploadFile, settings: Settings) -> str:
@@ -136,17 +190,17 @@ def _package_out(conn: Connection, package_id: UUID) -> TemplatePackageDetailOut
 
 
 @router.get("/template-package-categories", response_model=list[TemplatePackageCategoryOut])
-async def list_template_package_categories(conn: Connection = Depends(get_db_conn)) -> list[TemplatePackageCategoryOut]:
+async def list_template_package_categories() -> list[TemplatePackageCategoryOut]:
     return [
         TemplatePackageCategoryOut(
-            code=row.code,
-            display_name=row.display_name,
-            description=row.description,
-            sort_order=row.sort_order,
-            enabled=row.enabled,
-            metadata_json=row.metadata_json,
+            code=category["code"],
+            display_name=category["display_name"],
+            description=category["description"],
+            sort_order=int(category["sort_order"]),
+            enabled=True,
+            metadata_json={},
         )
-        for row in _repo.list_categories(conn)
+        for category in TENDER_TEMPLATE_CATEGORIES
     ]
 
 
@@ -155,9 +209,7 @@ async def list_template_packages(
     category_code: str | None = Query(None),
     conn: Connection = Depends(get_db_conn),
 ) -> list[TemplatePackageOut]:
-    packages = _repo.list_all(conn)
-    if category_code:
-        packages = [package for package in packages if package.category_code == category_code]
+    packages = _list_visible_template_packages(conn, category_code=category_code)
     items_by_package = _repo.count_items_by_package(conn, package_ids=[package.id for package in packages])
     return [
         TemplatePackageOut(
