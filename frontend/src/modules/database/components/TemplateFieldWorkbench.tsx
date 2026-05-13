@@ -267,6 +267,7 @@ export function TemplateFieldWorkbench() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [selectedBindingId, setSelectedBindingId] = useState<string | null>(null);
   const [showOnlyBlockedItems, setShowOnlyBlockedItems] = useState(false);
+  const [showAdvancedMaintenance, setShowAdvancedMaintenance] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [draft, setDraft] = useState<BindingDraft>(createEmptyDraft(null));
   const [saveError, setSaveError] = useState("");
@@ -385,6 +386,9 @@ export function TemplateFieldWorkbench() {
     () => (packagePreflightQuery.data?.items ?? []).filter((item) => !item.ready),
     [packagePreflightQuery.data?.items],
   );
+  const selectedItemIssues = preflightItem?.issues ?? [];
+  const selectedItemReady = preflightItem?.ready ?? itemContext?.ready ?? false;
+  const selectedItemSuggestion = suggestionQuery.data?.suggestions?.[0] ?? null;
 
   useEffect(() => {
     if (selectedBinding) {
@@ -687,29 +691,29 @@ export function TemplateFieldWorkbench() {
         <section className="template-panel template-panel--hero">
           <div className="template-panel__header template-panel__header--hero">
             <div>
-              <p className="template-panel__eyebrow">模板项字段面板</p>
+              <p className="template-panel__eyebrow">模板交付检查</p>
               <h2>{selectedItem ? `${selectedItem.item_code ?? ""} ${selectedItem.item_name}`.trim() : "请选择模板项"}</h2>
               <p className="template-panel__description">
-                {selectedItem ? selectedItem.relative_path : "选择单 DOCX 模板后，配置整本文档的数据绑定、字段映射和输出键。"}
+                {selectedItem ? "检查该模板项是否缺资料、缺绑定或需要模板管理员处理。" : "选择 DOCX 模板项后，按待处理清单补齐资料并确认可导出。"}
               </p>
             </div>
             {selectedItem && (
               <div className="template-summary summary-pill-row">
                 <div className="template-summary__pill">
-                  <span>绑定规则</span>
+                  <span>资料来源</span>
                   <strong>{itemBindingsQuery.data?.length ?? 0}</strong>
                 </div>
                 <div className="template-summary__pill">
-                  <span>上下文状态</span>
-                  <strong>{itemContext?.ready ? "就绪" : "待完善"}</strong>
+                  <span>当前项</span>
+                  <strong>{selectedItemReady ? "可生成" : "待处理"}</strong>
                 </div>
                 <div className="template-summary__pill">
-                  <span>缺失项</span>
-                  <strong>{itemContext?.missing_required_bindings.length ?? 0}</strong>
+                  <span>待处理</span>
+                  <strong>{selectedItemIssues.length}</strong>
                 </div>
                 <div className="template-summary__pill">
-                  <span>预检状态</span>
-                  <strong>{packagePreflightQuery.data?.ready ? "可导出" : "需修复"}</strong>
+                  <span>整包状态</span>
+                  <strong>{packagePreflightQuery.data?.ready ? "可导出" : "需处理"}</strong>
                 </div>
               </div>
             )}
@@ -717,12 +721,114 @@ export function TemplateFieldWorkbench() {
         </section>
 
         {selectedItem ? (
-          <div className="template-field-grid">
+          <div className="template-delivery-grid">
+            <section className="template-panel template-delivery-panel" aria-label="当前模板项交付状态">
+              <div className="template-panel__header">
+                <div>
+                  <p className="template-panel__eyebrow">交付状态</p>
+                  <h2>{selectedItemReady ? "当前项可生成" : "当前项待处理"}</h2>
+                  <p className="template-panel__description">
+                    {selectedItemReady
+                      ? "资料来源和渲染检查已通过，可参与导出。"
+                      : "先处理下方问题；无法判断的映射问题交给模板管理员。"}
+                  </p>
+                </div>
+                <Badge variant={selectedItemReady ? "success" : "warning"}>
+                  {selectedItemReady ? "可生成" : "待处理"}
+                </Badge>
+              </div>
+
+              <div className="template-preflight-summary">
+                <div className="template-preflight-summary__card">
+                  <span>可导出模板项</span>
+                  <strong>{packagePreflightQuery.data?.ready_item_count ?? 0}</strong>
+                </div>
+                <div className="template-preflight-summary__card">
+                  <span>待处理模板项</span>
+                  <strong>{packagePreflightQuery.data?.blocked_item_count ?? 0}</strong>
+                </div>
+                <div className="template-preflight-summary__card">
+                  <span>问题总数</span>
+                  <strong>{packagePreflightQuery.data?.issue_count ?? 0}</strong>
+                </div>
+              </div>
+
+              <div className="template-delivery-actions">
+                <ClayButton variant="outline" onClick={() => setShowOnlyBlockedItems((current) => !current)}>
+                  {showOnlyBlockedItems ? "查看全部模板项" : "只看待处理项"}
+                </ClayButton>
+                <ClayButton variant="outline" onClick={refreshItemQueries}>
+                  <Icon name="refresh" size={14} /> 重新检查
+                </ClayButton>
+              </div>
+            </section>
+
+            <section className="template-panel" aria-label="待处理清单">
+              <div className="template-panel__header">
+                <div>
+                  <p className="template-panel__eyebrow">待处理清单</p>
+                  <h2>{selectedItemIssues.length > 0 ? `${selectedItemIssues.length} 个问题` : "没有阻塞问题"}</h2>
+                </div>
+              </div>
+              {selectedItemIssues.length === 0 ? (
+                <div className="template-mapping-empty">该模板项已通过导出前检查。</div>
+              ) : (
+                <div className="template-delivery-issue-list">
+                  {selectedItemIssues.map((issue, index) => (
+                    <article key={`${issue.code}-${index}`} className="template-delivery-issue">
+                      <div>
+                        <strong>{issue.message}</strong>
+                        <p>{issue.asset_name ? `关联资料：${issue.asset_name}` : "按资料来源补齐，或交给模板管理员检查绑定规则。"}</p>
+                      </div>
+                      <div className="template-delivery-issue__actions">
+                        {selectedItemSuggestion && (
+                          <ClayButton size="sm" variant="secondary" onClick={() => applySuggestion(selectedItemSuggestion)}>
+                            采用系统建议
+                          </ClayButton>
+                        )}
+                        <ClayButton size="sm" variant="ghost" onClick={() => setShowAdvancedMaintenance(true)}>
+                          交给管理员
+                        </ClayButton>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="template-panel" aria-label="生成预览">
+              <div className="template-panel__header">
+                <div>
+                  <p className="template-panel__eyebrow">生成预览</p>
+                  <h2>这项会写入什么</h2>
+                </div>
+                <Badge variant={itemContext?.ready ? "success" : "warning"}>{itemContext?.ready ? "已就绪" : "草稿"}</Badge>
+              </div>
+              <div className="template-delivery-preview">
+                <p>模板路径：{selectedItem.relative_path}</p>
+                <p>渲染方式：{selectedItem.render_mode} / {selectedItem.item_type}</p>
+                <p>资料来源：{itemBindingsQuery.data?.length ? `${itemBindingsQuery.data.length} 条已配置` : "还没有资料来源"}</p>
+                <p>系统建议：{selectedItemSuggestion ? summarizeSuggestion(selectedItemSuggestion) : "暂无可用建议"}</p>
+              </div>
+            </section>
+
+            <details
+              className="template-panel template-advanced-maintenance"
+              open={showAdvancedMaintenance}
+              onToggle={(event) => setShowAdvancedMaintenance(event.currentTarget.open)}
+            >
+              <summary>
+                <span>
+                  <strong>高级维护</strong>
+                  <small>模板管理员使用：绑定规则、字段映射、上下文 JSON</small>
+                </span>
+              </summary>
+              <div className="template-field-grid template-field-grid--advanced">
             <section className="template-panel">
               <div className="template-panel__header">
                 <div>
                   <p className="template-panel__eyebrow">绑定编辑器</p>
-                  <h2>规则配置</h2>
+                  <h2>规则配置（高级）</h2>
                 </div>
                 <div className="template-inline-actions">
                   <ClayButton
@@ -1167,7 +1273,7 @@ export function TemplateFieldWorkbench() {
                 <div className="template-panel__header">
                   <div>
                     <p className="template-panel__eyebrow">上下文预览</p>
-                    <h2>映射结果</h2>
+                    <h2>技术上下文 JSON</h2>
                   </div>
                   <Badge variant={itemContext?.ready ? "success" : "warning"}>
                     {itemContext?.ready ? "ready" : "draft"}
@@ -1185,6 +1291,8 @@ export function TemplateFieldWorkbench() {
                 </div>
               </section>
             </div>
+          </div>
+            </details>
           </div>
         ) : (
           <section className="template-panel">
