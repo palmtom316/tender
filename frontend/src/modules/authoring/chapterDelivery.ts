@@ -87,6 +87,18 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function inferMaterialKey(label: string, fallback: string) {
+  if (/安全生产许可证/.test(label)) return "safety_license";
+  if (/营业执照|法人证书|登记证书/.test(label)) return "business_license";
+  if (/资质证书/.test(label)) return "qualification_certificate";
+  if (/项目经理/.test(label)) return "project_manager";
+  if (/技术负责人/.test(label)) return "technical_lead";
+  if (/安全员/.test(label)) return "safety_officer";
+  if (/业绩证明附件/.test(label)) return "performance_attachment";
+  if (/类似项目业绩/.test(label)) return "similar_performance";
+  return fallback;
+}
+
 export function chapterDeliveryKind(chapter: BidChapter | null | undefined): ChapterDeliveryKind {
   return chapter?.volume_type === "technical" ? "ai_content" : "material_composition";
 }
@@ -126,13 +138,15 @@ export function buildMaterialSlots(
     return matchingMissing.map((item, index) => {
       const record = asRecord(item);
       const label = String(record.material_name ?? record.name ?? record.title ?? `待补资料 ${index + 1}`);
+      const fallbackKey = String(record.material_key ?? record.id ?? `${chapter.id}-${index}`);
+      const key = inferMaterialKey(label, fallbackKey);
       return {
-        key: String(record.material_key ?? record.id ?? `${chapter.id}-${index}`),
+        key,
         label,
         sourceLabel: materialSourceLabel(record.material_type ?? record.source_type),
-        status: boundMaterials?.[String(record.material_key ?? record.id ?? `${chapter.id}-${index}`)] ? "ready" : "missing",
+        status: boundMaterials?.[key] ? "ready" : "missing",
         helpText: String(record.reason ?? record.message ?? "选择或补充该资料后重新检查。"),
-        boundLabel: boundMaterials?.[String(record.material_key ?? record.id ?? `${chapter.id}-${index}`)],
+        boundLabel: boundMaterials?.[key],
       };
     });
   }

@@ -56,6 +56,26 @@ describe("chapterDelivery", () => {
     expect(slots.map((slot) => slot.label)).toContain("资质证书");
   });
 
+  it("marks slot as ready and exposes bound label after binding", () => {
+    const slots = buildMaterialSlots(
+      chapter({ chapter_code: "3" }),
+      {
+        missing_materials: [
+          { chapter_code: "3", material_key: "safety_license", material_name: "安全生产许可证", material_type: "certificate", reason: "缺证书" },
+        ],
+      },
+      { safety_license: "安全生产许可证（推荐）" },
+    );
+
+    expect(slots).toEqual([
+      expect.objectContaining({
+        label: "安全生产许可证",
+        status: "ready",
+        boundLabel: "安全生产许可证（推荐）",
+      }),
+    ]);
+  });
+
   it("builds chart task cards from recommended charts and assets", () => {
     const assets: ChartAsset[] = [
       {

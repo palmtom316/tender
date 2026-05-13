@@ -20,6 +20,7 @@ const {
   generateBidChapterMock,
   generateTechnicalChapterMock,
   updateBidChapterMock,
+  fetchBusinessTemplatePreviewMock,
 } = vi.hoisted(() => ({
   useNavigationMock: vi.fn(),
   fetchDraftsMock: vi.fn(),
@@ -37,6 +38,7 @@ const {
   generateBidChapterMock: vi.fn(),
   generateTechnicalChapterMock: vi.fn(),
   updateBidChapterMock: vi.fn(),
+  fetchBusinessTemplatePreviewMock: vi.fn(),
 }));
 
 vi.mock("../../lib/NavigationContext", () => ({
@@ -62,6 +64,7 @@ vi.mock("../../lib/api", async () => {
     generateBidChapter: generateBidChapterMock,
     generateTechnicalChapter: generateTechnicalChapterMock,
     updateBidChapter: updateBidChapterMock,
+    fetchBusinessTemplatePreview: fetchBusinessTemplatePreviewMock,
   };
 });
 
@@ -163,6 +166,7 @@ describe("EditorContent chart workflow", () => {
     approveChartAssetMock.mockResolvedValue({ id: "asset-1", status: "approved" });
     updateBidChapterMock.mockResolvedValue({ id: "chapter-1", metadata_json: { target_pages: 96 } });
     updateDraftMock.mockResolvedValue({});
+    fetchBusinessTemplatePreviewMock.mockResolvedValue({ package_title: "国网配网工程商务标", chapters: [] });
   });
 
   it("generates a chart task draft and inserts the placeholder into the current draft", async () => {
@@ -304,6 +308,255 @@ describe("EditorContent chart workflow", () => {
     expect(screen.getByText("资料位清单")).toBeInTheDocument();
     expect(screen.getByText("安全生产许可证")).toBeInTheDocument();
     expect(await screen.findByText("待补资料")).toBeInTheDocument();
+  });
+
+  it("shows business template chapter preview pages for business chapters", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        {
+          id: "chapter-business-1",
+          project_id: "proj-1",
+          outline_id: "outline-1",
+          chapter_code: "1",
+          chapter_title: "商务偏差表",
+          volume_type: "business",
+          sort_order: 1,
+          metadata_json: {},
+        },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      {
+        id: "draft-business-1",
+        project_id: "proj-1",
+        chapter_code: "1",
+        content_md: "商务偏差表草稿",
+        updated_at: "2026-05-10T00:00:00Z",
+      },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({
+      project_id: "proj-1",
+      run: {},
+      chapters: [],
+      response_matrix: [],
+      missing_materials: [],
+      boundary: "完成",
+    });
+    fetchBusinessTemplatePreviewMock.mockResolvedValueOnce({
+      package_title: "国网配网工程商务标",
+      chapters: [
+        {
+          chapter_code: "1",
+          chapter_title: "商务偏差表",
+          page_start: 1,
+          page_end: 1,
+          pages: [{ page_number: 1, blocks: ["商务偏差表", "序号 采购文件条目号"] }],
+        },
+      ],
+    });
+
+    render(withClient(<EditorContent />));
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(assembleBusinessBidMock).toHaveBeenCalled());
+    await waitFor(() => expect(fetchBusinessTemplatePreviewMock).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "查看章节 1 商务偏差表" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "查看章节 1 商务偏差表" }));
+
+    expect(await screen.findByText("模板页面预览")).toBeInTheDocument();
+    expect(screen.getByText("第 1 页")).toBeInTheDocument();
+    expect(screen.getByText("序号 采购文件条目号")).toBeInTheDocument();
+  });
+
+  it("switches preview pages and material checklist when selecting another business chapter", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        { id: "chapter-business-1", project_id: "proj-1", outline_id: "outline-1", chapter_code: "1", chapter_title: "商务偏差表", volume_type: "business", sort_order: 1, metadata_json: {} },
+        { id: "chapter-business-2", project_id: "proj-1", outline_id: "outline-1", chapter_code: "2", chapter_title: "承诺函", volume_type: "business", sort_order: 2, metadata_json: {} },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      { id: "draft-business-1", project_id: "proj-1", chapter_code: "1", content_md: "商务偏差表草稿", updated_at: "2026-05-10T00:00:00Z" },
+      { id: "draft-business-2", project_id: "proj-1", chapter_code: "2", content_md: "承诺函草稿", updated_at: "2026-05-10T00:00:00Z" },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({
+      project_id: "proj-1",
+      run: {},
+      chapters: [],
+      response_matrix: [],
+      missing_materials: [{ chapter_code: "2", material_name: "信用中国查询报告", material_type: "evidence_asset", reason: "缺资料" }],
+      boundary: "完成",
+    });
+    fetchBusinessTemplatePreviewMock.mockResolvedValueOnce({
+      package_title: "国网配网工程商务标",
+      chapters: [
+        { chapter_code: "1", chapter_title: "商务偏差表", page_start: 1, page_end: 1, pages: [{ page_number: 1, blocks: ["商务偏差表正文"] }] },
+        { chapter_code: "2", chapter_title: "承诺函", page_start: 2, page_end: 3, pages: [{ page_number: 2, blocks: ["承诺函正文"] }] },
+      ],
+    });
+
+    render(withClient(<EditorContent />));
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(fetchBusinessTemplatePreviewMock).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "查看章节 2 承诺函" }));
+
+    expect(await screen.findByText("承诺函正文")).toBeInTheDocument();
+    expect(screen.getByText("信用中国查询报告")).toBeInTheDocument();
+  });
+
+  it("uses a unified chapter directory instead of a separate business template list", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        { id: "chapter-business-1", project_id: "proj-1", outline_id: "outline-1", chapter_code: "1", chapter_title: "商务偏差表", volume_type: "business", sort_order: 1, metadata_json: {} },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      { id: "draft-business-1", project_id: "proj-1", chapter_code: "1", content_md: "商务偏差表草稿", updated_at: "2026-05-10T00:00:00Z" },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({ project_id: "proj-1", run: {}, chapters: [], response_matrix: [], missing_materials: [], boundary: "完成" });
+    fetchBusinessTemplatePreviewMock.mockResolvedValueOnce({
+      package_title: "国网配网工程商务标",
+      chapters: [
+        { chapter_code: "1", chapter_title: "商务偏差表", page_start: 1, page_end: 1, pages: [{ page_number: 1, blocks: ["商务偏差表"] }] },
+      ],
+    });
+
+    render(withClient(<EditorContent />));
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(fetchBusinessTemplatePreviewMock).toHaveBeenCalled());
+
+    expect(screen.queryByText("商务模板章节")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "查看章节 1 商务偏差表" })).toBeInTheDocument());
+  });
+
+  it("renders business preview as paper-like page cards", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        { id: "chapter-business-1", project_id: "proj-1", outline_id: "outline-1", chapter_code: "1", chapter_title: "商务偏差表", volume_type: "business", sort_order: 1, metadata_json: {} },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      { id: "draft-business-1", project_id: "proj-1", chapter_code: "1", content_md: "商务偏差表草稿", updated_at: "2026-05-10T00:00:00Z" },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({ project_id: "proj-1", run: {}, chapters: [], response_matrix: [], missing_materials: [], boundary: "完成" });
+    fetchBusinessTemplatePreviewMock.mockResolvedValueOnce({
+      package_title: "国网配网工程商务标",
+      chapters: [
+        { chapter_code: "1", chapter_title: "商务偏差表", page_start: 1, page_end: 2, pages: [{ page_number: 1, blocks: ["商务偏差表", "序号 采购文件条目号"] }] },
+      ],
+    });
+
+    render(withClient(<EditorContent />));
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(fetchBusinessTemplatePreviewMock).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "查看章节 1 商务偏差表" }));
+
+    const previewRegion = await screen.findByLabelText("模板页面预览");
+    expect(within(previewRegion).getByText("第 1 页")).toBeInTheDocument();
+    expect(within(previewRegion).getByText("商务偏差表")).toBeInTheDocument();
+    expect(within(previewRegion).getByText("序号 采购文件条目号")).toBeInTheDocument();
+  });
+
+  it("highlights material placeholders inside business preview pages", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        { id: "chapter-business-1", project_id: "proj-1", outline_id: "outline-1", chapter_code: "3", chapter_title: "企业资信情况", volume_type: "business", sort_order: 1, metadata_json: {} },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      { id: "draft-business-1", project_id: "proj-1", chapter_code: "3", content_md: "企业资信情况草稿", updated_at: "2026-05-10T00:00:00Z" },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({
+      project_id: "proj-1",
+      run: {},
+      chapters: [],
+      response_matrix: [],
+      missing_materials: [{ chapter_code: "3", material_name: "安全生产许可证", material_type: "certificate", reason: "缺少有效附件" }],
+      boundary: "完成",
+    });
+    fetchBusinessTemplatePreviewMock.mockResolvedValueOnce({
+      package_title: "国网配网工程商务标",
+      chapters: [
+        { chapter_code: "3", chapter_title: "企业资信情况", page_start: 1, page_end: 1, pages: [{ page_number: 1, blocks: ["{{ asset.safety_license }}", "企业资信情况说明"] }] },
+      ],
+    });
+
+    render(withClient(<EditorContent />));
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(fetchBusinessTemplatePreviewMock).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "查看章节 3 企业资信情况" }));
+
+    expect(await screen.findByText("待插资料位")).toBeInTheDocument();
+    expect(screen.getByText("asset.safety_license")).toBeInTheDocument();
+  });
+
+  it("shows bound material feedback inside the preview card after binding", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        { id: "chapter-business-1", project_id: "proj-1", outline_id: "outline-1", chapter_code: "3", chapter_title: "企业资信情况", volume_type: "business", sort_order: 1, metadata_json: {} },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      { id: "draft-business-1", project_id: "proj-1", chapter_code: "3", content_md: "企业资信情况草稿", updated_at: "2026-05-10T00:00:00Z" },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({
+      project_id: "proj-1",
+      run: {},
+      chapters: [],
+      response_matrix: [],
+      missing_materials: [{ chapter_code: "3", material_name: "安全生产许可证", material_type: "certificate", reason: "缺少有效附件" }],
+      boundary: "完成",
+    });
+    fetchBusinessTemplatePreviewMock.mockResolvedValueOnce({
+      package_title: "国网配网工程商务标",
+      chapters: [
+        { chapter_code: "3", chapter_title: "企业资信情况", page_start: 1, page_end: 1, pages: [{ page_number: 1, blocks: ["{{ asset.safety_license }}", "企业资信情况说明"] }] },
+      ],
+    });
+
+    render(withClient(<EditorContent />));
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(fetchBusinessTemplatePreviewMock).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "查看章节 3 企业资信情况" }));
+    fireEvent.click(await screen.findByRole("button", { name: "选择资料位 安全生产许可证" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /绑定到当前资料位/i }))[0]);
+
+    expect(await screen.findByText(/已绑定资料：安全生产许可证（公司基础资料）/)).toBeInTheDocument();
   });
 
   it("shows candidate material groups for a selected business material slot", async () => {

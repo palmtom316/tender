@@ -2,10 +2,19 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { listProjectsMock, createProjectMock, deleteProjectMock, navValue } = vi.hoisted(() => ({
+const {
+  listProjectsMock,
+  createProjectMock,
+  deleteProjectMock,
+  listTemplatePackagesMock,
+  confirmTemplateSelectionMock,
+  navValue,
+} = vi.hoisted(() => ({
   listProjectsMock: vi.fn(),
   createProjectMock: vi.fn(),
   deleteProjectMock: vi.fn(),
+  listTemplatePackagesMock: vi.fn(),
+  confirmTemplateSelectionMock: vi.fn(),
   navValue: {
     tab: "all",
     projectId: null,
@@ -22,6 +31,8 @@ vi.mock("../../lib/api", async () => {
     listProjects: listProjectsMock,
     createProject: createProjectMock,
     deleteProject: deleteProjectMock,
+    listTemplatePackages: listTemplatePackagesMock,
+    confirmTemplateSelection: confirmTemplateSelectionMock,
   };
 });
 
@@ -80,6 +91,7 @@ describe("ProjectsModule", () => {
   });
 
   it("renders project dates as yyyy/mm/dd", async () => {
+    listTemplatePackagesMock.mockResolvedValue([]);
     listProjectsMock.mockResolvedValue([
       { id: "p1", name: "日期项目", created_at: "2026-05-13T08:30:00Z", status: "draft", workflow_status: "created", submission_deadline: "2026-06-01T10:00:00Z" },
     ]);
@@ -88,5 +100,33 @@ describe("ProjectsModule", () => {
 
     expect(await screen.findByText("2026/05/13")).toBeInTheDocument();
     expect(screen.getByText("截止 2026/06/01")).toBeInTheDocument();
+  });
+
+  it("shows available template packages and confirms selected package after project creation", async () => {
+    listProjectsMock.mockResolvedValue([]);
+    listTemplatePackagesMock.mockResolvedValue([
+      {
+        id: "pkg-1",
+        package_key: "sgcc-distribution-business-single-docx",
+        display_name: "国网配网工程商务标",
+        package_type: "business",
+        category_code: "sgcc_distribution",
+        source_root: "/tmp/templates",
+        item_count: 1,
+      },
+    ]);
+    createProjectMock.mockResolvedValue({ id: "p1", name: "测试项目", created_at: "2026-05-13T00:00:00Z" });
+    confirmTemplateSelectionMock.mockResolvedValue({ selected_template_package_id: "pkg-1" });
+
+    renderModule();
+    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+
+    expect(await screen.findByText("国网配网工程商务标")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("选择模板包 国网配网工程商务标"));
+    fireEvent.change(screen.getByLabelText("项目名称"), { target: { value: "测试项目" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(createProjectMock).toHaveBeenCalled());
+    await waitFor(() => expect(confirmTemplateSelectionMock).toHaveBeenCalledWith("p1", "pkg-1"));
   });
 });

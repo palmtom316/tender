@@ -41,6 +41,17 @@ class _Repo:
             ),
             BidTemplatePackageRow(
                 id=uuid4(),
+                package_key="sgcc-distribution-business-single-docx",
+                display_name="国网配网工程商务标",
+                package_type="business",
+                category_code="sgcc_distribution",
+                source_root="docs/samples",
+                source_manifest={"volume_type": "business"},
+                created_at=now,
+                updated_at=now,
+            ),
+            BidTemplatePackageRow(
+                id=uuid4(),
                 package_key="sgcc-10kv-construction-methods-technical",
                 display_name="国网配网工程技术标-施工方案与技术措施",
                 package_type="technical",
@@ -56,12 +67,16 @@ class _Repo:
         return {package_id: 1 for package_id in package_ids}
 
 
-def test_template_package_list_only_exposes_outline_packages(monkeypatch):
+def test_template_package_list_exposes_outline_business_and_technical_packages(monkeypatch):
     monkeypatch.setattr(api, "_repo", _Repo())
 
     result = api._list_visible_template_packages(None, category_code=None)
 
-    assert [package.display_name for package in result] == ["国网公司配网工程技术标目录"]
+    assert [package.display_name for package in result] == [
+        "国网公司配网工程技术标目录",
+        "国网配网工程商务标",
+        "国网配网工程技术标-施工方案与技术措施",
+    ]
 
 
 def test_template_categories_use_six_tender_template_kinds():

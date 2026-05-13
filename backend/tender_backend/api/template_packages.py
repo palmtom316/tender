@@ -13,9 +13,11 @@ from tender_backend.core.path_safety import parse_root_list
 from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
+from tender_backend.db.repositories.project_repository import ProjectRepository
 from tender_backend.services.template_service.package_importer import (
     import_template_package_from_directory,
 )
+from tender_backend.services.template_service.business_template_preview import parse_business_template_preview
 from tender_backend.services.template_selection_service import TemplateSelectionService
 from tender_backend.core.project_access import require_project_access
 from tender_backend.core.security import CurrentUser
@@ -24,6 +26,7 @@ from tender_backend.core.security import CurrentUser
 router = APIRouter(tags=["template-packages"], dependencies=[Depends(get_current_user)])
 
 _repo = BidTemplatePackageRepository()
+_project_repo = ProjectRepository()
 _selection = TemplateSelectionService(template_repo=_repo)
 _DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PACKAGE_KEY_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -118,6 +121,24 @@ class TemplateSelectionConfirmBody(BaseModel):
     package_id: UUID
 
 
+class BusinessTemplatePreviewPageOut(BaseModel):
+    page_number: int
+    blocks: list[str]
+
+
+class BusinessTemplatePreviewChapterOut(BaseModel):
+    chapter_code: str
+    chapter_title: str
+    page_start: int
+    page_end: int
+    pages: list[BusinessTemplatePreviewPageOut]
+
+
+class BusinessTemplatePreviewOut(BaseModel):
+    package_title: str
+    chapters: list[BusinessTemplatePreviewChapterOut]
+
+
 def _sanitize_package_key_part(value: str) -> str:
     cleaned = _PACKAGE_KEY_SAFE_RE.sub("-", value).strip("-._").lower()
     return cleaned or "template"
@@ -134,6 +155,32 @@ def _list_visible_template_packages(
     if category_code:
         packages = [package for package in packages if package.category_code == category_code]
     return packages
+
+
+def _ensure_template_package_categories(conn: Connection) -> None:
+    with conn.cursor() as cur:
+        for category in TENDER_TEMPLATE_CATEGORIES:
+            cur.execute(
+                """
+                INSERT INTO template_package_category (
+                  code, display_name, description, sort_order, enabled, metadata_json
+                )
+                VALUES (%s, %s, %s, %s, TRUE, '{}'::jsonb)
+                ON CONFLICT (code)
+                DO UPDATE SET
+                  display_name = EXCLUDED.display_name,
+                  description = EXCLUDED.description,
+                  sort_order = EXCLUDED.sort_order,
+                  enabled = EXCLUDED.enabled,
+                  updated_at = now()
+                """,
+                (
+                    category["code"],
+                    category["display_name"],
+                    category["description"],
+                    int(category["sort_order"]),
+                ),
+            )
 
 
 async def _save_uploaded_template_docx(file: UploadFile, settings: Settings) -> str:
@@ -260,11 +307,61 @@ async def confirm_project_template_selection(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/projects/{project_id}/business-template-preview", response_model=BusinessTemplatePreviewOut)
+async def get_project_business_template_preview(
+    project_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> BusinessTemplatePreviewOut:
+    require_project_access(conn, project_id=project_id, user=user)
+    project = _project_repo.get(conn, project_id=project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    if project.selected_template_package_id is None:
+        raise HTTPException(status_code=400, detail="project has no selected template package")
+
+    package = _repo.get_by_id(conn, package_id=project.selected_template_package_id)
+    if package is None:
+        raise HTTPException(status_code=404, detail="template package not found")
+    items = _repo.list_items(conn, package_id=package.id)
+    if not items:
+        raise HTTPException(status_code=404, detail="template package has no template items")
+
+    template_path = parse_root_list(str(package.source_root))[0] / items[0].relative_path if False else None
+    from pathlib import Path
+
+    docx_path = Path(package.source_root) / items[0].relative_path
+    if not docx_path.is_file():
+        raise HTTPException(status_code=404, detail="template docx file not found")
+
+    preview = parse_business_template_preview(docx_path)
+    return BusinessTemplatePreviewOut(
+        package_title=package.display_name,
+        chapters=[
+            BusinessTemplatePreviewChapterOut(
+                chapter_code=chapter.chapter_code,
+                chapter_title=chapter.chapter_title,
+                page_start=chapter.page_start,
+                page_end=chapter.page_end,
+                pages=[
+                    BusinessTemplatePreviewPageOut(
+                        page_number=page.page_number,
+                        blocks=page.blocks,
+                    )
+                    for page in chapter.pages
+                ],
+            )
+            for chapter in preview.chapters
+        ],
+    )
+
+
 @router.post("/template-packages/import", response_model=TemplatePackageDetailOut)
 async def import_template_package(
     payload: TemplatePackageImportBody,
     conn: Connection = Depends(get_db_conn),
 ) -> TemplatePackageDetailOut:
+    _ensure_template_package_categories(conn)
     try:
         imported = import_template_package_from_directory(
             conn,
@@ -310,6 +407,7 @@ async def upload_template_package(
             "single-docx",
         ]
     )
+    _ensure_template_package_categories(conn)
     try:
         imported = import_template_package_from_directory(
             conn,

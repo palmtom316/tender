@@ -5,6 +5,7 @@ import {
   assembleBusinessBid,
   confirmBidOutline,
   fetchBidOutline,
+  fetchBusinessTemplatePreview,
   fetchDrafts,
   fetchTechnicalChapterContext,
   fetchTechnicalWritingPlan,
@@ -33,6 +34,7 @@ import {
   type MaterialSlotSummary,
 } from "./chapterDelivery";
 import { buildBusinessMaterialCandidates, groupBusinessMaterialCandidates, type BusinessMaterialCandidate } from "./businessMaterialWorkbench";
+import { matchPreviewChapter } from "./businessTemplatePreview";
 
 const CHART_TYPE_OPTIONS = [
   { value: "org_chart", label: "项目组织机构图" },
@@ -128,14 +130,62 @@ function targetPagesForChapter(
   return normalizeTargetPages(targetPagesInputValue(chapter, context, editedValues));
 }
 
+const BUSINESS_PLACEHOLDER_PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
+
+function previewPlaceholderKey(rawKey: string) {
+  return rawKey.replace(/^asset\./, "").trim();
+}
+
+function renderPreviewBlock(
+  block: string,
+  keyPrefix: string,
+  boundMaterials: Record<string, string> | undefined,
+) {
+  const matches = Array.from(block.matchAll(BUSINESS_PLACEHOLDER_PATTERN));
+  if (matches.length === 0) return <p key={keyPrefix}>{block}</p>;
+
+  const fragments: JSX.Element[] = [];
+  let lastIndex = 0;
+
+  matches.forEach((match, index) => {
+    const matchText = match[0];
+    const rawKey = match[1] ?? "";
+    const start = match.index ?? 0;
+    const before = block.slice(lastIndex, start);
+    if (before.trim()) {
+      fragments.push(<span key={`${keyPrefix}-text-${index}`}>{before}</span>);
+    }
+
+    const placeholderKey = previewPlaceholderKey(rawKey);
+    const boundLabel = boundMaterials?.[placeholderKey];
+    fragments.push(
+      <span key={`${keyPrefix}-placeholder-${index}`} className="preview-placeholder-chip">
+        <span className="preview-placeholder-chip__label">待插资料位</span>
+        <code>{rawKey.trim()}</code>
+        {boundLabel ? <span className="preview-placeholder-chip__bound">已绑定资料：{boundLabel}</span> : null}
+      </span>,
+    );
+    lastIndex = start + matchText.length;
+  });
+
+  const after = block.slice(lastIndex);
+  if (after.trim()) {
+    fragments.push(<span key={`${keyPrefix}-text-tail`}>{after}</span>);
+  }
+
+  return <p key={keyPrefix}>{fragments}</p>;
+}
+
 function MaterialSlotList({
   slots,
   selectedSlotKey,
   onSelectSlot,
+  boundLabelPrefix = "已绑定资料",
 }: {
   slots: MaterialSlotSummary[];
   selectedSlotKey: string | null;
   onSelectSlot?: (slot: MaterialSlotSummary) => void;
+  boundLabelPrefix?: string;
 }) {
   return (
     <section className="chapter-delivery-card" aria-label="资料位清单">
@@ -154,7 +204,7 @@ function MaterialSlotList({
             <div>
               <strong>{slot.label}</strong>
               <p>{slot.helpText}</p>
-              {slot.boundLabel && <p>已绑定资料：{slot.boundLabel}</p>}
+              {slot.boundLabel && <p>{boundLabelPrefix}：{slot.boundLabel}</p>}
             </div>
             <div className="material-slot-item__meta">
               <Badge variant={slot.status === "missing" ? "warning" : "success"}>
@@ -458,6 +508,16 @@ export function EditorContent() {
     },
   });
 
+  const { data: businessTemplatePreview } = useQuery({
+    queryKey: ["business-template-preview", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchBusinessTemplatePreview(projectId, { signal });
+    },
+    enabled: !!projectId && !!businessAssembly.data,
+    retry: false,
+  });
+
   const selectedBoundMaterials = selectedOutlineChapter ? boundMaterialByChapter[selectedOutlineChapter.id] : undefined;
   const selectedMaterialSlotsReal = buildMaterialSlots(selectedOutlineChapter, businessAssembly.data, selectedBoundMaterials);
   const chartTaskCards = buildChartTaskCards(recommendedCharts, chartAssets);
@@ -468,6 +528,8 @@ export function EditorContent() {
   const groupedMaterialCandidates = groupBusinessMaterialCandidates(
     buildBusinessMaterialCandidates(selectedMaterialSlot, selectedOutlineChapter?.chapter_title ?? ""),
   );
+  const matchedPreviewChapter = matchPreviewChapter(businessTemplatePreview, selectedOutlineChapter);
+  const previewBoundMaterials = selectedBoundMaterials ?? {};
 
   const generateChapter = useMutation({
     mutationFn: (chapterId: string) => {
@@ -625,14 +687,31 @@ export function EditorContent() {
           <h2>提纲</h2>
           {outline?.chapters.map((chapter) => {
             const kind = chapterDeliveryKind(chapter);
+            const isBusinessPreviewChapter = kind === "material_composition" && Boolean(
+              businessTemplatePreview?.chapters.some((item) => item.chapter_code === chapter.chapter_code),
+            );
             return (
-              <div key={chapter.id} className="outline-item">
+              <div
+                key={chapter.id}
+                className="outline-item"
+                onClick={() => {
+                  const draft = drafts.find((item) => item.chapter_code === chapter.chapter_code);
+                  if (draft) handleSelect(draft);
+                }}
+              >
                 <span className="outline-code">{chapter.chapter_code}</span>
                 <span>{chapter.chapter_title}</span>
                 <Badge variant={kind === "ai_content" ? "info" : "success"}>{deliveryKindLabel(kind)}</Badge>
                 <ClayButton
                   size="sm"
-                  onClick={() => {
+                  variant={isBusinessPreviewChapter ? "secondary" : "primary"}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (isBusinessPreviewChapter) {
+                      const draft = drafts.find((item) => item.chapter_code === chapter.chapter_code);
+                      if (draft) handleSelect(draft);
+                      return;
+                    }
                     if (chapter.volume_type === "technical" && outline?.status === "confirmed") {
                       const context = chapter.id === selectedOutlineChapter?.id ? chapterContext : undefined;
                       generateTechnical.mutate({
@@ -643,9 +722,13 @@ export function EditorContent() {
                       generateChapter.mutate(chapter.id);
                     }
                   }}
-                  disabled={generateChapter.isPending || generateTechnical.isPending}
+                  disabled={!isBusinessPreviewChapter && (generateChapter.isPending || generateTechnical.isPending)}
                 >
-                  {chapter.volume_type === "technical" && outline?.status === "confirmed" ? "技术生成" : "生成"}
+                  {isBusinessPreviewChapter
+                    ? `查看章节 ${chapter.chapter_code} ${chapter.chapter_title}`
+                    : chapter.volume_type === "technical" && outline?.status === "confirmed"
+                      ? "技术生成"
+                      : "生成"}
                 </ClayButton>
               </div>
             );
@@ -698,6 +781,7 @@ export function EditorContent() {
                     <MaterialSlotList
                       slots={selectedMaterialSlotsReal}
                       selectedSlotKey={selectedMaterialSlotKey}
+                      boundLabelPrefix={matchedPreviewChapter ? "资料位已选" : "已绑定资料"}
                       onSelectSlot={isBusinessCompositionChapter ? (slot) => {
                         if (!selectedOutlineChapter) return;
                         setSelectedMaterialSlotKeyByChapter((current) => ({
@@ -755,20 +839,48 @@ export function EditorContent() {
                 )}
               </div>
 
-              <section className="chapter-delivery-card" aria-label="章节预览">
-                <div className="chapter-delivery-card__header">
-                  <div>
-                    <strong>{selectedDeliveryKind === "ai_content" ? "AI 生成正文" : "模板生成预览"}</strong>
-                    <p>{selectedDeliveryKind === "ai_content" ? "审阅生成内容，可直接修改后保存。" : "固定文字和资料位最终会装配到该章节。"}</p>
+              {selectedDeliveryKind === "material_composition" && matchedPreviewChapter ? (
+                <section className="chapter-delivery-card" aria-label="模板页面预览">
+                  <div className="chapter-delivery-card__header">
+                    <div>
+                      <strong>模板页面预览</strong>
+                      <p>按模板分页展示固定正文，当前版本只读，不直接编辑版式。</p>
+                    </div>
+                    <Badge variant="info">{matchedPreviewChapter.pages.length} 页</Badge>
                   </div>
-                </div>
-                <textarea
-                  className="clay-textarea draft-editor"
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                  aria-label={`${selected.chapter_code} 章节正文`}
-                />
-              </section>
+                  <div className="preview-page-grid">
+                    {matchedPreviewChapter.pages.map((page) => (
+                      <article key={page.page_number} className="preview-page-card">
+                        <div className="preview-page-card__header">
+                          <strong>{`第 ${page.page_number} 页`}</strong>
+                        </div>
+                        <div className="preview-page-card__body">
+                          {page.blocks.map((block, index) => renderPreviewBlock(
+                            block,
+                            `${page.page_number}-${index}`,
+                            previewBoundMaterials,
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ) : (
+                <section className="chapter-delivery-card" aria-label="章节预览">
+                  <div className="chapter-delivery-card__header">
+                    <div>
+                      <strong>{selectedDeliveryKind === "ai_content" ? "AI 生成正文" : "模板生成预览"}</strong>
+                      <p>{selectedDeliveryKind === "ai_content" ? "审阅生成内容，可直接修改后保存。" : "固定文字和资料位最终会装配到该章节。"}</p>
+                    </div>
+                  </div>
+                  <textarea
+                    className="clay-textarea draft-editor"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    aria-label={`${selected.chapter_code} 章节正文`}
+                  />
+                </section>
+              )}
             </>
           ) : (
             <EmptyState

@@ -1387,6 +1387,24 @@ export interface TemplateSelectionPreview {
   candidates: TemplateSelectionCandidate[];
 }
 
+export interface BusinessTemplatePreviewPage {
+  page_number: number;
+  blocks: string[];
+}
+
+export interface BusinessTemplatePreviewChapter {
+  chapter_code: string;
+  chapter_title: string;
+  page_start: number;
+  page_end: number;
+  pages: BusinessTemplatePreviewPage[];
+}
+
+export interface BusinessTemplatePreview {
+  package_title: string;
+  chapters: BusinessTemplatePreviewChapter[];
+}
+
 export function previewTemplateSelection(projectId: string, options?: { signal?: AbortSignal }): Promise<TemplateSelectionPreview> {
   return request<TemplateSelectionPreview>(`/projects/${projectId}/template-selection`, { signal: options?.signal });
 }
@@ -1397,6 +1415,10 @@ export function confirmTemplateSelection(projectId: string, packageId: string): 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ package_id: packageId }),
   });
+}
+
+export function fetchBusinessTemplatePreview(projectId: string, options?: { signal?: AbortSignal }): Promise<BusinessTemplatePreview> {
+  return request<BusinessTemplatePreview>(`/projects/${projectId}/business-template-preview`, { signal: options?.signal });
 }
 
 export function fetchTemplatePackageRenderContext(
