@@ -41,6 +41,7 @@ class Project:
     procurement_type: str | None = None
     section_name: str | None = None
     lot_name: str | None = None
+    category_code: str | None = None
     selected_template_package_id: UUID | None = None
     workflow_status: str | None = None
     metadata_json: dict[str, Any] | None = None
@@ -53,7 +54,7 @@ tender_no, project_type, industry, business_line, sub_type, employer_name, emplo
 evaluation_method, evaluation_detail, qualification_review_type, submission_deadline,
 bid_opening_time, bid_validity_period, bid_bond_amount, bid_bond_form, bid_bond_deadline,
 voltage_level, project_scope, tender_platform, submission_target, procurement_type,
-section_name, lot_name, selected_template_package_id, workflow_status, metadata_json
+section_name, lot_name, category_code, selected_template_package_id, workflow_status, metadata_json
 """
 
 PROJECT_COLUMNS_P = """
@@ -63,7 +64,7 @@ p.tender_no, p.project_type, p.industry, p.business_line, p.sub_type, p.employer
 p.evaluation_method, p.evaluation_detail, p.qualification_review_type, p.submission_deadline,
 p.bid_opening_time, p.bid_validity_period, p.bid_bond_amount, p.bid_bond_form, p.bid_bond_deadline,
 p.voltage_level, p.project_scope, p.tender_platform, p.submission_target, p.procurement_type,
-p.section_name, p.lot_name, p.selected_template_package_id, p.workflow_status, p.metadata_json
+p.section_name, p.lot_name, p.category_code, p.selected_template_package_id, p.workflow_status, p.metadata_json
 """
 
 
@@ -96,6 +97,7 @@ def _to_project(row: dict) -> Project:
         procurement_type=row.get("procurement_type"),
         section_name=row.get("section_name"),
         lot_name=row.get("lot_name"),
+        category_code=row.get("category_code"),
         selected_template_package_id=row.get("selected_template_package_id"),
         workflow_status=row.get("workflow_status"),
         metadata_json=dict(row.get("metadata_json") or {}),
@@ -123,7 +125,7 @@ class ProjectRepository:
             "bid_validity_period", "bid_bond_amount", "bid_bond_form", "bid_bond_deadline", "voltage_level", "project_scope",
             "is_live_work_required", "controlled_price", "is_subcontract_allowed", "is_consortium_allowed", "tender_platform",
             "submission_target", "platform_file_rules", "procurement_type", "parent_project_id", "section_name", "lot_name",
-            "selected_template_package_id", "workflow_status", "metadata_json",
+            "category_code", "selected_template_package_id", "workflow_status", "metadata_json",
         }
         values = {key: value for key, value in metadata.items() if key in allowed and value is not None}
         values.setdefault("workflow_status", "created")
@@ -175,7 +177,7 @@ class ProjectRepository:
             "bid_validity_period", "bid_bond_amount", "bid_bond_form", "bid_bond_deadline", "voltage_level", "project_scope",
             "is_live_work_required", "controlled_price", "is_subcontract_allowed", "is_consortium_allowed", "tender_platform",
             "submission_target", "platform_file_rules", "procurement_type", "parent_project_id", "section_name", "lot_name",
-            "selected_template_package_id", "workflow_status", "status", "metadata_json",
+            "category_code", "selected_template_package_id", "workflow_status", "status", "metadata_json",
         }
         updates = {key: value for key, value in fields.items() if key in allowed}
         if not updates:

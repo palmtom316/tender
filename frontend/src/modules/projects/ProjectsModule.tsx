@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listProjects,
@@ -15,7 +15,7 @@ import { Badge } from "../../components/ui/Badge";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { EmptyState } from "../../components/ui/EmptyState";
 
-const TEMPLATE_KINDS = [
+const PROJECT_CATEGORIES = [
   { value: "sgcc_substation", label: "国网变电工程" },
   { value: "sgcc_maintenance", label: "国网运维工程" },
   { value: "sgcc_distribution", label: "国网配网工程" },
@@ -39,13 +39,14 @@ export function ProjectsModule() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [templateKind, setTemplateKind] = useState("sgcc_distribution");
+  const [categoryCode, setCategoryCode] = useState<string>("sgcc_distribution");
   const [employerName, setEmployerName] = useState("");
   const [tenderPlatform, setTenderPlatform] = useState("ECP");
   const [submissionDeadline, setSubmissionDeadline] = useState("");
   const [voltageLevel, setVoltageLevel] = useState("10kV");
   const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null);
   const [selectedTemplatePackageId, setSelectedTemplatePackageId] = useState<string | null>(null);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   const { data: projects = [], isLoading, error } = useQuery({
     queryKey: ["projects"],
@@ -57,9 +58,26 @@ export function ProjectsModule() {
     isLoading: isLoadingTemplatePackages,
     error: templatePackagesError,
   } = useQuery({
-    queryKey: ["template-packages", templateKind],
-    queryFn: () => listTemplatePackages({ categoryCode: templateKind }),
+    queryKey: ["template-packages", categoryCode],
+    queryFn: () => listTemplatePackages({ categoryCode }),
   });
+
+  useEffect(() => {
+    if (templatePackages.length === 0) {
+      if (selectedTemplatePackageId !== null) setSelectedTemplatePackageId(null);
+      return;
+    }
+    const stillValid = selectedTemplatePackageId
+      ? templatePackages.some((pkg) => pkg.id === selectedTemplatePackageId)
+      : false;
+    if (!stillValid) {
+      setSelectedTemplatePackageId(templatePackages[0].id);
+    }
+  }, [templatePackages, selectedTemplatePackageId]);
+
+  useEffect(() => {
+    setShowTemplatePicker(false);
+  }, [categoryCode]);
 
   const mutation = useMutation({
     mutationFn: createProject,
@@ -92,21 +110,22 @@ export function ProjectsModule() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (name.trim()) {
-      mutation.mutate({
-        name: name.trim(),
-        industry: "power",
-        business_line: templateKind,
-        project_type: templateKind,
-        sub_type: templateKind,
-        employer_name: employerName.trim() || undefined,
-        tender_platform: tenderPlatform,
-        submission_target: tenderPlatform === "线下" ? "paper" : "platform_manual_upload",
-        submission_deadline: submissionDeadline || undefined,
-        voltage_level: voltageLevel ? [voltageLevel] : [],
-        procurement_type: "single",
-      });
-    }
+    if (!name.trim()) return;
+    if (templatePackages.length === 0) return;
+    mutation.mutate({
+      name: name.trim(),
+      category_code: categoryCode,
+      industry: "power",
+      business_line: categoryCode,
+      project_type: categoryCode,
+      sub_type: categoryCode,
+      employer_name: employerName.trim() || undefined,
+      tender_platform: tenderPlatform,
+      submission_target: tenderPlatform === "线下" ? "paper" : "platform_manual_upload",
+      submission_deadline: submissionDeadline || undefined,
+      voltage_level: voltageLevel ? [voltageLevel] : [],
+      procurement_type: "single",
+    });
   };
 
   const handleProjectClick = (project: Project) => {
@@ -147,16 +166,12 @@ export function ProjectsModule() {
               aria-label="项目名称"
               autoFocus
             />
-            <select className="clay-input" value={templateKind} onChange={(e) => setTemplateKind(e.target.value)} aria-label="招标文件模板种类">
-              {TEMPLATE_KINDS.map((kind) => (
+            <select className="clay-input" value={categoryCode} onChange={(e) => setCategoryCode(e.target.value)} aria-label="项目类别">
+              {PROJECT_CATEGORIES.map((kind) => (
                 <option key={kind.value} value={kind.value}>{kind.label}</option>
               ))}
             </select>
-            <div className="project-template-picker" aria-label="可用模板包">
-              <div className="project-template-picker__header">
-                <strong>可用模板包</strong>
-                <span className="project-template-picker__hint">先选工程类别，再选模板</span>
-              </div>
+            <div className="project-template-picker" aria-label="模板包">
               {isLoadingTemplatePackages && <p className="project-template-picker__empty">模板加载中...</p>}
               {templatePackagesError && (
                 <p className="text-error project-template-picker__empty">
@@ -164,35 +179,60 @@ export function ProjectsModule() {
                 </p>
               )}
               {!isLoadingTemplatePackages && !templatePackagesError && templatePackages.length === 0 && (
-                <p className="project-template-picker__empty">当前工程类别下暂无已接入模板</p>
+                <p className="project-template-picker__empty">该类别暂无可用模板</p>
               )}
-              {!isLoadingTemplatePackages && !templatePackagesError && templatePackages.length > 0 && (
-                <div className="project-template-picker__options">
-                  {templatePackages.map((pkg) => {
-                    const checked = selectedTemplatePackageId === pkg.id;
-                    return (
-                      <label
-                        key={pkg.id}
-                        className={`project-template-picker__option${checked ? " is-selected" : ""}`}
-                      >
-                        <input
-                          type="radio"
-                          name="selected_template_package"
-                          value={pkg.id}
-                          checked={checked}
-                          onChange={() => setSelectedTemplatePackageId(pkg.id)}
-                          aria-label={`选择模板包 ${pkg.display_name}`}
-                        />
-                        <span className="project-template-picker__option-main">
-                          <span>{pkg.display_name}</span>
-                          <span className="project-template-picker__meta">
-                            {pkg.package_type} · {pkg.item_count} 项
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
+              {!isLoadingTemplatePackages && !templatePackagesError && templatePackages.length === 1 && (
+                <p className="project-template-picker__empty">
+                  将使用模板: <strong>{templatePackages[0].display_name}</strong>
+                </p>
+              )}
+              {!isLoadingTemplatePackages && !templatePackagesError && templatePackages.length > 1 && (
+                <>
+                  <div className="project-template-picker__header">
+                    <strong>
+                      该类别有 {templatePackages.length} 个可用模板
+                      {selectedTemplatePackageId &&
+                        `，当前: ${templatePackages.find((pkg) => pkg.id === selectedTemplatePackageId)?.display_name ?? ""}`}
+                    </strong>
+                    <ClayButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowTemplatePicker((prev) => !prev)}
+                      aria-expanded={showTemplatePicker}
+                    >
+                      {showTemplatePicker ? "收起" : "更换模板"}
+                    </ClayButton>
+                  </div>
+                  {showTemplatePicker && (
+                    <div className="project-template-picker__options">
+                      {templatePackages.map((pkg) => {
+                        const checked = selectedTemplatePackageId === pkg.id;
+                        return (
+                          <label
+                            key={pkg.id}
+                            className={`project-template-picker__option${checked ? " is-selected" : ""}`}
+                          >
+                            <input
+                              type="radio"
+                              name="selected_template_package"
+                              value={pkg.id}
+                              checked={checked}
+                              onChange={() => setSelectedTemplatePackageId(pkg.id)}
+                              aria-label={`选择模板包 ${pkg.display_name}`}
+                            />
+                            <span className="project-template-picker__option-main">
+                              <span>{pkg.display_name}</span>
+                              <span className="project-template-picker__meta">
+                                {pkg.package_type} · {pkg.item_count} 项
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <select className="clay-input" value={voltageLevel} onChange={(e) => setVoltageLevel(e.target.value)} aria-label="电压等级">
@@ -211,7 +251,7 @@ export function ProjectsModule() {
               <option value="线下">线下递交</option>
             </select>
             <input className="clay-input" type="datetime-local" value={submissionDeadline} onChange={(e) => setSubmissionDeadline(e.target.value)} aria-label="递交截止时间" />
-            <ClayButton type="submit" disabled={mutation.isPending}>
+            <ClayButton type="submit" disabled={mutation.isPending || templatePackages.length === 0}>
               {mutation.isPending ? "创建中..." : "创建"}
             </ClayButton>
           </form>

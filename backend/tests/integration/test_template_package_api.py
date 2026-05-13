@@ -240,7 +240,7 @@ def test_project_business_template_preview_returns_chapters(tmp_path: Path, monk
         assert uploaded.status_code == 201
         package_id = uploaded.json()["id"]
 
-        project = client.post("/api/projects", json={"name": "预览项目", "industry": "power", "business_line": "sgcc_distribution"})
+        project = client.post("/api/projects", json={"name": "预览项目", "industry": "power", "business_line": "sgcc_distribution", "category_code": "sgcc_distribution"})
         assert project.status_code == 200
         project_id = project.json()["id"]
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 from psycopg import Connection
+from psycopg.rows import dict_row
 
 from tender_backend.core.project_access import require_project_access
 from tender_backend.core.security import CurrentUser, Role, get_current_user, require_role
@@ -24,6 +25,7 @@ _setup = ProjectSetupService(_repo)
 
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1)
+    category_code: str = Field(min_length=1)
     tender_no: str | None = None
     project_type: str | None = None
     industry: str | None = "power"
@@ -56,6 +58,7 @@ class ProjectUpdate(BaseModel):
     industry: str | None = None
     business_line: str | None = None
     sub_type: str | None = None
+    category_code: str | None = None
     employer_name: str | None = None
     employer_type: str | None = None
     evaluation_method: str | None = None
@@ -104,6 +107,7 @@ class ProjectOut(BaseModel):
     procurement_type: str | None = None
     section_name: str | None = None
     lot_name: str | None = None
+    category_code: str | None = None
     selected_template_package_id: UUID | None = None
     workflow_status: str | None = None
 
@@ -118,12 +122,26 @@ def _project_out(project) -> ProjectOut:
     return ProjectOut(**project.__dict__)
 
 
+def _assert_category_enabled(conn: Connection, *, category_code: str) -> None:
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            "SELECT 1 FROM template_package_category WHERE code = %s AND enabled = TRUE",
+            (category_code,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid category_code: {category_code}",
+        )
+
+
 @router.post("/projects", response_model=ProjectOut)
 async def create_project(
     payload: ProjectCreate,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
 ) -> ProjectOut:
+    _assert_category_enabled(conn, category_code=payload.category_code)
     metadata = payload.model_dump(exclude={"name"})
     project = _setup.create_project(
         conn,
@@ -154,6 +172,8 @@ async def update_project(
     fields = payload.model_dump(exclude_unset=True)
     if "name" in fields:
         fields["name"] = fields["name"].strip()
+    if "category_code" in fields and fields["category_code"]:
+        _assert_category_enabled(conn, category_code=fields["category_code"])
     project = _repo.update(conn, project_id=project_id, fields=fields)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")

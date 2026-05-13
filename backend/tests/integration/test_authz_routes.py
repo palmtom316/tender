@@ -30,6 +30,7 @@ class _UserRow:
 class _ProjectRow:
     id: UUID
     name: str
+    workflow_status: str = "created"
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ class _FakeProjects:
     def create(self, _conn, *, name: str):
         return _ProjectRow(id=uuid4(), name=name)
 
-    def create_for_user(self, _conn, *, name: str, user_id: UUID | None):
+    def create_for_user(self, _conn, *, name: str, user_id: UUID | None, metadata=None):
         self.created_for_user_id = user_id
         return _ProjectRow(id=uuid4(), name=name)
 
@@ -81,6 +82,14 @@ class _FakeProjects:
 
     def delete(self, _conn, *, project_id: UUID):
         return True
+
+
+class _FakeProjectSetup:
+    def __init__(self, repo: _FakeProjects) -> None:
+        self._repo = repo
+
+    def create_project(self, conn, *, name: str, user_id: UUID | None, metadata=None, actor: str | None = None):
+        return self._repo.create_for_user(conn, name=name, user_id=user_id, metadata=metadata)
 
 
 class _FakeParseJobs:
@@ -122,6 +131,8 @@ def _isolated_authz(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(security, "_token_map", None)
     monkeypatch.setattr(users_api, "_repo", _FakeUsers())
     monkeypatch.setattr(projects_api, "_repo", _FakeProjects())
+    monkeypatch.setattr(projects_api, "_setup", _FakeProjectSetup(projects_api._repo))
+    monkeypatch.setattr(projects_api, "_assert_category_enabled", lambda *args, **kwargs: None)
     monkeypatch.setattr(parse_api, "_jobs", _FakeParseJobs())
     yield
     app.dependency_overrides.clear()
@@ -162,19 +173,20 @@ def test_user_management_requires_admin() -> None:
 
 
 def test_project_routes_require_authentication_and_write_roles() -> None:
+    body = {"name": "demo", "category_code": "sgcc_distribution"}
     anonymous = _client()
     assert anonymous.get("/api/projects").status_code == 401
-    assert anonymous.post("/api/projects", json={"name": "demo"}).status_code == 401
+    assert anonymous.post("/api/projects", json=body).status_code == 401
 
     reviewer = _client("reviewer-token")
-    assert reviewer.post("/api/projects", json={"name": "demo"}).status_code == 403
+    assert reviewer.post("/api/projects", json=body).status_code == 403
     assert reviewer.delete(f"/api/projects/{uuid4()}").status_code == 403
 
     editor = _client("editor-token")
-    assert editor.post("/api/projects", json={"name": "demo"}).status_code == 200
+    assert editor.post("/api/projects", json=body).status_code == 200
 
     admin = _client("admin-token")
-    assert admin.post("/api/projects", json={"name": "demo"}).status_code == 200
+    assert admin.post("/api/projects", json=body).status_code == 200
     assert admin.delete(f"/api/projects/{uuid4()}").status_code == 200
 
 
@@ -183,8 +195,9 @@ def test_project_create_receives_session_user_id(monkeypatch: pytest.MonkeyPatch
     repo = _FakeProjects()
     monkeypatch.setattr(security, "_sessions", _FakeSessions(user_id))
     monkeypatch.setattr(projects_api, "_repo", repo)
+    monkeypatch.setattr(projects_api, "_setup", _FakeProjectSetup(repo))
 
-    response = _client("session-token").post("/api/projects", json={"name": "demo"})
+    response = _client("session-token").post("/api/projects", json={"name": "demo", "category_code": "sgcc_distribution"})
 
     assert response.status_code == 200
     assert repo.created_for_user_id == user_id

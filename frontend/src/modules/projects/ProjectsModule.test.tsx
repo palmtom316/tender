@@ -57,14 +57,25 @@ afterEach(() => {
 });
 
 describe("ProjectsModule", () => {
-  it("uses six template kinds, preserves voltage level, and does not ask for bid bond", async () => {
+  it("uses six project categories, preserves voltage level, and submits category_code", async () => {
     listProjectsMock.mockResolvedValue([]);
+    listTemplatePackagesMock.mockResolvedValue([
+      {
+        id: "pkg-um",
+        package_key: "user-maintenance-pkg",
+        display_name: "用户运维模板",
+        package_type: "business",
+        category_code: "user_maintenance",
+        source_root: "/tmp/templates",
+        item_count: 1,
+      },
+    ]);
     createProjectMock.mockResolvedValue({ id: "p1", name: "测试项目", created_at: "2026-05-13T00:00:00Z" });
 
     renderModule();
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
 
-    const kindSelect = screen.getByLabelText("招标文件模板种类");
+    const kindSelect = screen.getByLabelText("项目类别");
     expect(within(kindSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "国网变电工程",
       "国网运维工程",
@@ -78,10 +89,12 @@ describe("ProjectsModule", () => {
 
     fireEvent.change(screen.getByLabelText("项目名称"), { target: { value: "测试项目" } });
     fireEvent.change(kindSelect, { target: { value: "user_maintenance" } });
+    await screen.findByText(/将使用模板/);
     fireEvent.click(screen.getByRole("button", { name: "创建" }));
 
     await waitFor(() => expect(createProjectMock).toHaveBeenCalled());
     expect(createProjectMock.mock.calls[0][0]).toEqual(expect.objectContaining({
+      category_code: "user_maintenance",
       project_type: "user_maintenance",
       business_line: "user_maintenance",
       sub_type: "user_maintenance",
@@ -102,7 +115,7 @@ describe("ProjectsModule", () => {
     expect(screen.getByText("截止 2026/06/01")).toBeInTheDocument();
   });
 
-  it("shows available template packages and confirms selected package after project creation", async () => {
+  it("auto-selects the only template and hides the radio list", async () => {
     listProjectsMock.mockResolvedValue([]);
     listTemplatePackagesMock.mockResolvedValue([
       {
@@ -121,12 +134,66 @@ describe("ProjectsModule", () => {
     renderModule();
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
 
-    expect(await screen.findByText("国网配网工程商务标")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("选择模板包 国网配网工程商务标"));
+    expect(await screen.findByText(/将使用模板/)).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "更换模板" })).not.toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText("项目名称"), { target: { value: "测试项目" } });
     fireEvent.click(screen.getByRole("button", { name: "创建" }));
 
     await waitFor(() => expect(createProjectMock).toHaveBeenCalled());
     await waitFor(() => expect(confirmTemplateSelectionMock).toHaveBeenCalledWith("p1", "pkg-1"));
+  });
+
+  it("collapses the picker when multiple templates exist and allows swapping", async () => {
+    listProjectsMock.mockResolvedValue([]);
+    listTemplatePackagesMock.mockResolvedValue([
+      {
+        id: "pkg-a",
+        package_key: "pkg-a-key",
+        display_name: "模板A",
+        package_type: "business",
+        category_code: "sgcc_distribution",
+        source_root: "/tmp/templates",
+        item_count: 1,
+      },
+      {
+        id: "pkg-b",
+        package_key: "pkg-b-key",
+        display_name: "模板B",
+        package_type: "business",
+        category_code: "sgcc_distribution",
+        source_root: "/tmp/templates",
+        item_count: 1,
+      },
+    ]);
+    createProjectMock.mockResolvedValue({ id: "p1", name: "测试项目", created_at: "2026-05-13T00:00:00Z" });
+    confirmTemplateSelectionMock.mockResolvedValue({ selected_template_package_id: "pkg-b" });
+
+    renderModule();
+    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+
+    expect(await screen.findByText(/该类别有 2 个可用模板/)).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "更换模板" }));
+    fireEvent.click(screen.getByLabelText("选择模板包 模板B"));
+
+    fireEvent.change(screen.getByLabelText("项目名称"), { target: { value: "测试项目" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(createProjectMock).toHaveBeenCalled());
+    await waitFor(() => expect(confirmTemplateSelectionMock).toHaveBeenCalledWith("p1", "pkg-b"));
+  });
+
+  it("disables submit when category has no templates", async () => {
+    listProjectsMock.mockResolvedValue([]);
+    listTemplatePackagesMock.mockResolvedValue([]);
+
+    renderModule();
+    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+
+    expect(await screen.findByText("该类别暂无可用模板")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建" })).toBeDisabled();
   });
 });

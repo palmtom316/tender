@@ -124,6 +124,7 @@ export interface Project {
   procurement_type?: string | null;
   section_name?: string | null;
   lot_name?: string | null;
+  category_code?: string | null;
   selected_template_package_id?: string | null;
   workflow_status?: string | null;
 }
@@ -136,6 +137,7 @@ export function listProjects(options?: {
 
 export function createProject(data: {
   name: string;
+  category_code: string;
   tender_no?: string;
   project_type?: string;
   tender_deadline?: string;

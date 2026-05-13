@@ -32,7 +32,7 @@ def test_project_and_file_flow() -> None:
 
     client = SyncASGIClient(app)
 
-    res = client.post("/api/projects", json={"name": "demo"})
+    res = client.post("/api/projects", json={"name": "demo", "category_code": "sgcc_distribution"})
     assert res.status_code == 200
     project_id = UUID(res.json()["id"])
 

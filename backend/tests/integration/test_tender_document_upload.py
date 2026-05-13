@@ -116,7 +116,7 @@ def test_upload_real_zip_tender_package(tmp_path: Path, monkeypatch: pytest.Monk
 
     client = SyncASGIClient(app)
     try:
-        project_res = client.post("/api/projects", json={"name": "国网包1"})
+        project_res = client.post("/api/projects", json={"name": "国网包1", "category_code": "sgcc_distribution"})
         assert project_res.status_code == 200
         project_id = UUID(project_res.json()["id"])
 
@@ -177,7 +177,7 @@ def test_upload_pdf_tender_document(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     client = SyncASGIClient(app)
     try:
-        project_res = client.post("/api/projects", json={"name": "PDF 招标文件"})
+        project_res = client.post("/api/projects", json={"name": "PDF 招标文件", "category_code": "sgcc_distribution"})
         assert project_res.status_code == 200
         project_id = UUID(project_res.json()["id"])
 
@@ -223,7 +223,7 @@ def test_parse_uploaded_pdf_tender_document(tmp_path: Path, monkeypatch: pytest.
 
     client = SyncASGIClient(app)
     try:
-        project_res = client.post("/api/projects", json={"name": "PDF 解析"})
+        project_res = client.post("/api/projects", json={"name": "PDF 解析", "category_code": "sgcc_distribution"})
         assert project_res.status_code == 200
         project_id = UUID(project_res.json()["id"])
 
@@ -277,7 +277,7 @@ def test_parse_uploaded_zip_office_files(tmp_path: Path, monkeypatch: pytest.Mon
 
     client = SyncASGIClient(app)
     try:
-        project_res = client.post("/api/projects", json={"name": "Office 解析"})
+        project_res = client.post("/api/projects", json={"name": "Office 解析", "category_code": "sgcc_distribution"})
         assert project_res.status_code == 200
         project_id = UUID(project_res.json()["id"])
 
