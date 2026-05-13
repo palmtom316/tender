@@ -67,7 +67,7 @@ TENDER_TEMPLATE_CATEGORIES = [
     },
 ]
 
-_VISIBLE_TEMPLATE_PACKAGE_TYPES = {"outline"}
+_VISIBLE_TEMPLATE_PACKAGE_TYPES = {"outline", "business", "technical"}
 
 
 class TemplatePackageImportBody(BaseModel):

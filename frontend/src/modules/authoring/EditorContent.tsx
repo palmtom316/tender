@@ -32,6 +32,7 @@ import {
   type ChartTaskCard,
   type MaterialSlotSummary,
 } from "./chapterDelivery";
+import { buildBusinessMaterialCandidates, groupBusinessMaterialCandidates, type BusinessMaterialCandidate } from "./businessMaterialWorkbench";
 
 const CHART_TYPE_OPTIONS = [
   { value: "org_chart", label: "项目组织机构图" },
@@ -127,7 +128,15 @@ function targetPagesForChapter(
   return normalizeTargetPages(targetPagesInputValue(chapter, context, editedValues));
 }
 
-function MaterialSlotList({ slots }: { slots: MaterialSlotSummary[] }) {
+function MaterialSlotList({
+  slots,
+  selectedSlotKey,
+  onSelectSlot,
+}: {
+  slots: MaterialSlotSummary[];
+  selectedSlotKey: string | null;
+  onSelectSlot?: (slot: MaterialSlotSummary) => void;
+}) {
   return (
     <section className="chapter-delivery-card" aria-label="资料位清单">
       <div className="chapter-delivery-card__header">
@@ -145,16 +154,67 @@ function MaterialSlotList({ slots }: { slots: MaterialSlotSummary[] }) {
             <div>
               <strong>{slot.label}</strong>
               <p>{slot.helpText}</p>
+              {slot.boundLabel && <p>已绑定资料：{slot.boundLabel}</p>}
             </div>
             <div className="material-slot-item__meta">
               <Badge variant={slot.status === "missing" ? "warning" : "success"}>
                 {slot.status === "missing" ? "待补资料" : "已匹配"}
               </Badge>
               <span>{slot.sourceLabel}</span>
+              {onSelectSlot && (
+                <ClayButton
+                  size="sm"
+                  variant={selectedSlotKey === slot.key ? "primary" : "secondary"}
+                  onClick={() => onSelectSlot(slot)}
+                >
+                  {selectedSlotKey === slot.key ? `当前资料位 ${slot.label}` : `选择资料位 ${slot.label}`}
+                </ClayButton>
+              )}
             </div>
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function BusinessMaterialCandidatePanel({
+  slot,
+  groupedCandidates,
+  onBind,
+}: {
+  slot: MaterialSlotSummary | null;
+  groupedCandidates: Array<{ groupLabel: string; rows: BusinessMaterialCandidate[] }>;
+  onBind: (candidate: BusinessMaterialCandidate) => void;
+}) {
+  return (
+    <section className="chapter-delivery-card" aria-label="资料候选区">
+      <div className="chapter-delivery-card__header">
+        <div>
+          <strong>资料候选区</strong>
+          <p>按资料来源筛选候选资料，并绑定到当前资料位。</p>
+        </div>
+      </div>
+      {slot ? <p>当前资料位：{slot.label}</p> : <p>先在左侧选择一个资料位。</p>}
+      {slot && groupedCandidates.map((group) => (
+        <div key={group.groupLabel} className="material-slot-list">
+          <strong>{group.groupLabel}</strong>
+          {group.rows.map((candidate) => (
+            <article key={candidate.key} className="material-slot-item">
+              <div>
+                <strong>{candidate.label}</strong>
+                <p>{candidate.summary}</p>
+              </div>
+              <div className="material-slot-item__meta">
+                <span>{candidate.sourceLabel}</span>
+                <ClayButton size="sm" variant="secondary" onClick={() => onBind(candidate)}>
+                  绑定到当前资料位 {candidate.label}
+                </ClayButton>
+              </div>
+            </article>
+          ))}
+        </div>
+      ))}
     </section>
   );
 }
@@ -288,6 +348,8 @@ export function EditorContent() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [targetPagesByChapter, setTargetPagesByChapter] = useState<Record<string, string>>({});
+  const [selectedMaterialSlotKeyByChapter, setSelectedMaterialSlotKeyByChapter] = useState<Record<string, string>>({});
+  const [boundMaterialByChapter, setBoundMaterialByChapter] = useState<Record<string, Record<string, string>>>({});
 
   const { data: drafts = [], isLoading } = useQuery({
     queryKey: ["drafts", projectId],
@@ -396,8 +458,16 @@ export function EditorContent() {
     },
   });
 
-  const selectedMaterialSlotsReal = buildMaterialSlots(selectedOutlineChapter, businessAssembly.data);
+  const selectedBoundMaterials = selectedOutlineChapter ? boundMaterialByChapter[selectedOutlineChapter.id] : undefined;
+  const selectedMaterialSlotsReal = buildMaterialSlots(selectedOutlineChapter, businessAssembly.data, selectedBoundMaterials);
   const chartTaskCards = buildChartTaskCards(recommendedCharts, chartAssets);
+  const isBusinessCompositionChapter = selectedOutlineChapter?.volume_type === "business" || selectedOutlineChapter?.volume_type === "qualification";
+  const selectedMaterialSlotKey = selectedOutlineChapter ? selectedMaterialSlotKeyByChapter[selectedOutlineChapter.id] ?? null : null;
+  const selectedMaterialSlot =
+    selectedMaterialSlotsReal.find((slot) => slot.key === selectedMaterialSlotKey) ?? null;
+  const groupedMaterialCandidates = groupBusinessMaterialCandidates(
+    buildBusinessMaterialCandidates(selectedMaterialSlot, selectedOutlineChapter?.chapter_title ?? ""),
+  );
 
   const generateChapter = useMutation({
     mutationFn: (chapterId: string) => {
@@ -623,7 +693,37 @@ export function EditorContent() {
               </div>
 
               <div className="chapter-delivery-controls">
-                {selectedDeliveryKind === "material_composition" && <MaterialSlotList slots={selectedMaterialSlotsReal} />}
+                {selectedDeliveryKind === "material_composition" && (
+                  <>
+                    <MaterialSlotList
+                      slots={selectedMaterialSlotsReal}
+                      selectedSlotKey={selectedMaterialSlotKey}
+                      onSelectSlot={isBusinessCompositionChapter ? (slot) => {
+                        if (!selectedOutlineChapter) return;
+                        setSelectedMaterialSlotKeyByChapter((current) => ({
+                          ...current,
+                          [selectedOutlineChapter.id]: slot.key,
+                        }));
+                      } : undefined}
+                    />
+                    {isBusinessCompositionChapter && (
+                      <BusinessMaterialCandidatePanel
+                        slot={selectedMaterialSlot}
+                        groupedCandidates={groupedMaterialCandidates}
+                        onBind={(candidate) => {
+                          if (!selectedOutlineChapter || !selectedMaterialSlot) return;
+                          setBoundMaterialByChapter((current) => ({
+                            ...current,
+                            [selectedOutlineChapter.id]: {
+                              ...(current[selectedOutlineChapter.id] ?? {}),
+                              [selectedMaterialSlot.key]: candidate.label,
+                            },
+                          }));
+                        }}
+                      />
+                    )}
+                  </>
+                )}
                 {selectedDeliveryKind === "ai_content" && selectedOutlineChapter && (
                   <>
                     <TechnicalWritingBrief

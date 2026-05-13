@@ -116,6 +116,7 @@ services:
       MERMAID_RENDER_TIMEOUT_SECONDS: ${MERMAID_RENDER_TIMEOUT_SECONDS:-20}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+      TEMPLATE_IMPORT_ROOTS: ${TEMPLATE_IMPORT_ROOTS:-/workspace/backend/data/template_imports}
     volumes:
       - ../backend:/workspace/backend
     depends_on:

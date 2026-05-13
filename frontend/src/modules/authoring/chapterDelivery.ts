@@ -10,6 +10,7 @@ export interface MaterialSlotSummary {
   sourceLabel: string;
   status: MaterialSlotStatus;
   helpText: string;
+  boundLabel?: string;
 }
 
 export interface ChartTaskCard {
@@ -111,6 +112,7 @@ export function readableContextCount(context: Record<string, unknown> | undefine
 export function buildMaterialSlots(
   chapter: BidChapter | null | undefined,
   assembly: { missing_materials?: Array<Record<string, unknown>> } | undefined,
+  boundMaterials?: Record<string, string>,
 ): MaterialSlotSummary[] {
   if (!chapter) return [];
 
@@ -128,8 +130,9 @@ export function buildMaterialSlots(
         key: String(record.material_key ?? record.id ?? `${chapter.id}-${index}`),
         label,
         sourceLabel: materialSourceLabel(record.material_type ?? record.source_type),
-        status: "missing",
+        status: boundMaterials?.[String(record.material_key ?? record.id ?? `${chapter.id}-${index}`)] ? "ready" : "missing",
         helpText: String(record.reason ?? record.message ?? "选择或补充该资料后重新检查。"),
+        boundLabel: boundMaterials?.[String(record.material_key ?? record.id ?? `${chapter.id}-${index}`)],
       };
     });
   }

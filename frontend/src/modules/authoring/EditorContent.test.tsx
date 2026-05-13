@@ -303,7 +303,122 @@ describe("EditorContent chart workflow", () => {
     expect((await screen.findAllByText("资料编排")).length).toBeGreaterThan(0);
     expect(screen.getByText("资料位清单")).toBeInTheDocument();
     expect(screen.getByText("安全生产许可证")).toBeInTheDocument();
-    expect(await screen.findByText("缺少有效附件")).toBeInTheDocument();
+    expect(await screen.findByText("待补资料")).toBeInTheDocument();
+  });
+
+  it("shows candidate material groups for a selected business material slot", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        {
+          id: "chapter-business-1",
+          project_id: "proj-1",
+          outline_id: "outline-1",
+          chapter_code: "3",
+          chapter_title: "企业资信情况",
+          volume_type: "business",
+          sort_order: 1,
+          metadata_json: {},
+        },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      {
+        id: "draft-business-1",
+        project_id: "proj-1",
+        chapter_code: "3",
+        content_md: "## 企业资信情况\n我公司具备承担本项目的相关资质。",
+        updated_at: "2026-05-10T00:00:00Z",
+      },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({
+      project_id: "proj-1",
+      run: {},
+      chapters: [],
+      response_matrix: [],
+      missing_materials: [
+        { chapter_code: "3", material_name: "安全生产许可证", material_type: "certificate", reason: "缺少有效附件" },
+      ],
+      boundary: "商务资料装配完成，仍有缺失资料。",
+    });
+
+    render(withClient(<EditorContent />));
+
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(assembleBusinessBidMock).toHaveBeenCalled());
+    fireEvent.click((await screen.findAllByText("3"))[1]);
+    fireEvent.click(await screen.findByRole("button", { name: "选择资料位 安全生产许可证" }));
+
+    expect(await screen.findByText("当前资料位：安全生产许可证")).toBeInTheDocument();
+    expect(screen.getByText("资料候选区")).toBeInTheDocument();
+    expect(screen.getByText("公司资料候选")).toBeInTheDocument();
+    expect(screen.getByText("证照/附件候选")).toBeInTheDocument();
+  });
+
+  it("binds a candidate material to the selected slot in the business workbench", async () => {
+    fetchBidOutlineMock.mockResolvedValueOnce({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        {
+          id: "chapter-business-1",
+          project_id: "proj-1",
+          outline_id: "outline-1",
+          chapter_code: "3",
+          chapter_title: "企业资信情况",
+          volume_type: "business",
+          sort_order: 1,
+          metadata_json: {},
+        },
+      ],
+    });
+    fetchDraftsMock.mockResolvedValueOnce([
+      {
+        id: "draft-business-1",
+        project_id: "proj-1",
+        chapter_code: "3",
+        content_md: "## 企业资信情况\n我公司具备承担本项目的相关资质。",
+        updated_at: "2026-05-10T00:00:00Z",
+      },
+    ]);
+    assembleBusinessBidMock.mockResolvedValueOnce({
+      project_id: "proj-1",
+      run: {},
+      chapters: [],
+      response_matrix: [],
+      missing_materials: [
+        { chapter_code: "3", material_name: "安全生产许可证", material_type: "certificate", reason: "缺少有效附件" },
+      ],
+      boundary: "商务资料装配完成，仍有缺失资料。",
+    });
+
+    render(withClient(<EditorContent />));
+
+    const assembleButton = await screen.findByRole("button", { name: "资格商务装配" });
+    await waitFor(() => expect(assembleButton).not.toBeDisabled());
+    fireEvent.click(assembleButton);
+    await waitFor(() => expect(assembleBusinessBidMock).toHaveBeenCalled());
+    fireEvent.click((await screen.findAllByText("3"))[1]);
+    fireEvent.click(await screen.findByRole("button", { name: "选择资料位 安全生产许可证" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /绑定到当前资料位/i }))[0]);
+
+    expect(await screen.findByText(/已绑定资料：/)).toBeInTheDocument();
+    expect(screen.getByText("已匹配")).toBeInTheDocument();
+  });
+
+  it("keeps technical chapters on AI content flow without business candidate panel", async () => {
+    render(withClient(<EditorContent />));
+    fireEvent.click((await screen.findAllByText("10.1"))[1]);
+
+    expect(await screen.findByLabelText("图表任务")).toBeInTheDocument();
+    expect(screen.queryByLabelText("资料候选区")).not.toBeInTheDocument();
   });
 
   it("shows chart task cards with purpose, source, approval and insert actions", async () => {
