@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from tender_backend.api.master_data_assets import router as asset_router
+from tender_backend.api.companybase import router as companybase_router
 from tender_backend.api.master_data_certificates import router as certificate_router
 from tender_backend.api.master_data_companies import router as company_router
 from tender_backend.api.master_data_evidence import router as evidence_router
@@ -77,6 +78,7 @@ _ASSET_TAXONOMY = [
 @router.get("/master-data/asset-taxonomy")
 async def get_asset_taxonomy() -> dict[str, object]:
     return {"domains": _ASSET_TAXONOMY}
+router.include_router(companybase_router)
 router.include_router(company_router)
 router.include_router(asset_router)
 router.include_router(people_router)

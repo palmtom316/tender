@@ -42,6 +42,7 @@ export const MODULE_CONFIG: ModuleConfig[] = [
       { id: "templates", label: "投标文件模版" },
       { id: "company", label: "公司资料" },
       { id: "personnel", label: "人员资料" },
+      { id: "companybase", label: "导入/备份" },
     ],
   },
   {

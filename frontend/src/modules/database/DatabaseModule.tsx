@@ -1,6 +1,7 @@
 import { Card } from "../../components/ui/Card";
 import { useNavigation } from "../../lib/NavigationContext";
 import { CompanyLibraryWorkbench } from "./components/CompanyLibraryWorkbench";
+import { CompanybaseImportWorkbench } from "./components/CompanybaseImportWorkbench";
 import { PersonnelLibraryWorkbench } from "./components/PersonnelLibraryWorkbench";
 import { StandardsWorkbench } from "./components/StandardsWorkbench";
 import { TemplateFieldWorkbench } from "./components/TemplateFieldWorkbench";
@@ -9,6 +10,7 @@ const TAB_DESCRIPTIONS: Record<string, string> = {
   templates: "配置投标文件模版、字段映射和渲染上下文",
   company: "公司资质证书、业绩证明等企业资料",
   personnel: "项目团队成员简历、资质证书等",
+  companybase: "Excel 资料包导入、校验和备份",
 };
 
 export function DatabaseModule() {
@@ -46,6 +48,15 @@ export function DatabaseModule() {
       <div>
         <h1 className="section-heading">人员资料库</h1>
         <PersonnelLibraryWorkbench />
+      </div>
+    );
+  }
+
+  if (tab === "companybase") {
+    return (
+      <div>
+        <h1 className="section-heading">资料包导入/备份</h1>
+        <CompanybaseImportWorkbench />
       </div>
     );
   }

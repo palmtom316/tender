@@ -2326,6 +2326,39 @@ export function fetchMe(options?: {
   return request<MeResponse>("/auth/me", { signal: options?.signal });
 }
 
+
+export interface CompanybaseIssue {
+  severity: string;
+  sheet: string;
+  row: number | null;
+  message: string;
+}
+
+export interface CompanybaseReport {
+  summary: Record<string, number>;
+  issues: CompanybaseIssue[];
+  p0_count: number;
+  p1_count: number;
+  actions: { created: number; updated: number; skipped: number };
+  dry_run: boolean;
+}
+
+export function validateCompanybaseWorkbook(file: File): Promise<CompanybaseReport> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<CompanybaseReport>("/master-data/companybase/validate", { method: "POST", body: form });
+}
+
+export function importCompanybaseWorkbook(file: File, dryRun: boolean): Promise<CompanybaseReport> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<CompanybaseReport>(`/master-data/companybase/import?dry_run=${dryRun ? "true" : "false"}`, { method: "POST", body: form });
+}
+
+export function backupCompanybaseUrl(): string {
+  return buildApiUrl("/master-data/companybase/backup");
+}
+
 // ── Users ──
 
 export interface SystemUser {
