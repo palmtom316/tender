@@ -2792,3 +2792,40 @@ export function updateDeviationTable(
     body: JSON.stringify(data),
   });
 }
+
+
+// ── Project template instances ──
+export interface ProjectTemplateInstanceApi {
+  id: string;
+  project_id: string;
+  display_name: string;
+  status: string;
+  chapters: Array<Record<string, unknown>>;
+  reconciliation_summary?: Record<string, unknown>;
+  unanswered_requirement_count?: number;
+  pending_seal_checklist_count?: number;
+}
+
+export function fetchProjectTemplateInstance(projectId: string): Promise<ProjectTemplateInstanceApi> {
+  return request<ProjectTemplateInstanceApi>(`/projects/${projectId}/template-instance`);
+}
+
+export function reorderProjectTemplateChapters(instanceId: string, data: { ordered_tree: Array<{ chapter_id: string; parent_id?: string | null; sort_order: number }> }): Promise<{ chapters: Array<Record<string, unknown>> }> {
+  return request<{ chapters: Array<Record<string, unknown>> }>(`/project-template-instances/${instanceId}/chapters/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateProjectTemplateBlock(blockId: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/project-template-blocks/${blockId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function confirmProjectTemplateInstance(instanceId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/project-template-instances/${instanceId}/confirm`, { method: "POST" });
+}

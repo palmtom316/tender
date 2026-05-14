@@ -4,6 +4,7 @@ import { ParseContent } from "./ParseContent";
 import { RequirementsContent } from "./RequirementsContent";
 import { EditorContent } from "./EditorContent";
 import { AuthoringWorkflowStatus } from "./AuthoringWorkflowStatus";
+import { ProjectTemplateWorkbench } from "../templates/ProjectTemplateWorkbench";
 
 export function AuthoringModule() {
   const { tab, navigate, projectId } = useNavigation();
@@ -26,7 +27,7 @@ export function AuthoringModule() {
     case "editor":
       return chrome(<EditorContent />);
     case "template":
-      return chrome(<div className="workflow-gate-panel" aria-label="项目模板调整"><strong>项目模板调整</strong><p>项目模板实例将在下一步接入三栏表单化工作台。</p></div>);
+      return chrome(projectId ? <ProjectTemplateWorkbench projectId={projectId} /> : <div className="workflow-gate-panel" aria-label="项目模板调整"><strong>项目模板调整</strong><p>请先选择项目。</p></div>);
     default:
       return chrome(<UploadContent />);
   }
