@@ -533,3 +533,112 @@ def test_service_build_generation_inputs_blocks_unconfirmed_or_deadline_passed()
     deadline = _now() - timedelta(days=1)
     with pytest.raises(ValueError, match="submission deadline"):
         ProjectTemplateInstanceService(instance_repo=InstanceRepo()).build_generation_inputs(None, project_id=project_id, submission_deadline=deadline)
+
+
+def test_service_builds_promotion_diff_without_mutating_global_template_package() -> None:
+    from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemRow
+    from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
+
+    project_id = uuid4()
+    package_id = uuid4()
+    instance_id = uuid4()
+    source_item_id = uuid4()
+    chapter_id = uuid4()
+    block_id = uuid4()
+    instance = type(
+        "Instance",
+        (),
+        {
+            "id": instance_id,
+            "project_id": project_id,
+            "base_template_package_id": package_id,
+            "display_name": "项目模板实例",
+            "status": "ready_for_authoring",
+            "version": 2,
+            "metadata_json": {"format_profile": {"font_family": "宋体"}},
+        },
+    )()
+    chapter = type(
+        "Chapter",
+        (),
+        {
+            "id": chapter_id,
+            "source_template_item_id": source_item_id,
+            "chapter_code": "5A",
+            "chapter_title": "施工组织设计（项目优化）",
+            "volume_type": "technical",
+            "sort_order": 7,
+            "enabled": True,
+            "chapter_status": "confirmed",
+            "tender_requirement_status": "manual_override",
+            "metadata_json": {},
+        },
+    )()
+    block = type(
+        "Block",
+        (),
+        {
+            "id": block_id,
+            "block_type": "ai_prompt",
+            "sort_order": 10,
+            "label": "AI 写作提示",
+            "content_text": "",
+            "prompt_text": "强化安全文明施工响应",
+            "placeholder_key": None,
+            "asset_type": None,
+            "required": False,
+            "render_options_json": {},
+            "condition_json": {},
+            "metadata_json": {},
+        },
+    )()
+    base_item = BidTemplateItemRow(
+        id=source_item_id,
+        package_id=package_id,
+        item_code="5",
+        item_name="施工组织设计",
+        filename="5.docx",
+        relative_path="5.docx",
+        source_kind="docx",
+        item_type="chapter",
+        render_mode="ai_written",
+        is_required=True,
+        sort_order=5,
+        created_at=_now(),
+    )
+
+    class InstanceRepo:
+        def __init__(self) -> None:
+            self.created = []
+        def get_by_id(self, conn, instance_id):
+            return instance
+        def list_chapters(self, conn, instance_id):
+            return [chapter]
+        def list_blocks(self, conn, chapter_id):
+            return [block]
+        def create_promotion_proposal(self, conn, **kwargs):
+            self.created.append(kwargs)
+            return type("Proposal", (), {"id": uuid4(), "proposal_status": "draft", **kwargs})()
+
+    class TemplateRepo:
+        def __init__(self) -> None:
+            self.write_calls = 0
+        def list_items(self, conn, *, package_id):
+            return [base_item]
+        def replace_items(self, *args, **kwargs):
+            self.write_calls += 1
+            raise AssertionError("promotion proposal must not mutate global template items")
+
+    instance_repo = InstanceRepo()
+    template_repo = TemplateRepo()
+    service = ProjectTemplateInstanceService(instance_repo=instance_repo, template_repo=template_repo)
+
+    proposal = service.create_promotion_proposal(None, instance_id=instance_id, actor="alice")
+
+    assert proposal.proposal_status == "draft"
+    diff = instance_repo.created[0]["diff_json"]
+    assert diff["summary"]["changed_chapters"] == 1
+    assert diff["chapters"][0]["change_type"] == "modified"
+    assert diff["chapters"][0]["project"]["chapter_title"] == "施工组织设计（项目优化）"
+    assert diff["chapters"][0]["blocks"][0]["prompt_text"] == "强化安全文明施工响应"
+    assert template_repo.write_calls == 0

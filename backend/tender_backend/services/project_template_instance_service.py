@@ -290,6 +290,122 @@ class ProjectTemplateInstanceService:
         return count
 
 
+
+    def create_promotion_proposal(
+        self,
+        conn: Connection,
+        *,
+        instance_id: UUID,
+        actor: str | None = None,
+    ) -> Any:
+        instance = self.instance_repo.get_by_id(conn, instance_id)
+        if instance is None:
+            raise ValueError("template instance not found")
+        diff = self.build_promotion_diff(conn, instance=instance)
+        return self.instance_repo.create_promotion_proposal(
+            conn,
+            instance_id=instance.id,
+            base_template_package_id=getattr(instance, "base_template_package_id", None),
+            project_id=instance.project_id,
+            diff_json=diff,
+            created_by=actor,
+        )
+
+    def build_promotion_diff(self, conn: Connection, *, instance: Any) -> dict[str, Any]:
+        base_package_id = getattr(instance, "base_template_package_id", None)
+        base_items: dict[UUID, Any] = {}
+        if base_package_id is not None:
+            try:
+                base_items = {item.id: item for item in self.template_repo.list_items(conn, package_id=base_package_id)}
+            except Exception:
+                base_items = {}
+
+        changes: list[dict[str, Any]] = []
+        for chapter in self.instance_repo.list_chapters(conn, instance.id):
+            source_id = getattr(chapter, "source_template_item_id", None)
+            base = base_items.get(source_id) if source_id else None
+            project_snapshot = self._promotion_chapter_snapshot(conn, chapter)
+            base_snapshot = self._base_item_snapshot(base) if base else None
+            change_type = "added" if base is None else "modified" if self._chapter_differs_from_base(chapter, base) else "unchanged"
+            if change_type == "unchanged" and not project_snapshot["blocks"]:
+                continue
+            if change_type == "unchanged":
+                change_type = "modified"
+            changes.append({"change_type": change_type, "base": base_snapshot, "project": project_snapshot, "blocks": project_snapshot["blocks"]})
+
+        removed_source_ids = set(base_items) - {getattr(chapter, "source_template_item_id", None) for chapter in self.instance_repo.list_chapters(conn, instance.id)}
+        for source_id in removed_source_ids:
+            base = base_items[source_id]
+            changes.append({"change_type": "removed", "base": self._base_item_snapshot(base), "project": None, "blocks": []})
+
+        return {
+            "template_instance_id": str(instance.id),
+            "base_template_package_id": str(base_package_id) if base_package_id else None,
+            "instance_version": getattr(instance, "version", None),
+            "summary": {
+                "chapter_count": len(changes),
+                "changed_chapters": sum(1 for item in changes if item["change_type"] in {"added", "modified", "removed"}),
+                "added_chapters": sum(1 for item in changes if item["change_type"] == "added"),
+                "removed_chapters": sum(1 for item in changes if item["change_type"] == "removed"),
+            },
+            "metadata_json": dict(getattr(instance, "metadata_json", None) or {}),
+            "chapters": changes,
+        }
+
+    def _promotion_chapter_snapshot(self, conn: Connection, chapter: Any) -> dict[str, Any]:
+        return {
+            "id": str(chapter.id),
+            "source_template_item_id": str(chapter.source_template_item_id) if getattr(chapter, "source_template_item_id", None) else None,
+            "chapter_code": chapter.chapter_code,
+            "chapter_title": chapter.chapter_title,
+            "volume_type": chapter.volume_type,
+            "sort_order": chapter.sort_order,
+            "enabled": bool(getattr(chapter, "enabled", True)),
+            "chapter_status": getattr(chapter, "chapter_status", None),
+            "tender_requirement_status": getattr(chapter, "tender_requirement_status", None),
+            "metadata_json": dict(getattr(chapter, "metadata_json", None) or {}),
+            "blocks": [self._promotion_block_snapshot(block) for block in self.instance_repo.list_blocks(conn, chapter.id)],
+        }
+
+    def _promotion_block_snapshot(self, block: Any) -> dict[str, Any]:
+        return {
+            "id": str(block.id),
+            "block_type": block.block_type,
+            "sort_order": getattr(block, "sort_order", 0),
+            "label": getattr(block, "label", ""),
+            "content_text": getattr(block, "content_text", ""),
+            "prompt_text": getattr(block, "prompt_text", ""),
+            "placeholder_key": getattr(block, "placeholder_key", None),
+            "asset_type": getattr(block, "asset_type", None),
+            "required": bool(getattr(block, "required", False)),
+            "render_options_json": dict(getattr(block, "render_options_json", None) or {}),
+            "condition_json": dict(getattr(block, "condition_json", None) or {}),
+            "metadata_json": dict(getattr(block, "metadata_json", None) or {}),
+        }
+
+    def _base_item_snapshot(self, item: Any) -> dict[str, Any]:
+        return {
+            "id": str(item.id),
+            "item_code": item.item_code,
+            "item_name": item.item_name,
+            "relative_path": item.relative_path,
+            "item_type": item.item_type,
+            "render_mode": item.render_mode,
+            "is_required": item.is_required,
+            "sort_order": item.sort_order,
+        }
+
+    def _chapter_differs_from_base(self, chapter: Any, base: Any) -> bool:
+        return any(
+            [
+                chapter.chapter_code != (base.item_code or ""),
+                chapter.chapter_title != base.item_name,
+                chapter.sort_order != base.sort_order,
+                getattr(chapter, "enabled", True) != base.is_required,
+                getattr(chapter, "metadata_json", None),
+            ]
+        )
+
     def build_generation_inputs(
         self,
         conn: Connection,

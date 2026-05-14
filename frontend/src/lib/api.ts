@@ -2802,12 +2802,24 @@ export function updateDeviationTable(
 
 
 // ── Project template instances ──
+export interface TemplatePromotionProposalApi {
+  id: string;
+  template_instance_id: string;
+  base_template_package_id?: string | null;
+  project_id: string;
+  proposal_status: "draft" | "submitted" | "approved" | "rejected" | string;
+  diff_json?: Record<string, unknown>;
+  created_by?: string | null;
+  reviewed_by?: string | null;
+}
+
 export interface ProjectTemplateInstanceApi {
   id: string;
   project_id: string;
   display_name: string;
   status: string;
   chapters: Array<Record<string, unknown>>;
+  promotion_proposals?: TemplatePromotionProposalApi[];
   reconciliation_summary?: Record<string, unknown>;
   unanswered_requirement_count?: number;
   pending_seal_checklist_count?: number;
@@ -2835,4 +2847,8 @@ export function updateProjectTemplateBlock(blockId: string, data: Record<string,
 
 export function confirmProjectTemplateInstance(instanceId: string): Promise<Record<string, unknown>> {
   return request<Record<string, unknown>>(`/project-template-instances/${instanceId}/confirm`, { method: "POST" });
+}
+
+export function proposeProjectTemplatePromotion(instanceId: string): Promise<TemplatePromotionProposalApi> {
+  return request<TemplatePromotionProposalApi>(`/project-template-instances/${instanceId}/promotion-proposals`, { method: "POST" });
 }

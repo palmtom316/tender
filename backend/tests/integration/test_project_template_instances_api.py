@@ -102,6 +102,21 @@ class _Seal:
     updated_at: datetime = datetime(2026, 5, 14, tzinfo=timezone.utc)
 
 
+
+@dataclass(frozen=True)
+class _Proposal:
+    id: UUID
+    template_instance_id: UUID
+    base_template_package_id: UUID | None
+    project_id: UUID
+    proposal_status: str
+    diff_json: dict
+    created_by: str | None = None
+    reviewed_by: str | None = None
+    created_at: datetime = datetime(2026, 5, 14, tzinfo=timezone.utc)
+    reviewed_at: datetime | None = None
+
+
 class _FakeConn:
     pass
 
@@ -168,9 +183,13 @@ class _FakeRepo:
         )
         self.seal = _Seal(id=uuid4(), project_id=self.project_id, template_instance_id=self.instance_id, seal_block_id=self.seal_block_id)
         self.reorder_payload = None
+        self.proposals: list[_Proposal] = []
 
     def get_current_for_project(self, _conn, project_id):
         return self.instance if project_id == self.project_id else None
+
+    def get_by_id(self, _conn, instance_id):
+        return self.instance if instance_id == self.instance_id else None
 
     def list_chapters(self, _conn, instance_id):
         return [self.chapter] if instance_id == self.instance_id else []
@@ -215,6 +234,22 @@ class _FakeRepo:
     def record_revision(self, *_args, **_kwargs):
         return None
 
+    def create_promotion_proposal(self, _conn, *, instance_id, base_template_package_id, project_id, diff_json, created_by):
+        proposal = _Proposal(
+            id=uuid4(),
+            template_instance_id=instance_id,
+            base_template_package_id=base_template_package_id,
+            project_id=project_id,
+            proposal_status="draft",
+            diff_json=diff_json,
+            created_by=created_by,
+        )
+        self.proposals.append(proposal)
+        return proposal
+
+    def list_promotion_proposals(self, _conn, instance_id):
+        return [proposal for proposal in self.proposals if proposal.template_instance_id == instance_id]
+
 
 class _FakeRequirements:
     def list_by_project(self, _conn, *, project_id, include_stale=False, **_kwargs):
@@ -233,7 +268,7 @@ def client(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AUTH_TOKENS", "dev-token:editor:Dev User")
     monkeypatch.setattr(security, "_token_map", None)
     monkeypatch.setattr(api, "_repo", fake_repo)
-    monkeypatch.setattr(api, "_service", _FakeService(fake_repo.instance))
+    monkeypatch.setattr(api, "_service", api.ProjectTemplateInstanceService(instance_repo=fake_repo))
     monkeypatch.setattr(api, "_requirements", _FakeRequirements())
     monkeypatch.setattr(api, "require_project_access", lambda *args, **kwargs: None)
     sync_client = SyncASGIClient(app)
@@ -323,3 +358,23 @@ def test_reconcile_and_apply_directory_updates_instance_metadata(client) -> None
     assert applied.status_code == 200
     assert applied.json()["applied_suggestion_ids"] == [suggestion_id]
     assert "reconciliation" in repo.instance.metadata_json
+
+
+def test_create_promotion_proposal_returns_diff_and_keeps_global_template_read_only(client) -> None:
+    sync_client, repo = client
+
+    response = sync_client.post(f"/api/project-template-instances/{repo.instance_id}/promotion-proposals")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["proposal_status"] == "draft"
+    assert body["template_instance_id"] == str(repo.instance_id)
+    assert body["base_template_package_id"] == str(repo.instance.base_template_package_id)
+    assert body["diff_json"]["summary"]["chapter_count"] == 1
+    assert body["diff_json"]["chapters"][0]["project"]["chapter_title"] == "施工组织设计"
+    assert len(repo.proposals) == 1
+
+    current = sync_client.get(f"/api/projects/{repo.project_id}/template-instance")
+    assert current.status_code == 200
+    proposals = current.json()["promotion_proposals"]
+    assert proposals[0]["proposal_status"] == "draft"

@@ -872,3 +872,16 @@ class ProjectTemplateInstanceRepository:
             ).fetchone()
         assert row is not None
         return _to_proposal(dict(row))
+
+    def list_promotion_proposals(self, conn: Connection, instance_id: UUID) -> list[TemplatePromotionProposalRow]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                f"""
+                SELECT {_PROPOSAL_COLUMNS}
+                FROM template_promotion_proposal
+                WHERE template_instance_id = %s
+                ORDER BY created_at DESC, id
+                """,
+                (instance_id,),
+            ).fetchall()
+        return [_to_proposal(dict(row)) for row in rows]

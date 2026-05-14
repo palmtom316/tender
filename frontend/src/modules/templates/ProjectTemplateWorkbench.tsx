@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { confirmProjectTemplateInstance, fetchProjectTemplateInstance, reorderProjectTemplateChapters, updateProjectTemplateBlock } from "../../lib/api";
+import { confirmProjectTemplateInstance, fetchProjectTemplateInstance, proposeProjectTemplatePromotion, reorderProjectTemplateChapters, updateProjectTemplateBlock } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { ChapterTree } from "./ChapterTree";
 import { ChapterTemplateForm } from "./ChapterTemplateForm";
 import { TemplatePreviewPane } from "./TemplatePreviewPane";
-import { templateInstanceCanConfirm, type ProjectTemplateBlock, type ProjectTemplateChapter, type ProjectTemplateInstance } from "./templateInstanceModel";
+import { promotionProposalStatusLabel, templateInstanceCanConfirm, type ProjectTemplateBlock, type ProjectTemplateChapter, type ProjectTemplateInstance } from "./templateInstanceModel";
 
 export function ProjectTemplateWorkbench({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
@@ -30,6 +30,10 @@ export function ProjectTemplateWorkbench({ projectId }: { projectId: string }) {
     mutationFn: () => confirmProjectTemplateInstance(instance!.id),
     onSuccess: () => nav.navigate("authoring", "editor", projectId),
   });
+  const proposePromotion = useMutation({
+    mutationFn: () => proposeProjectTemplatePromotion(instance!.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-template-instance", projectId] }),
+  });
 
   const orderedChapters = useMemo(() => [...chapters].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [chapters]);
 
@@ -52,8 +56,21 @@ export function ProjectTemplateWorkbench({ projectId }: { projectId: string }) {
     <div className="project-template-workbench">
       <header className="project-template-workbench__header">
         <div><p className="template-panel__eyebrow">项目模板实例</p><h1>{instance.display_name}</h1></div>
-        <button type="button" className="clay-btn clay-btn--primary" disabled={!confirmState.canConfirm || confirm.isPending} onClick={() => confirm.mutate()}>确认模板</button>
+        <div className="toolbar-row">
+          <button type="button" className="clay-btn clay-btn--outline" disabled={proposePromotion.isPending} onClick={() => proposePromotion.mutate()}>提议沉淀为新版模板</button>
+          <button type="button" className="clay-btn clay-btn--primary" disabled={!confirmState.canConfirm || confirm.isPending} onClick={() => confirm.mutate()}>确认模板</button>
+        </div>
       </header>
+      {(instance.promotion_proposals?.length ?? 0) > 0 && (
+        <section className="template-panel" aria-label="模板沉淀提议">
+          <p className="template-panel__eyebrow">沉淀提议</p>
+          <div className="toolbar-row">
+            {instance.promotion_proposals?.map((proposal) => (
+              <span className="status-pill" key={proposal.id}>{promotionProposalStatusLabel(proposal.proposal_status)}</span>
+            ))}
+          </div>
+        </section>
+      )}
       {!confirmState.canConfirm && <p className="text-error">{confirmState.reason}</p>}
       {error && <p className="text-error">{error}</p>}
       <div className="project-template-workbench__grid">

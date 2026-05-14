@@ -9,6 +9,7 @@ const { api, nav } = vi.hoisted(() => ({
     reorderProjectTemplateChapters: vi.fn(),
     updateProjectTemplateBlock: vi.fn(),
     confirmProjectTemplateInstance: vi.fn(),
+    proposeProjectTemplatePromotion: vi.fn(),
   },
   nav: { projectId: "p1", navigate: vi.fn() },
 }));
@@ -45,6 +46,8 @@ beforeEach(() => {
   api.reorderProjectTemplateChapters.mockResolvedValue({ chapters: [instance().chapters[1], instance().chapters[0]] });
   api.updateProjectTemplateBlock.mockResolvedValue({ id: "b1", block_type: "fixed_text", content_text: "新文本" });
   api.confirmProjectTemplateInstance.mockResolvedValue({ id: "inst-1", status: "ready_for_authoring" });
+  api.proposeProjectTemplatePromotion.mockResolvedValue({ id: "proposal-1", proposal_status: "draft", diff_json: { summary: { chapter_count: 2 } } });
+
 });
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -105,4 +108,26 @@ describe("ProjectTemplateWorkbench", () => {
     await waitFor(() => expect(api.confirmProjectTemplateInstance).toHaveBeenCalledWith("inst-1"));
     await waitFor(() => expect(nav.navigate).toHaveBeenCalledWith("authoring", "editor", "p1"));
   });
+
+  it("creates promotion proposal and displays proposal statuses", async () => {
+    api.fetchProjectTemplateInstance.mockResolvedValueOnce(instance({
+      promotion_proposals: [
+        { id: "proposal-draft", proposal_status: "draft" },
+        { id: "proposal-submitted", proposal_status: "submitted" },
+        { id: "proposal-approved", proposal_status: "approved" },
+        { id: "proposal-rejected", proposal_status: "rejected" },
+      ],
+    }));
+    render(withClient(<ProjectTemplateWorkbench projectId="p1" />));
+
+    expect(await screen.findByText("草稿")).toBeInTheDocument();
+    expect(screen.getByText("已提交")).toBeInTheDocument();
+    expect(screen.getByText("已批准")).toBeInTheDocument();
+    expect(screen.getByText("已拒绝")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "提议沉淀为新版模板" }));
+
+    await waitFor(() => expect(api.proposeProjectTemplatePromotion).toHaveBeenCalledWith("inst-1"));
+  });
+
 });

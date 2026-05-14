@@ -27,15 +27,26 @@ export interface ProjectTemplateChapter {
   blocks: ProjectTemplateBlock[];
 }
 
+export interface TemplatePromotionProposal {
+  id: string;
+  proposal_status: "draft" | "submitted" | "approved" | "rejected" | string;
+}
+
 export interface ProjectTemplateInstance {
   id: string;
   project_id: string;
   display_name: string;
   status: string;
   chapters: ProjectTemplateChapter[];
+  promotion_proposals?: TemplatePromotionProposal[];
   reconciliation_summary?: Record<string, unknown>;
   unanswered_requirement_count?: number;
   pending_seal_checklist_count?: number;
+}
+
+export function promotionProposalStatusLabel(status: string): string {
+  const labels: Record<string, string> = { draft: "草稿", submitted: "已提交", approved: "已批准", rejected: "已拒绝" };
+  return labels[status] ?? status;
 }
 
 export function groupBlocksByFormSection(blocks: ProjectTemplateBlock[]) {

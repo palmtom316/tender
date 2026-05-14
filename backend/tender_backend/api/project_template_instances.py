@@ -69,6 +69,19 @@ class ProjectTemplateChapterOut(BaseModel):
     blocks: list[ProjectTemplateBlockOut] = Field(default_factory=list)
 
 
+class TemplatePromotionProposalOut(BaseModel):
+    id: UUID
+    template_instance_id: UUID
+    base_template_package_id: UUID | None = None
+    project_id: UUID
+    proposal_status: str
+    diff_json: dict[str, Any] = Field(default_factory=dict)
+    created_by: str | None = None
+    reviewed_by: str | None = None
+    created_at: datetime | None = None
+    reviewed_at: datetime | None = None
+
+
 class ProjectTemplateInstanceOut(BaseModel):
     id: UUID
     project_id: UUID
@@ -83,8 +96,7 @@ class ProjectTemplateInstanceOut(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     chapters: list[ProjectTemplateChapterOut] = Field(default_factory=list)
-
-
+    promotion_proposals: list[TemplatePromotionProposalOut] = Field(default_factory=list)
 
 
 class DirectoryReconcileBody(BaseModel):
@@ -259,8 +271,12 @@ def _instance_out(conn: Connection, instance: Any) -> ProjectTemplateInstanceOut
     chapters = []
     for chapter in _repo.list_chapters(conn, instance.id):
         chapters.append(_chapter_out(chapter, _repo.list_blocks(conn, chapter.id)))
+    proposals = []
+    if hasattr(_repo, "list_promotion_proposals"):
+        proposals = [TemplatePromotionProposalOut(**_dump(row)) for row in _repo.list_promotion_proposals(conn, instance.id)]
     data = _dump(instance)
     data["chapters"] = chapters
+    data["promotion_proposals"] = proposals
     return ProjectTemplateInstanceOut(**data)
 
 
@@ -419,6 +435,23 @@ async def confirm_project_template_instance(
     else:
         updated = _repo.update_instance(conn, instance_id, fields)
     return ProjectTemplateConfirmOut(id=updated.id, status=updated.status, confirmed_at=updated.confirmed_at, confirmed_by=updated.confirmed_by)
+
+
+
+
+@router.post("/project-template-instances/{instance_id}/promotion-proposals", response_model=TemplatePromotionProposalOut)
+async def create_project_template_promotion_proposal(
+    instance_id: UUID,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
+) -> TemplatePromotionProposalOut:
+    instance = _find_instance_by_id(conn, instance_id)
+    _ensure_project_access(conn, project_id=instance.project_id, user=user)
+    try:
+        proposal = _service.create_promotion_proposal(conn, instance_id=instance_id, actor=user.display_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TemplatePromotionProposalOut(**_dump(proposal))
 
 
 @router.get("/project-template-instances/{instance_id}/requirement-responses", response_model=list[RequirementResponseOut])
