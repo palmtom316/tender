@@ -1017,6 +1017,13 @@ export interface ReviewIssue {
   title: string;
   detail: string | null;
   resolved: boolean;
+  issue_source?: string | null;
+  suggested_workspace?: "template" | "editor" | string | null;
+  template_chapter_id?: string | null;
+  template_block_id?: string | null;
+  requirement_response_id?: string | null;
+  seal_block_id?: string | null;
+  source_clarification_id?: string | null;
   metadata_json?: Record<string, unknown>;
 }
 
