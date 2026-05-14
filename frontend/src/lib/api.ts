@@ -2806,8 +2806,8 @@ export interface ProjectTemplateInstanceApi {
   pending_seal_checklist_count?: number;
 }
 
-export function fetchProjectTemplateInstance(projectId: string): Promise<ProjectTemplateInstanceApi> {
-  return request<ProjectTemplateInstanceApi>(`/projects/${projectId}/template-instance`);
+export function fetchProjectTemplateInstance(projectId: string, options?: { signal?: AbortSignal }): Promise<ProjectTemplateInstanceApi> {
+  return request<ProjectTemplateInstanceApi>(`/projects/${projectId}/template-instance`, { signal: options?.signal });
 }
 
 export function reorderProjectTemplateChapters(instanceId: string, data: { ordered_tree: Array<{ chapter_id: string; parent_id?: string | null; sort_order: number }> }): Promise<{ chapters: Array<Record<string, unknown>> }> {

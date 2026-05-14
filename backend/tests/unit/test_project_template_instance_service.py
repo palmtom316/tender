@@ -462,3 +462,74 @@ def test_service_raises_when_project_has_no_selected_template_package() -> None:
 
     with pytest.raises(ValueError, match="selected template package"):
         service.ensure_for_project(None, project_id=project.id)
+
+
+def test_service_build_generation_inputs_requires_confirmed_instance_and_includes_blocks() -> None:
+    from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
+
+    project_id = uuid4()
+    instance_id = uuid4()
+    chapter_id = uuid4()
+    block_id = uuid4()
+    seal_block_id = uuid4()
+    instance = type(
+        "Instance",
+        (),
+        {
+            "id": instance_id,
+            "project_id": project_id,
+            "status": "ready_for_authoring",
+            "version": 3,
+            "metadata_json": {"format_profile": {"font_family": "宋体"}},
+        },
+    )()
+    chapter = type("Chapter", (), {"id": chapter_id, "chapter_code": "5", "chapter_title": "施工组织设计", "volume_type": "technical", "enabled": True, "sort_order": 1})()
+    blocks = [
+        type("Block", (), {"id": block_id, "block_type": "fixed_text", "label": "固定", "content_text": "固定正文", "prompt_text": "", "required": True, "sort_order": 1, "render_options_json": {}, "metadata_json": {}})(),
+        type("Block", (), {"id": uuid4(), "block_type": "ai_prompt", "label": "提示", "content_text": "", "prompt_text": "写技术方案", "required": False, "sort_order": 2, "render_options_json": {}, "metadata_json": {}})(),
+        type("Block", (), {"id": seal_block_id, "block_type": "seal_mark", "label": "盖章", "content_text": "", "prompt_text": "", "required": True, "sort_order": 3, "render_options_json": {}, "metadata_json": {"confirmation_required": True}})(),
+        type("Block", (), {"id": uuid4(), "block_type": "page_break", "label": "分页", "content_text": "", "prompt_text": "", "required": False, "sort_order": 4, "render_options_json": {}, "metadata_json": {}})(),
+    ]
+    response = type("Response", (), {"id": uuid4(), "requirement_id": uuid4(), "response_status": "full_response", "template_chapter_id": chapter_id, "template_block_id": block_id, "response_text": "完全响应"})()
+    seal = type("Seal", (), {"seal_block_id": seal_block_id, "confirmation_status": "confirmed"})()
+
+    class InstanceRepo:
+        def get_current_for_project(self, conn, project_id):
+            return instance
+        def list_chapters(self, conn, instance_id):
+            return [chapter]
+        def list_blocks(self, conn, chapter_id):
+            return blocks
+        def list_requirement_responses(self, conn, instance_id):
+            return [response]
+        def list_seal_checklist(self, conn, instance_id):
+            return [seal]
+
+    result = ProjectTemplateInstanceService(instance_repo=InstanceRepo()).build_generation_inputs(None, project_id=project_id)
+
+    assert result["metadata"]["template_instance_id"] == str(instance_id)
+    assert result["metadata"]["template_instance_version"] == 3
+    assert result["metadata"]["requirement_response_coverage"]["unanswered"] == 0
+    assert result["chapters"][0]["blocks"][0]["content_text"] == "固定正文"
+    assert any(block["block_type"] == "seal_mark" for block in result["chapters"][0]["blocks"])
+    assert result["metadata"]["seal_checklist_status"]["pending"] == 0
+
+
+def test_service_build_generation_inputs_blocks_unconfirmed_or_deadline_passed() -> None:
+    from datetime import timedelta
+    from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
+
+    project_id = uuid4()
+    instance = type("Instance", (), {"id": uuid4(), "project_id": project_id, "status": "draft", "version": 1, "metadata_json": {}})()
+
+    class InstanceRepo:
+        def get_current_for_project(self, conn, project_id):
+            return instance
+
+    with pytest.raises(ValueError, match="confirmed project template instance"):
+        ProjectTemplateInstanceService(instance_repo=InstanceRepo()).build_generation_inputs(None, project_id=project_id)
+
+    instance.status = "ready_for_authoring"
+    deadline = _now() - timedelta(days=1)
+    with pytest.raises(ValueError, match="submission deadline"):
+        ProjectTemplateInstanceService(instance_repo=InstanceRepo()).build_generation_inputs(None, project_id=project_id, submission_deadline=deadline)

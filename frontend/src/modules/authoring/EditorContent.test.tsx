@@ -21,6 +21,7 @@ const {
   generateTechnicalChapterMock,
   updateBidChapterMock,
   fetchBusinessTemplatePreviewMock,
+  fetchProjectTemplateInstanceMock,
 } = vi.hoisted(() => ({
   useNavigationMock: vi.fn(),
   fetchDraftsMock: vi.fn(),
@@ -39,6 +40,7 @@ const {
   generateTechnicalChapterMock: vi.fn(),
   updateBidChapterMock: vi.fn(),
   fetchBusinessTemplatePreviewMock: vi.fn(),
+  fetchProjectTemplateInstanceMock: vi.fn(),
 }));
 
 vi.mock("../../lib/NavigationContext", () => ({
@@ -65,7 +67,17 @@ vi.mock("../../lib/api", async () => {
     generateTechnicalChapter: generateTechnicalChapterMock,
     updateBidChapter: updateBidChapterMock,
     fetchBusinessTemplatePreview: fetchBusinessTemplatePreviewMock,
+    fetchProjectTemplateInstance: fetchProjectTemplateInstanceMock,
   };
+
+  it("blocks business generation when project template instance is not confirmed", async () => {
+    fetchProjectTemplateInstanceMock.mockResolvedValueOnce({ id: "inst-1", project_id: "proj-1", display_name: "项目模板", status: "draft", unanswered_requirement_count: 3, pending_seal_checklist_count: 1, chapters: [] });
+    render(withClient(<EditorContent />));
+
+    expect(await screen.findByText("项目模板尚未确认，生成已阻断")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "资格商务装配" })).toBeDisabled();
+  });
+
 });
 
 import { EditorContent } from "./EditorContent";
@@ -131,6 +143,7 @@ describe("EditorContent chart workflow", () => {
       blocking_requirements: [],
     });
     fetchTechnicalWritingPlanMock.mockResolvedValue({ project_id: "proj-1", outline_id: "outline-1", chapter_count: 1, chapters: [] });
+    fetchProjectTemplateInstanceMock.mockResolvedValue({ id: "inst-1", project_id: "proj-1", display_name: "项目模板", status: "ready_for_authoring", unanswered_requirement_count: 0, pending_seal_checklist_count: 0, chapters: [] });
     fetchTechnicalChapterContextMock.mockResolvedValue({
       constraints: [{ id: "constraint-1" }],
       scoring_items: [{ id: "score-1" }],

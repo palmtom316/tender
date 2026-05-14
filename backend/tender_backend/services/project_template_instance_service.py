@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -285,6 +288,103 @@ class ProjectTemplateInstanceService:
             )
             count += 1
         return count
+
+
+    def build_generation_inputs(
+        self,
+        conn: Connection,
+        *,
+        project_id: UUID,
+        submission_deadline: datetime | None = None,
+    ) -> dict[str, Any]:
+        instance = self.instance_repo.get_current_for_project(conn, project_id)
+        if instance is None or instance.status not in {"ready_for_authoring", "locked_for_generation"}:
+            raise ValueError("generation requires a confirmed project template instance")
+        if submission_deadline is not None and submission_deadline < datetime.now(timezone.utc) and instance.status != "locked_for_generation":
+            raise ValueError("submission deadline has passed; generation is blocked unless template is locked_for_generation")
+
+        chapters: list[dict[str, Any]] = []
+        for chapter in self.instance_repo.list_chapters(conn, instance.id):
+            if not getattr(chapter, "enabled", True):
+                continue
+            blocks = [self._block_generation_dict(block) for block in self.instance_repo.list_blocks(conn, chapter.id)]
+            chapters.append(
+                {
+                    "id": str(chapter.id),
+                    "chapter_code": chapter.chapter_code,
+                    "chapter_title": chapter.chapter_title,
+                    "volume_type": chapter.volume_type,
+                    "sort_order": chapter.sort_order,
+                    "blocks": blocks,
+                }
+            )
+        responses = list(self.instance_repo.list_requirement_responses(conn, instance.id))
+        seals = list(self.instance_repo.list_seal_checklist(conn, instance.id))
+        unanswered = sum(1 for response in responses if response.response_status == "unanswered")
+        pending_seals = sum(1 for seal in seals if seal.confirmation_status != "confirmed")
+        metadata = dict(instance.metadata_json or {})
+        format_profile = metadata.get("format_profile") or {}
+        revision_no = self._latest_revision_no(conn, instance.id)
+        return {
+            "instance": {
+                "id": str(instance.id),
+                "version": instance.version,
+                "status": instance.status,
+                "metadata_json": metadata,
+            },
+            "chapters": chapters,
+            "requirement_responses": [self._response_generation_dict(row) for row in responses],
+            "seal_checklist": [self._seal_generation_dict(row) for row in seals],
+            "metadata": {
+                "template_instance_id": str(instance.id),
+                "template_instance_version": instance.version,
+                "template_revision_no": revision_no,
+                "requirement_response_coverage": {"total": len(responses), "unanswered": unanswered},
+                "format_profile_hash": hashlib.sha256(json.dumps(format_profile, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest(),
+                "seal_checklist_status": {"total": len(seals), "pending": pending_seals},
+            },
+        }
+
+    def _block_generation_dict(self, block: Any) -> dict[str, Any]:
+        return {
+            "id": str(block.id),
+            "block_type": block.block_type,
+            "label": block.label,
+            "content_text": getattr(block, "content_text", ""),
+            "prompt_text": getattr(block, "prompt_text", ""),
+            "placeholder_key": getattr(block, "placeholder_key", None),
+            "asset_type": getattr(block, "asset_type", None),
+            "required": bool(getattr(block, "required", False)),
+            "sort_order": getattr(block, "sort_order", 0),
+            "render_options_json": dict(getattr(block, "render_options_json", None) or {}),
+            "metadata_json": dict(getattr(block, "metadata_json", None) or {}),
+        }
+
+    def _response_generation_dict(self, response: Any) -> dict[str, Any]:
+        return {
+            "id": str(response.id),
+            "requirement_id": str(response.requirement_id),
+            "response_status": response.response_status,
+            "template_chapter_id": str(response.template_chapter_id) if response.template_chapter_id else None,
+            "template_block_id": str(response.template_block_id) if response.template_block_id else None,
+            "response_text": getattr(response, "response_text", ""),
+        }
+
+    def _seal_generation_dict(self, seal: Any) -> dict[str, Any]:
+        return {
+            "seal_block_id": str(seal.seal_block_id),
+            "confirmation_status": seal.confirmation_status,
+        }
+
+    def _latest_revision_no(self, conn: Connection, instance_id: UUID) -> int | None:
+        if conn is None:
+            return None
+        try:
+            with conn.cursor() as cur:
+                row = cur.execute("SELECT MAX(revision_no) FROM project_template_revision WHERE template_instance_id = %s", (instance_id,)).fetchone()
+            return int(row[0]) if row and row[0] is not None else None
+        except Exception:
+            return None
 
     def snapshot(self, instance: ProjectTemplateInstanceRow) -> dict[str, Any]:
         return asdict(instance)

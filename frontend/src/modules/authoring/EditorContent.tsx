@@ -7,6 +7,7 @@ import {
   fetchBidOutline,
   fetchBusinessTemplatePreview,
   fetchDrafts,
+  fetchProjectTemplateInstance,
   fetchTechnicalChapterContext,
   fetchTechnicalWritingPlan,
   generateBidChapter,
@@ -508,6 +509,19 @@ export function EditorContent() {
     },
   });
 
+  const { data: projectTemplateInstance } = useQuery({
+    queryKey: ["project-template-instance", projectId],
+    queryFn: ({ signal }) => {
+      if (!projectId) throw new Error("No project selected");
+      return fetchProjectTemplateInstance(projectId, { signal });
+    },
+    enabled: !!projectId,
+    retry: false,
+  });
+  const templateBlockReason = projectTemplateInstance && projectTemplateInstance.status !== "ready_for_authoring" && projectTemplateInstance.status !== "locked_for_generation"
+    ? "项目模板尚未确认，生成已阻断"
+    : null;
+
   const { data: businessTemplatePreview } = useQuery({
     queryKey: ["business-template-preview", projectId],
     queryFn: ({ signal }) => {
@@ -623,11 +637,25 @@ export function EditorContent() {
         <ClayButton
           variant="secondary"
           onClick={() => businessAssembly.mutate()}
-          disabled={outline?.status !== "confirmed" || businessAssembly.isPending}
+          disabled={!!templateBlockReason || outline?.status !== "confirmed" || businessAssembly.isPending}
         >
           {businessAssembly.isPending ? "装配中..." : "资格商务装配"}
         </ClayButton>
       </div>
+
+      {projectTemplateInstance && (
+        <section className="workflow-gate-panel" aria-label="项目模板实例状态">
+          <div>
+            <strong>项目模板实例</strong>
+            <p>{templateBlockReason ?? "已确认，可用于标书生成。"}</p>
+          </div>
+          <div className="workflow-gate-panel__chips">
+            <span>状态：{projectTemplateInstance.status}</span>
+            <span>未响应：{projectTemplateInstance.unanswered_requirement_count ?? 0}</span>
+            <span>签章待确认：{projectTemplateInstance.pending_seal_checklist_count ?? 0}</span>
+          </div>
+        </section>
+      )}
 
       {reconciliation && (
         <section className="workflow-gate-panel">
