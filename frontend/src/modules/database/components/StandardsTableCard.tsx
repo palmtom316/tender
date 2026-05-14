@@ -1,7 +1,6 @@
 import { Card } from "../../../components/ui/Card";
 import { Badge } from "../../../components/ui/Badge";
 import { ClayButton } from "../../../components/ui/ClayButton";
-import { Icon } from "../../../components/ui/Icon";
 import type { Standard } from "../../../lib/api";
 import { StandardProgressBar } from "./StandardProgressBar";
 
@@ -111,11 +110,11 @@ export function StandardsTableCard({
                   <td>
                     <div className="standards-table-card__actions">
                       <ClayButton type="button" variant="ghost" size="sm" onClick={() => onDelete(std.id)}>
-                        <Icon name="trash" size={14} /> 删除
+                        删除
                       </ClayButton>
                       {std.processing_status === "failed" && (
                         <ClayButton type="button" variant="ghost" size="sm" onClick={() => onRetry(std.id)}>
-                          <Icon name="refresh" size={14} /> 重试
+                          重试
                         </ClayButton>
                       )}
                     </div>

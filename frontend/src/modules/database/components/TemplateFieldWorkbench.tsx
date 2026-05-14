@@ -762,7 +762,7 @@ export function TemplateFieldWorkbench() {
                   {showOnlyBlockedItems ? "查看全部模板项" : "只看待处理项"}
                 </ClayButton>
                 <ClayButton variant="outline" onClick={refreshItemQueries}>
-                  <Icon name="refresh" size={14} /> 重新检查
+                  重新检查
                 </ClayButton>
               </div>
             </section>
@@ -843,7 +843,7 @@ export function TemplateFieldWorkbench() {
                       setDraft(createEmptyDraft(selectedItem));
                     }}
                   >
-                    <Icon name="plus" size={14} /> 新建
+                    新建
                   </ClayButton>
                   <ClayButton
                     variant="danger"
@@ -851,7 +851,7 @@ export function TemplateFieldWorkbench() {
                     disabled={!selectedBindingId || deleteMutation.isPending}
                     onClick={() => setDeleteDialogOpen(true)}
                   >
-                    <Icon name="trash" size={14} /> 删除
+                    删除
                   </ClayButton>
                 </div>
               </div>
@@ -1147,7 +1147,7 @@ export function TemplateFieldWorkbench() {
                       }));
                     }}
                   >
-                    <Icon name="plus" size={14} /> 新增映射
+                    新增映射
                   </ClayButton>
                 </div>
               </div>
@@ -1162,7 +1162,7 @@ export function TemplateFieldWorkbench() {
                   {saveMutation.isPending ? "保存中..." : selectedBindingId ? "更新绑定" : "创建绑定"}
                 </ClayButton>
                 <ClayButton variant="outline" onClick={refreshItemQueries}>
-                  <Icon name="refresh" size={14} /> 刷新预览
+                  刷新预览
                 </ClayButton>
               </div>
             </section>

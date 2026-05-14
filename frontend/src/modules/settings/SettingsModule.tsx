@@ -4,7 +4,6 @@ import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
 import { Badge } from "../../components/ui/Badge";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
-import { Icon } from "../../components/ui/Icon";
 import { EmptyState } from "../../components/ui/EmptyState";
 import {
   fetchAgentConfigs,
@@ -115,10 +114,7 @@ function UserManagement() {
       <div className="page-header">
         <h1 className="section-heading">用户管理</h1>
         <ClayButton onClick={() => { setShowForm(true); setEditingUser(null); }}>
-          <span className="inline-icon-label">
-            <Icon name="plus" size={16} />
-            添加用户
-          </span>
+          添加用户
         </ClayButton>
       </div>
 
@@ -162,23 +158,21 @@ function UserManagement() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="clay-btn--icon"
                   onClick={() => { setEditingUser(user); setShowForm(false); }}
                   title="编辑"
                   aria-label={`编辑用户 ${user.display_name}`}
                 >
-                  <Icon name="edit" size={16} />
+                  编辑
                 </ClayButton>
                 <ClayButton
                   type="button"
                   variant="danger"
                   size="sm"
-                  className="clay-btn--icon"
                   onClick={() => setPendingDeleteUser(user)}
                   title="删除"
                   aria-label={`删除用户 ${user.display_name}`}
                 >
-                  <Icon name="trash" size={16} />
+                  删除
                 </ClayButton>
               </div>
             </div>

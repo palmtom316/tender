@@ -2,7 +2,6 @@ import { Suspense, lazy, useEffect, useState } from "react";
 
 import { Badge } from "../../../components/ui/Badge";
 import { ClayButton } from "../../../components/ui/ClayButton";
-import { Icon } from "../../../components/ui/Icon";
 import type {
   StandardClauseNode,
   StandardParseAssetSection,
@@ -369,7 +368,7 @@ export function StandardViewerModal({
             <h2>{viewerData.standard_code} {viewerData.standard_name}</h2>
           </div>
           <ClayButton type="button" variant="ghost" size="sm" onClick={onClose}>
-            <Icon name="x" size={16} /> 关闭
+            关闭
           </ClayButton>
         </div>
 

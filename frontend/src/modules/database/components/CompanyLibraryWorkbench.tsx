@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Icon } from "../../../components/ui/Icon";
 import { Card } from "../../../components/ui/Card";
 import { ClayButton } from "../../../components/ui/ClayButton";
 import { CompanyAssetSection } from "./CompanyAssetSection";
@@ -708,7 +707,6 @@ export function CompanyLibraryWorkbench() {
                               target="_blank"
                               rel="noreferrer"
                             >
-                              <Icon name="download" size={14} />
                               <span>下载</span>
                             </a>
                           </span>
