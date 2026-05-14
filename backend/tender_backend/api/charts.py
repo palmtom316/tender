@@ -13,10 +13,12 @@ from tender_backend.core.project_access import require_project_access
 from tender_backend.core.security import CurrentUser, get_current_user
 from tender_backend.db.deps import get_db_conn
 from tender_backend.services.chart_generation_service import ChartGenerationService, SUPPORTED_CHART_TYPES
+from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 
 
 router = APIRouter(tags=["charts"])
 _service = ChartGenerationService()
+_template_instances = ProjectTemplateInstanceService()
 
 
 class ChartAssetBody(BaseModel):
@@ -39,6 +41,17 @@ class ChartGenerateBody(BaseModel):
     context: dict[str, Any] | None = None
 
 
+def _template_revision_metadata(conn: Connection, *, project_id: UUID) -> dict[str, Any]:
+    try:
+        metadata = _template_instances.build_generation_inputs(conn, project_id=project_id).get("metadata") or {}
+    except ValueError:
+        return {}
+    return {
+        "template_instance_id": metadata.get("template_instance_id"),
+        "template_revision_no": metadata.get("template_revision_no"),
+    }
+
+
 @router.get("/projects/{project_id}/chart-assets")
 async def list_chart_assets(
     project_id: UUID,
@@ -57,6 +70,7 @@ async def create_chart_asset(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     require_project_access(conn, project_id=project_id, user=user)
+    template_metadata = _template_revision_metadata(conn, project_id=project_id)
     try:
         return _service.create_or_update(
             conn,
@@ -66,6 +80,8 @@ async def create_chart_asset(
             spec_json=payload.spec_json,
             outline_node_id=payload.outline_node_id,
             chapter_code=payload.chapter_code,
+            template_instance_id=UUID(str(template_metadata["template_instance_id"])) if template_metadata.get("template_instance_id") else None,
+            template_revision_no=template_metadata.get("template_revision_no"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -85,6 +101,7 @@ async def generate_chart_asset(
         placeholder_key=payload.placeholder_key,
         context=payload.context,
     )
+    template_metadata = _template_revision_metadata(conn, project_id=project_id)
     try:
         return _service.create_or_update(
             conn,
@@ -93,6 +110,8 @@ async def generate_chart_asset(
             title=payload.title,
             spec_json=spec,
             outline_node_id=payload.outline_node_id,
+            template_instance_id=UUID(str(template_metadata["template_instance_id"])) if template_metadata.get("template_instance_id") else None,
+            template_revision_no=template_metadata.get("template_revision_no"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

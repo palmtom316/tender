@@ -90,6 +90,57 @@ describe("ProjectTemplateWorkbench", () => {
     expect(screen.queryByLabelText("AI 提示词内容")).not.toBeInTheDocument();
   });
 
+  it("renders editable business template blocks and docx preview for the selected chapter", async () => {
+    api.fetchProjectTemplateInstance.mockResolvedValueOnce(instance({
+      chapters: [
+        {
+          id: "c5",
+          chapter_code: "5",
+          chapter_title: "商务响应",
+          sort_order: 5,
+          enabled: true,
+          chapter_status: "draft",
+          tender_requirement_status: "not_checked",
+          lock_owner: null,
+          blocks: [
+            { id: "b-fixed", template_chapter_id: "c5", project_id: "p1", block_type: "fixed_text", label: "固定文字", content_text: "本章固定说明", sort_order: 1, required: true, render_options_json: {}, condition_json: {}, metadata_json: {} },
+            { id: "b-table", template_chapter_id: "c5", project_id: "p1", block_type: "table_definition", label: "资质明细表", sort_order: 2, required: true, render_options_json: { title: "资质明细表", headers: ["证书名称", "有效期"], fixed_rows: [["营业执照", "2027-12-31"]], repeat_header: true, note: "复印件加盖公章" }, condition_json: {}, metadata_json: {} },
+            { id: "b-asset", template_chapter_id: "c5", project_id: "p1", block_type: "asset_placeholder", label: "营业执照", placeholder_key: "business_license", asset_type: "qualification", sort_order: 3, required: true, render_options_json: { matching_rule: "有效期内", help_text: "插入公司营业执照扫描件" }, condition_json: {}, metadata_json: {} },
+            { id: "b-ai", template_chapter_id: "c5", project_id: "p1", block_type: "ai_prompt", label: "商务响应提示词", prompt_text: "结合招标要求编写商务响应", sort_order: 4, required: false, render_options_json: {}, condition_json: {}, metadata_json: {} },
+            { id: "b-chart", template_chapter_id: "c5", project_id: "p1", block_type: "chart_prompt", label: "履约能力图", prompt_text: "生成履约能力组织图", placeholder_key: "delivery_chart", sort_order: 5, required: false, render_options_json: { chart_type: "mermaid", source_code: "graph TD; A[项目经理]-->B[技术负责人]" }, condition_json: {}, metadata_json: {} },
+            { id: "b-format", template_chapter_id: "c5", project_id: "p1", block_type: "page_format", label: "页面格式", sort_order: 6, required: false, render_options_json: { page_break: "before", title_level: 2, section_break: "next_page", header_footer_ref: "business", margins: "normal", orientation: "portrait", page_numbering: "continue" }, condition_json: {}, metadata_json: {} },
+          ],
+        },
+      ],
+    }));
+    api.updateProjectTemplateBlock.mockResolvedValueOnce({
+      block: { id: "b-ai", block_type: "ai_prompt", prompt_text: "更新后的商务响应提示词" },
+      revision_no: 3,
+      impact: { stale_drafts: 1, stale_charts: 0, stale_docx: 1, stale_draft_count: 1, stale_chart_count: 0, stale_export_artifact_count: 1 },
+    });
+
+    render(withClient(<ProjectTemplateWorkbench projectId="p1" />));
+
+    expect(await screen.findByLabelText("固定文本内容")).toHaveValue("本章固定说明");
+    expect(screen.getByLabelText("表格标题")).toHaveValue("资质明细表");
+    expect(screen.getByLabelText("资产占位符键")).toHaveValue("business_license");
+    expect(screen.getByLabelText("AI 提示词内容")).toHaveValue("结合招标要求编写商务响应");
+    expect(screen.getByLabelText("AI 图表生成提示词")).toHaveValue("生成履约能力组织图");
+    expect(screen.getByLabelText("图表代码")).toHaveValue("graph TD; A[项目经理]-->B[技术负责人]");
+    expect(screen.getByLabelText("页眉页脚引用")).toHaveValue("business");
+
+    fireEvent.change(screen.getByLabelText("AI 提示词内容"), { target: { value: "更新后的商务响应提示词" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存AI提示词" }));
+
+    await waitFor(() => expect(api.updateProjectTemplateBlock).toHaveBeenCalledWith("b-ai", expect.objectContaining({ prompt_text: "更新后的商务响应提示词" })));
+    expect(await screen.findByText("已保存模板修订 3，受影响：正文草稿 1、图表 0、导出产物 1")).toBeInTheDocument();
+    expect(screen.getByText("[表格] 资质明细表")).toBeInTheDocument();
+    expect(screen.getByText("[资产] 营业执照：business_license")).toBeInTheDocument();
+    expect(screen.getByText("[AI提示词] 商务响应提示词")).toBeInTheDocument();
+    expect(screen.getByText("[AI图表] 履约能力图：delivery_chart")).toBeInTheDocument();
+    expect(screen.getByText("[页面格式] 页眉页脚 business，portrait")).toBeInTheDocument();
+  });
+
   it("disables confirmation for critical issues and locked chapters", async () => {
     api.fetchProjectTemplateInstance.mockResolvedValueOnce(instance({ reconciliation_summary: { critical: 1 }, chapters: [{ ...instance().chapters[0], lock_owner: "Other" }] }));
     render(withClient(<ProjectTemplateWorkbench projectId="p1" />));

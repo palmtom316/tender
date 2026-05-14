@@ -362,6 +362,7 @@ function ChartTaskCards({
                 {task.status === "not_generated" ? "未生成" : task.status}
               </Badge>
             </div>
+            {task.isStaleByTemplate && <Badge variant="danger">模板已更新，需重新生成图表</Badge>}
             <p>{task.purpose}</p>
             <p>来源：{task.sourceSummary}</p>
             <code>{task.placeholder}</code>
@@ -372,7 +373,7 @@ function ChartTaskCards({
             )}
             <div className="chart-task-card__actions">
               <ClayButton size="sm" variant="secondary" onClick={() => onGenerate(task.chartType)} disabled={generating}>
-                {task.assetId ? "重新生成" : "生成图表草案"}
+                {task.isStaleByTemplate ? "按新模板重新生成图表" : task.assetId ? "重新生成" : "生成图表草案"}
               </ClayButton>
               <ClayButton
                 size="sm"
@@ -772,7 +773,7 @@ export function EditorContent() {
               <span className="outline-date">
                 {new Date(d.updated_at).toLocaleDateString("zh-CN")}
               </span>
-              {d.is_stale && <Badge variant="danger">stale</Badge>}
+              {d.is_stale_by_template ? <Badge variant="danger">模板 stale</Badge> : d.is_stale && <Badge variant="danger">stale</Badge>}
             </div>
           ))}
           {!isLoading && drafts.length === 0 && (
@@ -792,6 +793,7 @@ export function EditorContent() {
                   <h2>{selected.chapter_code} {selectedOutlineChapter?.chapter_title ?? "章节草稿"}</h2>
                   <div className="chapter-delivery-toolbar__meta">
                     <Badge variant={selectedDeliveryKind === "ai_content" ? "info" : "success"}>{selectedDeliveryLabel}</Badge>
+                    {selected.is_stale_by_template && <Badge variant="danger">模板已更新，需重新生成正文</Badge>}
                     {selected.is_stale && <Badge variant="danger">{selected.stale_reason || "内容已过期"}</Badge>}
                   </div>
                 </div>
@@ -801,6 +803,15 @@ export function EditorContent() {
                 >
                   {save.isPending ? "保存中..." : "保存正文"}
                 </ClayButton>
+                {selected.is_stale_by_template && selectedOutlineChapter && (
+                  <ClayButton
+                    variant="secondary"
+                    onClick={() => generateTechnical.mutate({ chapterId: selectedOutlineChapter.id, targetPages: selectedTargetPages })}
+                    disabled={generateTechnical.isPending || Boolean(templateBlockReason)}
+                  >
+                    按新模板重新生成正文
+                  </ClayButton>
+                )}
               </div>
 
               <div className="chapter-delivery-controls">

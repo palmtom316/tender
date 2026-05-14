@@ -117,8 +117,29 @@ class _Proposal:
     reviewed_at: datetime | None = None
 
 
+@dataclass(frozen=True)
+class _Revision:
+    id: UUID
+    template_instance_id: UUID
+    project_id: UUID
+    revision_no: int
+    change_type: str
+    change_summary: str
+    snapshot_json: dict
+    created_by: str | None = None
+    created_at: datetime = datetime(2026, 5, 14, tzinfo=timezone.utc)
+
+
 class _FakeConn:
-    pass
+    def transaction(self):
+        class _Tx:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        return _Tx()
 
 
 class _FakeService:
@@ -184,6 +205,7 @@ class _FakeRepo:
         self.seal = _Seal(id=uuid4(), project_id=self.project_id, template_instance_id=self.instance_id, seal_block_id=self.seal_block_id)
         self.reorder_payload = None
         self.proposals: list[_Proposal] = []
+        self.revisions: list[_Revision] = []
 
     def get_current_for_project(self, _conn, project_id):
         return self.instance if project_id == self.project_id else None
@@ -196,6 +218,9 @@ class _FakeRepo:
 
     def list_blocks(self, _conn, chapter_id):
         return [self.block] if chapter_id == self.chapter_id else []
+
+    def get_block_by_id(self, _conn, block_id):
+        return self.block if block_id == self.block_id else None
 
     def update_instance(self, _conn, instance_id, fields):
         self.instance = _Instance(**{**self.instance.__dict__, **fields, "metadata_json": fields.get("metadata_json", self.instance.metadata_json)})
@@ -231,8 +256,19 @@ class _FakeRepo:
         self.chapter = _Chapter(**{**self.chapter.__dict__, "lock_owner": actor, "lock_version": 2})
         return self.chapter
 
-    def record_revision(self, *_args, **_kwargs):
-        return None
+    def record_revision(self, _conn, instance_id, change_type, change_summary, snapshot_json, created_by):
+        revision = _Revision(
+            id=uuid4(),
+            template_instance_id=instance_id,
+            project_id=self.project_id,
+            revision_no=len(self.revisions) + 1,
+            change_type=change_type,
+            change_summary=change_summary,
+            snapshot_json=snapshot_json,
+            created_by=created_by,
+        )
+        self.revisions.append(revision)
+        return revision
 
     def create_promotion_proposal(self, _conn, *, instance_id, base_template_package_id, project_id, diff_json, created_by):
         proposal = _Proposal(
@@ -304,19 +340,29 @@ def test_project_template_instance_routes_cover_read_edit_confirm_and_locks(clie
     assert reordered.status_code == 200
     assert repo.reorder_payload[0]["sort_order"] == 7
 
+    patched_block = sync_client.request("PATCH",
+        f"/api/project-template-blocks/{repo.block.id}",
+        json={"content_text": "更新后的固定文本"},
+    )
+    assert patched_block.status_code == 200
+    assert patched_block.json()["block"]["content_text"] == "更新后的固定文本"
+    assert patched_block.json()["revision_no"] == 2
+    assert patched_block.json()["impact"] == {
+        "stale_drafts": 0,
+        "stale_charts": 0,
+        "stale_docx": 1,
+        "stale_draft_count": 0,
+        "stale_chart_count": 0,
+        "stale_export_artifact_count": 1,
+    }
+    assert repo.revisions[-1].change_type == "template_block_update"
+
     added_block = sync_client.post(
         f"/api/project-template-chapters/{repo.chapter_id}/blocks",
         json={"project_id": str(repo.project_id), "block_type": "seal_mark", "label": "盖章", "required": True},
     )
     assert added_block.status_code == 200
     assert added_block.json()["block_type"] == "seal_mark"
-
-    patched_block = sync_client.request("PATCH", 
-        f"/api/project-template-blocks/{repo.block.id}",
-        json={"content_text": "更新后的固定文本"},
-    )
-    assert patched_block.status_code == 200
-    assert patched_block.json()["content_text"] == "更新后的固定文本"
 
     responses = sync_client.get(f"/api/project-template-instances/{repo.instance_id}/requirement-responses")
     assert responses.status_code == 200

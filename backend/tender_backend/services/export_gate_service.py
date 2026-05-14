@@ -94,6 +94,20 @@ def _stale_artifact_count(conn: Connection, *, project_id: UUID) -> int:
     return int((row or {}).get("count") or 0)
 
 
+def _stale_template_artifact_count(conn: Connection, *, project_id: UUID) -> int:
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            SELECT (
+              (SELECT COUNT(*) FROM chapter_draft WHERE project_id = %s AND COALESCE(is_stale_by_template, false) = true)
+              + (SELECT COUNT(*) FROM chart_asset WHERE project_id = %s AND COALESCE(is_stale_by_template, false) = true)
+            ) AS stale_template_artifact_count
+            """,
+            (project_id, project_id),
+        ).fetchone()
+    return int((row or {}).get("stale_template_artifact_count") or 0)
+
+
 def _unresolved_critical_constraint_count(constraint_set: dict | None) -> int:
     if not constraint_set:
         return 0
@@ -123,6 +137,7 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
     constraints_confirmed = constraint_set is not None or legacy_project
     template_gate = _template_render_gate(project_metadata)
     stale_artifact_count = _stale_artifact_count(conn, project_id=project_id)
+    stale_template_artifact_count = _stale_template_artifact_count(conn, project_id=project_id)
     unresolved_critical_constraint_count = _unresolved_critical_constraint_count(latest_constraint_set)
 
     gates = {
@@ -139,6 +154,8 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
         "unresolved_critical_constraint_count": unresolved_critical_constraint_count,
         "stale_artifacts_clear": stale_artifact_count == 0,
         "stale_artifact_count": stale_artifact_count,
+        "template_stale_artifacts_clear": stale_template_artifact_count == 0,
+        "stale_template_artifact_count": stale_template_artifact_count,
         **template_gate,
         **format_gate,
     }
@@ -153,5 +170,6 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
             and gates["critical_constraints_resolved"]
             and gates["template_required_items_rendered"]
             and gates["stale_artifacts_clear"]
+            and gates["template_stale_artifacts_clear"]
         ),
     }

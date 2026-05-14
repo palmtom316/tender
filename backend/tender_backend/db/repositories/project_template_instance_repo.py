@@ -445,6 +445,11 @@ class ProjectTemplateInstanceRepository:
             ).fetchall()
         return [_to_block(dict(row)) for row in rows]
 
+    def get_block_by_id(self, conn: Connection, block_id: UUID) -> ProjectTemplateBlockRow | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(f"SELECT {_BLOCK_COLUMNS} FROM project_template_block WHERE id = %s", (block_id,)).fetchone()
+        return _to_block(dict(row)) if row else None
+
     def replace_chapter_order(self, conn: Connection, instance_id: UUID, ordered_chapter_ids: list[UUID]) -> None:
         if not ordered_chapter_ids:
             return

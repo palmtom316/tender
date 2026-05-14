@@ -17,6 +17,7 @@ vi.mock("./UploadContent", () => ({ UploadContent: () => <div>Upload</div> }));
 vi.mock("./ParseContent", () => ({ ParseContent: () => <div>Parse</div> }));
 vi.mock("./RequirementsContent", () => ({ RequirementsContent: () => <div>Requirements</div> }));
 vi.mock("./EditorContent", () => ({ EditorContent: () => <div>Editor</div> }));
+vi.mock("../templates/ProjectTemplateWorkbench", () => ({ ProjectTemplateWorkbench: () => <div aria-label="项目模板调整">Template</div> }));
 
 import { AuthoringModule } from "./AuthoringModule";
 

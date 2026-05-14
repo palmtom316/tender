@@ -1,4 +1,186 @@
-from tender_backend.services.technical_bid_writer import TechnicalBidWriter
+from uuid import uuid4
+
+from tender_backend.services.technical_bid_writer import TechnicalBidWriter, _json_safe
+
+
+def test_technical_writer_uses_ai_gateway_content_when_available(monkeypatch) -> None:
+    project_id = uuid4()
+    outline_id = uuid4()
+    chapter_id = uuid4()
+    captured = {}
+
+    class _Writer(TechnicalBidWriter):
+        def _confirmed_outline(self, conn, *, project_id):
+            return {"id": outline_id, "project_id": project_id, "status": "confirmed"}
+
+        def _chapter(self, conn, *, project_id, chapter_id):
+            return {
+                "id": chapter_id,
+                "project_id": project_id,
+                "chapter_code": "8",
+                "chapter_title": "施工方案与技术措施",
+                "volume_type": "technical",
+            }
+
+        def _create_run(self, conn, **kwargs):
+            captured.update(kwargs)
+            return {"id": uuid4(), "metadata_json": kwargs["metadata"]}
+
+    class _ContextBuilder:
+        def build(self, conn, *, project_id, chapter_id):
+            return {
+                "chapter": {
+                    "id": chapter_id,
+                    "chapter_code": "8",
+                    "chapter_title": "施工方案与技术措施",
+                    "volume_type": "technical",
+                },
+                "constraints": [],
+                "standard_clauses": [],
+                "personnel_selections": [],
+                "equipment_selections": [],
+                "company_assets": [],
+                "recommended_charts": ["construction_flow"],
+                "chart_assets": [{"placeholder_key": "construction_flow", "chart_type": "construction_flow"}],
+                "generation_controls": {"target_pages": 8, "target_pages_source": "request"},
+                "strategy": {"key": "construction_plan_and_technical_measures"},
+                "prompt_template": {"status": "loaded", "content_md": "第8章提示词"},
+            }
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "INSERT INTO chapter_draft" in query:
+                self.result = [
+                    {
+                        "id": uuid4(),
+                        "project_id": params[1],
+                        "volume_type": params[2],
+                        "chapter_code": params[3],
+                        "content_md": params[4],
+                        "referenced_chart_keys": params[5],
+                    }
+                ]
+            return self
+
+        def fetchone(self):
+            return self.result[0] if getattr(self, "result", []) else None
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
+    monkeypatch.setattr(
+        "tender_backend.services.technical_bid_writer._request_ai_gateway_completion",
+        lambda context, rewrite_note=None: {
+            "content": "# 8 施工方案与技术措施\n\n## 8.1 编制依据与标准\nDeepSeek 生成正文\n\n{{chart:construction_flow}}",
+            "resolved_model": "deepseek-v4-flash",
+            "resolved_provider": "deepseek",
+            "usage": {"input_tokens": 111, "output_tokens": 222},
+        },
+        raising=False,
+    )
+
+    result = _Writer().generate_chapter(_Conn(), project_id=project_id, chapter_id=chapter_id, target_pages=8)
+
+    assert "DeepSeek 生成正文" in result["draft"]["content_md"]
+    assert captured["metadata"]["generation_mode"] == "ai_gateway"
+    assert captured["metadata"]["ai_gateway"]["resolved_provider"] == "deepseek"
+    assert captured["metadata"]["ai_gateway"]["resolved_model"] == "deepseek-v4-flash"
+
+
+def test_technical_writer_clears_only_template_stale_state(monkeypatch) -> None:
+    project_id = uuid4()
+    outline_id = uuid4()
+    chapter_id = uuid4()
+    queries = []
+
+    class _Writer(TechnicalBidWriter):
+        def _confirmed_outline(self, conn, *, project_id):
+            return {"id": outline_id, "project_id": project_id, "status": "confirmed"}
+
+        def _chapter(self, conn, *, project_id, chapter_id):
+            return {
+                "id": chapter_id,
+                "project_id": project_id,
+                "chapter_code": "8",
+                "chapter_title": "施工方案与技术措施",
+                "volume_type": "technical",
+            }
+
+        def _create_run(self, conn, **kwargs):
+            return {"id": uuid4(), "metadata_json": kwargs["metadata"]}
+
+    class _ContextBuilder:
+        def build(self, conn, *, project_id, chapter_id):
+            return {
+                "chapter": {"id": chapter_id, "chapter_code": "8", "chapter_title": "施工方案与技术措施", "volume_type": "technical"},
+                "constraints": [],
+                "standard_clauses": [],
+                "personnel_selections": [],
+                "equipment_selections": [],
+                "company_assets": [],
+                "recommended_charts": [],
+                "chart_assets": [],
+                "generation_controls": {"target_pages": 8},
+                "strategy": {"key": "construction_plan_and_technical_measures"},
+                "prompt_template": {"status": "loaded", "content_md": "第8章提示词"},
+            }
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            queries.append((query, params))
+            if "INSERT INTO chapter_draft" in query:
+                self.result = [
+                    {
+                        "id": uuid4(),
+                        "project_id": params[1],
+                        "volume_type": params[2],
+                        "chapter_code": params[3],
+                        "content_md": params[4],
+                        "referenced_chart_keys": params[5],
+                    }
+                ]
+            return self
+
+        def fetchone(self):
+            return self.result[0] if getattr(self, "result", []) else None
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
+    monkeypatch.setattr(
+        "tender_backend.services.technical_bid_writer._request_ai_gateway_completion",
+        lambda context, rewrite_note=None: {"content": "# 8 施工方案与技术措施\n\n正文", "resolved_model": "deepseek-v4-flash", "resolved_provider": "deepseek", "usage": {}},
+        raising=False,
+    )
+
+    _Writer().generate_chapter(_Conn(), project_id=project_id, chapter_id=chapter_id, target_pages=8)
+
+    insert_query = next(query for query, _params in queries if "INSERT INTO chapter_draft" in query)
+    assert "template_stale_reason = NULL" in insert_query
+    assert "is_stale = false" not in insert_query
+    assert "\n              stale_reason = NULL" not in insert_query
 
 
 def test_technical_self_check_flags_pricing_terms() -> None:
@@ -91,8 +273,6 @@ def test_technical_self_check_detects_schedule_internal_sections() -> None:
 
 
 def test_technical_writer_records_context_and_creates_recommended_charts(monkeypatch) -> None:
-    from uuid import uuid4
-
     project_id = uuid4()
     outline_id = uuid4()
     chapter_id = uuid4()
@@ -194,8 +374,6 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
 
 
 def test_technical_writer_allows_target_pages_override(monkeypatch) -> None:
-    from uuid import uuid4
-
     project_id = uuid4()
     outline_id = uuid4()
     chapter_id = uuid4()
@@ -265,3 +443,12 @@ def test_technical_writer_allows_target_pages_override(monkeypatch) -> None:
     assert "96 页左右 A4" in captured["prompt_inputs"]["generation_controls"]["prompt_overlay_md"]
     assert "质量提示词" in captured["prompt_inputs"]["prompt_template"]["effective_content_md"]
     assert "96 页左右 A4" in captured["prompt_inputs"]["prompt_template"]["effective_content_md"]
+
+
+def test_json_safe_converts_uuids_before_jsonb_insert() -> None:
+    value = {"chapter": {"id": uuid4()}, "items": [{"id": uuid4()}]}
+
+    result = _json_safe(value)
+
+    assert isinstance(result["chapter"]["id"], str)
+    assert isinstance(result["items"][0]["id"], str)

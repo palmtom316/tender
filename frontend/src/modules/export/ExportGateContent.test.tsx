@@ -54,6 +54,8 @@ describe("ExportGateContent", () => {
         failed_required_template_items: ["授权委托书", "技术规范响应表"],
         stale_artifacts_clear: false,
         stale_artifact_count: 4,
+        template_stale_artifacts_clear: false,
+        stale_template_artifact_count: 2,
         format_passed: false,
         format_status: "warning_not_checked",
         format_message: "尚未执行自动格式校验",
@@ -70,6 +72,8 @@ describe("ExportGateContent", () => {
     expect(screen.getByText("2 个必需模板项渲染失败：授权委托书、技术规范响应表")).toBeInTheDocument();
     expect(screen.getByText("内容时效")).toBeInTheDocument();
     expect(screen.getByText("4 项草稿、目录或图表已过期")).toBeInTheDocument();
+    expect(screen.getByText("模板修改后未重新生成")).toBeInTheDocument();
+    expect(screen.getByText("2 项正文或图表需按新模板重新生成")).toBeInTheDocument();
     expect(screen.getByText("图表审批")).toBeInTheDocument();
     expect(screen.getByText("1 个引用图表未审批")).toBeInTheDocument();
     expect(screen.getByText("尚未执行自动格式校验")).toBeInTheDocument();

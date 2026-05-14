@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import urllib.error
+import urllib.request
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,8 +14,11 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from tender_backend.services.bid_chapter_generation import generate_bid_chapter_draft
+from tender_backend.core.config import get_settings
+from tender_backend.services.ai_gateway_client import ai_gateway_headers
+from tender_backend.services.bid_chapter_generation import CHART_PLACEHOLDER_RE, generate_bid_chapter_draft
 from tender_backend.services.chart_generation_service import ChartGenerationService
+from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 from tender_backend.services.technical_chapter_context import TechnicalChapterContextBuilder, with_target_pages_override
 
 
@@ -63,8 +68,34 @@ class TechnicalBidWriter:
             target_pages,
         )
         context = _with_effective_prompt_template(context)
-        draft = generate_bid_chapter_draft(conn, project_id=project_id, chapter_id=chapter_id, context=context, rewrite_note=rewrite_note)
+        ai_result = _request_ai_gateway_completion(context, rewrite_note=rewrite_note)
+        if ai_result is not None:
+            draft = _save_chapter_draft(
+                conn,
+                project_id=project_id,
+                chapter=chapter,
+                content_md=ai_result["content"],
+                context=context,
+            )
+            generation_mode = "ai_gateway"
+            ai_metadata = _ai_gateway_metadata(ai_result)
+        else:
+            draft = generate_bid_chapter_draft(conn, project_id=project_id, chapter_id=chapter_id, context=context, rewrite_note=rewrite_note)
+            generation_mode = "deterministic_strategy_fallback"
+            ai_metadata = None
         self_check = self._self_check(draft.get("content_md") or "")
+        metadata = {
+            "chapter_code": chapter["chapter_code"],
+            "self_check": self_check,
+            "context_hash": _context_hash(context),
+            "prompt_version": "technical_chapter_context_v1",
+            "prompt_contract": _technical_prompt_contract(context),
+            "source_trace": _source_trace(context),
+            "generation_mode": generation_mode,
+            "prompt_template": _prompt_template_trace(context),
+        }
+        if ai_metadata is not None:
+            metadata["ai_gateway"] = ai_metadata
         run = self._create_run(
             conn,
             project_id=project_id,
@@ -73,16 +104,7 @@ class TechnicalBidWriter:
             status="completed",
             created_by=created_by,
             prompt_inputs=context,
-            metadata={
-                "chapter_code": chapter["chapter_code"],
-                "self_check": self_check,
-                "context_hash": _context_hash(context),
-                "prompt_version": "technical_chapter_context_v1",
-                "prompt_contract": _technical_prompt_contract(context),
-                "source_trace": _source_trace(context),
-                "generation_mode": "deterministic_strategy_fallback",
-                "prompt_template": _prompt_template_trace(context),
-            },
+            metadata=metadata,
         )
         return {"project_id": str(project_id), "chapter": chapter, "draft": draft, "run": run}
 
@@ -269,8 +291,8 @@ class TechnicalBidWriter:
                     outline_id,
                     chapter_id,
                     status,
-                    Jsonb(prompt_inputs or {"source": "confirmed_outline_and_mapped_requirements"}),
-                    Jsonb(metadata),
+                    Jsonb(_json_safe(prompt_inputs or {"source": "confirmed_outline_and_mapped_requirements"})),
+                    Jsonb(_json_safe(metadata)),
                     created_by,
                 ),
             ).fetchone()
@@ -281,9 +303,164 @@ class TechnicalBidWriter:
 __all__ = ["TechnicalBidWriter"]
 
 
+def _request_ai_gateway_completion(context: dict[str, Any], *, rewrite_note: str | None = None) -> dict[str, Any] | None:
+    settings = get_settings()
+    if not settings.ai_gateway_url:
+        return None
+    payload = {
+        "task_type": "generate_section",
+        "messages": _ai_gateway_messages(context, rewrite_note=rewrite_note),
+        "temperature": 0.2,
+        "max_tokens": _ai_gateway_max_tokens(context),
+        "stream": False,
+    }
+    request = urllib.request.Request(
+        settings.ai_gateway_url.rstrip("/") + "/api/ai/chat",
+        data=json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"),
+        headers={"Content-Type": "application/json", **ai_gateway_headers()},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=max(settings.standard_ai_gateway_timeout_seconds, 300.0)) as response:
+            body = response.read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    try:
+        result = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    content = str(result.get("content") or "").strip()
+    if not content or content.startswith("[AI Gateway stub"):
+        return None
+    return {
+        "content": content,
+        "resolved_model": result.get("resolved_model"),
+        "resolved_provider": result.get("resolved_provider"),
+        "used_fallback": bool(result.get("used_fallback")),
+        "finish_reason": result.get("finish_reason"),
+        "usage": {
+            "input_tokens": int(result.get("input_tokens") or 0),
+            "output_tokens": int(result.get("output_tokens") or 0),
+            "reasoning_tokens": int(result.get("reasoning_tokens") or 0),
+            "prompt_cache_hit_tokens": int(result.get("prompt_cache_hit_tokens") or 0),
+            "prompt_cache_miss_tokens": int(result.get("prompt_cache_miss_tokens") or 0),
+            "latency_ms": int(result.get("latency_ms") or 0),
+        },
+    }
+
+
+def _ai_gateway_messages(context: dict[str, Any], *, rewrite_note: str | None = None) -> list[dict[str, str]]:
+    prompt_template = context.get("prompt_template") if isinstance(context.get("prompt_template"), dict) else {}
+    template_content = str(prompt_template.get("effective_content_md") or prompt_template.get("content_md") or "").strip()
+    contract = _technical_prompt_contract(context)
+    source_context = {
+        key: context.get(key)
+        for key in contract["allowed_context_keys"]
+        if key in context
+    }
+    user_payload = {
+        "task": "generate_technical_bid_chapter",
+        "chapter": context.get("chapter"),
+        "rewrite_note": rewrite_note,
+        "prompt_template": template_content,
+        "prompt_contract": contract,
+        "source_trace": _source_trace(context),
+        "context": source_context,
+    }
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是投标文件技术标章节编写助手。只根据用户提供的结构化上下文、模板提示词、"
+                "已确认招标约束、标准条文、企业资料和图表占位符编写，不得编造未给出的日期、"
+                "数量、人员姓名、证书编号、设备型号、金额或承诺。输出 Markdown 正文，保留章节编号，"
+                "需要图表的位置必须使用 {{chart:key}} 占位符。不得输出思考过程、说明或 JSON。"
+            ),
+        },
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, default=str)},
+    ]
+
+
+def _ai_gateway_max_tokens(context: dict[str, Any]) -> int:
+    controls = context.get("generation_controls") if isinstance(context.get("generation_controls"), dict) else {}
+    target_pages = controls.get("target_pages")
+    if isinstance(target_pages, int) and target_pages >= 80:
+        return 32768
+    if isinstance(target_pages, int) and target_pages >= 40:
+        return 24576
+    return 16384
+
+
+def _ai_gateway_metadata(ai_result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "resolved_model": ai_result.get("resolved_model"),
+        "resolved_provider": ai_result.get("resolved_provider"),
+        "used_fallback": bool(ai_result.get("used_fallback")),
+        "finish_reason": ai_result.get("finish_reason"),
+        "usage": ai_result.get("usage") or {},
+    }
+
+
+def _save_chapter_draft(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    chapter: dict[str, Any],
+    content_md: str,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    template_metadata: dict[str, Any] = {}
+    try:
+        template_inputs = ProjectTemplateInstanceService().build_generation_inputs(conn, project_id=project_id)
+        template_metadata = dict(template_inputs.get("metadata") or {})
+    except ValueError:
+        template_metadata = {}
+    referenced_chart_keys = sorted(set(CHART_PLACEHOLDER_RE.findall(content_md)))
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            INSERT INTO chapter_draft (
+              id, project_id, volume_type, chapter_code, content_md, referenced_chart_keys,
+              template_instance_id, template_revision_no, is_stale_by_template,
+              stale_by_template_revision_no, stale_by_template_block_id
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, false, NULL, NULL)
+            ON CONFLICT (project_id, volume_type, chapter_code)
+            DO UPDATE SET
+              content_md = EXCLUDED.content_md,
+              referenced_chart_keys = EXCLUDED.referenced_chart_keys,
+              template_instance_id = EXCLUDED.template_instance_id,
+              template_revision_no = EXCLUDED.template_revision_no,
+              is_stale_by_template = false,
+              stale_by_template_revision_no = NULL,
+              stale_by_template_block_id = NULL,
+              template_stale_reason = NULL,
+              updated_at = now()
+            RETURNING *
+            """,
+            (
+                uuid4(),
+                project_id,
+                chapter.get("volume_type") or "technical",
+                chapter["chapter_code"],
+                content_md,
+                referenced_chart_keys,
+                UUID(str(template_metadata["template_instance_id"])) if template_metadata.get("template_instance_id") else None,
+                template_metadata.get("template_revision_no"),
+            ),
+        ).fetchone()
+    conn.commit()
+    assert row is not None
+    return dict(row)
+
+
 def _context_hash(context: dict[str, Any]) -> str:
     payload = json.dumps(context, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _json_safe(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _has_heading(content: str, heading: str) -> bool:

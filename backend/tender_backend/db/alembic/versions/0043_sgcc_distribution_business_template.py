@@ -84,6 +84,17 @@ _ITEMS: tuple[tuple[str, str], ...] = (
 
 def upgrade() -> None:
     op.execute("""
+    INSERT INTO template_package_category (code, display_name, description, sort_order, enabled)
+    VALUES ('sgcc_distribution', '国网配网工程', '国家电网配网工程类项目模板', 30, TRUE)
+    ON CONFLICT (code)
+    DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      description = EXCLUDED.description,
+      sort_order = EXCLUDED.sort_order,
+      enabled = TRUE,
+      updated_at = now();
+    """)
+    op.execute("""
     INSERT INTO bid_template_package (
       id, package_key, display_name, package_type, category_code, source_root, source_manifest
     )

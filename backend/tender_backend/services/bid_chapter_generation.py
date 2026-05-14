@@ -230,8 +230,10 @@ def generate_bid_chapter_draft(
         "本章节依据已确认的项目模板实例和招标文件解析出的约束编写；当模板与招标文件要求冲突时，以招标文件解析结果为准。",
         "",
     ]
+    template_metadata: dict[str, Any] = {}
     try:
         template_inputs = ProjectTemplateInstanceService().build_generation_inputs(conn, project_id=project_id)
+        template_metadata = dict(template_inputs.get("metadata") or {})
         template_chapter = next((item for item in template_inputs.get("chapters", []) if item.get("chapter_code") == chapter.get("chapter_code")), None)
         if template_chapter:
             fixed_blocks = [block for block in template_chapter.get("blocks", []) if block.get("block_type") == "fixed_text" and block.get("content_text")]
@@ -258,16 +260,35 @@ def generate_bid_chapter_draft(
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """
-            INSERT INTO chapter_draft (id, project_id, volume_type, chapter_code, content_md, referenced_chart_keys)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO chapter_draft (
+              id, project_id, volume_type, chapter_code, content_md, referenced_chart_keys,
+              template_instance_id, template_revision_no, is_stale_by_template,
+              stale_by_template_revision_no, stale_by_template_block_id
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, false, NULL, NULL)
             ON CONFLICT (project_id, volume_type, chapter_code)
             DO UPDATE SET
               content_md = EXCLUDED.content_md,
               referenced_chart_keys = EXCLUDED.referenced_chart_keys,
+              template_instance_id = EXCLUDED.template_instance_id,
+              template_revision_no = EXCLUDED.template_revision_no,
+              is_stale_by_template = false,
+              stale_by_template_revision_no = NULL,
+              stale_by_template_block_id = NULL,
+              template_stale_reason = NULL,
               updated_at = now()
             RETURNING *
             """,
-            (uuid4(), project_id, chapter.get("volume_type") or "technical", chapter["chapter_code"], content_md, referenced_chart_keys),
+            (
+                uuid4(),
+                project_id,
+                chapter.get("volume_type") or "technical",
+                chapter["chapter_code"],
+                content_md,
+                referenced_chart_keys,
+                UUID(str(template_metadata["template_instance_id"])) if template_metadata.get("template_instance_id") else None,
+                template_metadata.get("template_revision_no"),
+            ),
         ).fetchone()
     conn.commit()
     assert row is not None

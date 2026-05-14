@@ -238,8 +238,54 @@ def test_generate_bid_chapter_draft_persists_referenced_chart_keys() -> None:
         "response_matrix",
     ]
     assert "referenced_chart_keys" in insert_query
-    assert insert_params[-1] == expected_chart_keys
+    assert insert_params[5] == expected_chart_keys
     assert conn.saved["referenced_chart_keys"] == expected_chart_keys
+
+
+def test_generate_bid_chapter_draft_stamps_template_revision(monkeypatch) -> None:
+    conn = _Conn()
+    template_instance_id = uuid4()
+
+    class _TemplateService:
+        def build_generation_inputs(self, _conn, *, project_id, **_kwargs):
+            return {
+                "instance": {"id": str(template_instance_id)},
+                "chapters": [],
+                "metadata": {"template_instance_id": str(template_instance_id), "template_revision_no": 12},
+            }
+
+    monkeypatch.setattr("tender_backend.services.bid_chapter_generation.ProjectTemplateInstanceService", _TemplateService)
+
+    generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    insert_query, insert_params = conn.queries[-1]
+    assert "template_instance_id" in insert_query
+    assert "template_revision_no" in insert_query
+    assert "is_stale_by_template = false" in insert_query
+    assert insert_params[6] == template_instance_id
+    assert insert_params[7] == 12
+
+
+def test_generate_bid_chapter_draft_clears_only_template_stale_state(monkeypatch) -> None:
+    conn = _Conn()
+    template_instance_id = uuid4()
+
+    class _TemplateService:
+        def build_generation_inputs(self, _conn, *, project_id, **_kwargs):
+            return {
+                "instance": {"id": str(template_instance_id)},
+                "chapters": [],
+                "metadata": {"template_instance_id": str(template_instance_id), "template_revision_no": 13},
+            }
+
+    monkeypatch.setattr("tender_backend.services.bid_chapter_generation.ProjectTemplateInstanceService", _TemplateService)
+
+    generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    insert_query, _insert_params = conn.queries[-1]
+    assert "template_stale_reason = NULL" in insert_query
+    assert "is_stale = false" not in insert_query
+    assert "\n              stale_reason = NULL" not in insert_query
 
 
 def test_generate_bid_chapter_draft_can_render_from_normalized_context() -> None:

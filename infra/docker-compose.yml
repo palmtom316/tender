@@ -120,6 +120,7 @@ services:
       TEMPLATE_IMPORT_ROOTS: ${TEMPLATE_IMPORT_ROOTS:-/workspace/backend/data/template_imports}
     volumes:
       - ../backend:/workspace/backend
+      - ../docs:/workspace/docs:ro
     depends_on:
       postgres:
         condition: service_healthy

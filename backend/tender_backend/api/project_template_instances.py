@@ -18,6 +18,7 @@ from tender_backend.services.template_directory_reconciliation_service import (
     DirectoryReconciliationSuggestion,
     TemplateDirectoryReconciliationService,
 )
+from tender_backend.services.template_edit_propagation_service import TemplateEditPropagationService
 
 
 router = APIRouter(tags=["project-template-instances"])
@@ -26,6 +27,7 @@ _repo = ProjectTemplateInstanceRepository()
 _service = ProjectTemplateInstanceService(instance_repo=_repo)
 _requirements = RequirementRepository()
 _reconciliation = TemplateDirectoryReconciliationService()
+_template_edit_propagation = TemplateEditPropagationService()
 
 
 class ProjectTemplateBlockOut(BaseModel):
@@ -191,6 +193,21 @@ class ProjectTemplateBlockUpdate(BaseModel):
     metadata_json: dict[str, Any] | None = None
 
 
+class ProjectTemplateBlockImpactOut(BaseModel):
+    stale_drafts: int = 0
+    stale_charts: int = 0
+    stale_docx: int = 0
+    stale_draft_count: int = 0
+    stale_chart_count: int = 0
+    stale_export_artifact_count: int = 0
+
+
+class ProjectTemplateBlockUpdateOut(BaseModel):
+    block: ProjectTemplateBlockOut
+    revision_no: int
+    impact: ProjectTemplateBlockImpactOut
+
+
 class ProjectTemplateConfirmOut(BaseModel):
     id: UUID
     status: str
@@ -295,6 +312,14 @@ def _find_instance_by_id(conn: Connection, instance_id: UUID) -> Any:
     raise HTTPException(status_code=404, detail="template instance not found")
 
 
+def _find_block_by_id(conn: Connection, block_id: UUID) -> Any:
+    if hasattr(_repo, "get_block_by_id"):
+        block = _repo.get_block_by_id(conn, block_id)
+        if block is not None:
+            return block
+    raise HTTPException(status_code=404, detail="block not found")
+
+
 def _ensure_project_access(conn: Connection, *, project_id: UUID, user: CurrentUser) -> None:
     require_project_access(conn, project_id=project_id, user=user)
 
@@ -388,18 +413,32 @@ async def create_project_template_block(
     return _block_out(block)
 
 
-@router.patch("/project-template-blocks/{block_id}", response_model=ProjectTemplateBlockOut)
+@router.patch("/project-template-blocks/{block_id}", response_model=ProjectTemplateBlockUpdateOut)
 async def update_project_template_block(
     block_id: UUID,
     payload: ProjectTemplateBlockUpdate,
     conn: Connection = Depends(get_db_conn),
     user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
-) -> ProjectTemplateBlockOut:
-    block = _repo.update_block(conn, block_id, payload.model_dump(exclude_unset=True))
-    if block is None:
-        raise HTTPException(status_code=404, detail="block not found")
-    _ensure_project_access(conn, project_id=block.project_id, user=user)
-    return _block_out(block)
+) -> ProjectTemplateBlockUpdateOut:
+    existing = _find_block_by_id(conn, block_id)
+    _ensure_project_access(conn, project_id=existing.project_id, user=user)
+    with conn.transaction():
+        block = _repo.update_block(conn, block_id, payload.model_dump(exclude_unset=True))
+        if block is None:
+            raise HTTPException(status_code=404, detail="block not found")
+        instance = _repo.get_current_for_project(conn, block.project_id)
+        if instance is None:
+            raise HTTPException(status_code=404, detail="template instance not found")
+        revision = _repo.record_revision(
+            conn,
+            instance.id,
+            "template_block_update",
+            f"update {block.block_type} block {block.label}",
+            {"block_id": str(block.id), "block_type": block.block_type, "fields": payload.model_dump(exclude_unset=True)},
+            user.display_name,
+        )
+        impact = _template_edit_propagation.apply_stale_impact(conn, block=block, revision_no=revision.revision_no, actor=user.display_name)
+    return ProjectTemplateBlockUpdateOut(block=_block_out(block), revision_no=revision.revision_no, impact=ProjectTemplateBlockImpactOut(**impact))
 
 
 @router.delete("/project-template-blocks/{block_id}")

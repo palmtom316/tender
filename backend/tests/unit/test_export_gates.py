@@ -61,6 +61,11 @@ def _asset(*, placeholder_key: str, status: str) -> ChartAssetRow:
         rendered_png_path=None,
         status=status,
         version=1,
+        template_instance_id=None,
+        template_revision_no=None,
+        is_stale_by_template=False,
+        stale_by_template_revision_no=None,
+        stale_by_template_block_id=None,
         metadata_json={},
         created_at=now,
         updated_at=now,
@@ -237,6 +242,66 @@ def test_export_gate_blocks_required_template_render_failures_and_stale_artifact
     assert state["gates"]["required_template_failed_count"] == 2
     assert state["gates"]["stale_artifacts_clear"] is False
     assert state["gates"]["stale_artifact_count"] == 3
+    assert state["can_export"] is False
+
+
+def test_export_gate_reports_template_stale_artifacts(monkeypatch):
+    project_id = uuid4()
+
+    class _ReqRepo:
+        def unconfirmed_veto_count(self, conn, *, project_id):
+            return 0
+
+    class _ChartRepo:
+        def list_by_project(self, conn, *, project_id):
+            return []
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"id": uuid4(), "version": 1, "status": "confirmed", "items": []}
+
+        def latest(self, conn, *, project_id):
+            return {"id": uuid4(), "version": 1, "status": "confirmed", "items": []}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "FROM project" in query:
+                self.result = [{"metadata_json": {}}]
+            elif "FROM chapter_draft" in query and "content_md" in query:
+                self.result = []
+            elif "stale_template_artifact_count" in query:
+                self.result = [{"stale_template_artifact_count": 2}]
+            elif "AS count" in query:
+                self.result = [{"count": 0}]
+            else:
+                self.result = []
+            return self
+
+        def fetchone(self):
+            return self.result[0] if self.result else None
+
+        def fetchall(self):
+            return self.result
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    monkeypatch.setattr("tender_backend.services.export_gate_service.RequirementRepository", _ReqRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.ChartAssetRepository", _ChartRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.get_blocking_issues", lambda conn, *, project_id: [])
+
+    state = build_export_gate_state(_Conn(), project_id=project_id)
+
+    assert state["gates"]["template_stale_artifacts_clear"] is False
+    assert state["gates"]["stale_template_artifact_count"] == 2
     assert state["can_export"] is False
 
 

@@ -164,6 +164,15 @@ export function ExportGateContent() {
             }
           />
           <GateIndicator
+            passed={gates.template_stale_artifacts_clear ?? true}
+            label="模板修改后未重新生成"
+            detail={
+              gates.template_stale_artifacts_clear ?? true
+                ? "正文和图表均已按当前模板生成"
+                : `${gates.stale_template_artifact_count ?? 0} 项正文或图表需按新模板重新生成`
+            }
+          />
+          <GateIndicator
             passed={gates.format_passed}
             label="格式校验"
             detail={

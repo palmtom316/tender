@@ -57,6 +57,8 @@ class ChartGenerationService:
         spec_json: dict[str, Any],
         outline_node_id: UUID | None = None,
         chapter_code: str | None = None,
+        template_instance_id: UUID | None = None,
+        template_revision_no: int | None = None,
     ) -> dict[str, Any]:
         if chart_type not in SUPPORTED_CHART_TYPES:
             raise ValueError(f"unsupported chart type: {chart_type}")
@@ -83,6 +85,9 @@ class ChartGenerationService:
                 placeholder_key=_placeholder_from_spec(payload),
                 mermaid_source=None,
                 status="needs_review",
+                template_instance_id=template_instance_id,
+                template_revision_no=template_revision_no,
+                is_stale_by_template=False,
                 metadata_json={
                     "validation": validation,
                     "source_kind": "default_spec" if is_default_spec else "json_spec",
@@ -106,6 +111,9 @@ class ChartGenerationService:
                 placeholder_key=_placeholder_from_spec(payload),
                 mermaid_source=None,
                 status="needs_review",
+                template_instance_id=template_instance_id,
+                template_revision_no=template_revision_no,
+                is_stale_by_template=False,
                 metadata_json={
                     "validation": validation,
                     "blind_bid_scan": {"issues": blind_bid_issues},
@@ -128,6 +136,9 @@ class ChartGenerationService:
                 placeholder_key=_placeholder_from_spec(payload),
                 mermaid_source=None,
                 status="needs_review",
+                template_instance_id=template_instance_id,
+                template_revision_no=template_revision_no,
+                is_stale_by_template=False,
                 metadata_json={
                     "validation": validation,
                     "provenance": {"issues": provenance_issues},
@@ -159,6 +170,9 @@ class ChartGenerationService:
             placeholder_key=_placeholder_from_spec(normalized),
             mermaid_source=rendered.mermaid_source,
             status=status,
+            template_instance_id=template_instance_id,
+            template_revision_no=template_revision_no,
+            is_stale_by_template=False,
             metadata_json={
                 "validation": validation,
                 "render_engine": rendered.engine,
@@ -344,7 +358,7 @@ def _generate_spec_with_ai(
         "task_type": "generate_chart_spec",
         "messages": [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False, default=str)},
         ],
         "max_tokens": 1600,
         "response_format": {"type": "json_object"},

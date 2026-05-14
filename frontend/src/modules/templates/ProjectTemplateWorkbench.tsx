@@ -5,6 +5,7 @@ import { useNavigation } from "../../lib/NavigationContext";
 import { ChapterTree } from "./ChapterTree";
 import { ChapterTemplateForm } from "./ChapterTemplateForm";
 import { TemplatePreviewPane } from "./TemplatePreviewPane";
+import { formatTemplateEditImpact, type TemplateEditImpactResponse } from "./templateEditPropagation";
 import { promotionProposalStatusLabel, templateInstanceCanConfirm, type ProjectTemplateBlock, type ProjectTemplateChapter, type ProjectTemplateInstance } from "./templateInstanceModel";
 
 export function ProjectTemplateWorkbench({ projectId }: { projectId: string }) {
@@ -13,6 +14,7 @@ export function ProjectTemplateWorkbench({ projectId }: { projectId: string }) {
   const [localChapters, setLocalChapters] = useState<ProjectTemplateChapter[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   const query = useQuery({ queryKey: ["project-template-instance", projectId], queryFn: () => fetchProjectTemplateInstance(projectId) });
   const instance = query.data as ProjectTemplateInstance | undefined;
@@ -25,7 +27,21 @@ export function ProjectTemplateWorkbench({ projectId }: { projectId: string }) {
     onError: () => { setLocalChapters(instance?.chapters ?? []); setError("保存失败，已恢复原顺序"); },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["project-template-instance", projectId] }),
   });
-  const updateBlock = useMutation({ mutationFn: ({ block, fields }: { block: ProjectTemplateBlock; fields: Partial<ProjectTemplateBlock> }) => updateProjectTemplateBlock(block.id, fields) });
+  const updateBlock = useMutation({
+    mutationFn: ({ block, fields }: { block: ProjectTemplateBlock; fields: Partial<ProjectTemplateBlock> }) => updateProjectTemplateBlock(block.id, fields),
+    onMutate: ({ block, fields }) => {
+      setSaveNotice(null);
+      setLocalChapters((current) => (current ?? chapters).map((chapter) => ({
+        ...chapter,
+        blocks: (chapter.blocks ?? []).map((candidate) => candidate.id === block.id ? { ...candidate, ...fields } : candidate),
+      })));
+    },
+    onSuccess: (result) => {
+      setSaveNotice(formatTemplateEditImpact(result as TemplateEditImpactResponse));
+      queryClient.invalidateQueries({ queryKey: ["project-template-instance", projectId] });
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "模板块保存失败"),
+  });
   const confirm = useMutation({
     mutationFn: () => confirmProjectTemplateInstance(instance!.id),
     onSuccess: () => nav.navigate("authoring", "editor", projectId),
@@ -73,6 +89,7 @@ export function ProjectTemplateWorkbench({ projectId }: { projectId: string }) {
       )}
       {!confirmState.canConfirm && <p className="text-error">{confirmState.reason}</p>}
       {error && <p className="text-error">{error}</p>}
+      {saveNotice && <p className="template-edit-impact" role="status">{saveNotice}</p>}
       <div className="project-template-workbench__grid">
         <ChapterTree chapters={orderedChapters} selectedId={selected?.id} onSelect={(chapter) => setSelectedId(chapter.id)} onReorder={handleReorder} />
         {selected && <ChapterTemplateForm chapter={selected} onSaveBlock={(block, fields) => updateBlock.mutate({ block, fields })} />}

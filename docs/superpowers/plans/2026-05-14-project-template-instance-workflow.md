@@ -99,6 +99,79 @@ Existing code already contains these foundations:
 - [ ] Review/compliance issues are classified by source and routed either to template adjustment or bid authoring.
 - [ ] Project template instance can be promoted back to global template as a versioned proposal after project completion.
 
+## Template Edit Propagation Rules
+
+Template editing must follow these rules:
+
+- [ ] Saving a template block changes the current project template instance.
+- [ ] Saving a template block refreshes the template preview immediately.
+- [ ] Saving a template block affects future generation and future DOCX rendering.
+- [ ] Saving a template block does not silently rewrite existing generated bid text, chart assets, or exported DOCX files.
+- [ ] Generated artifacts store which template instance version/revision created them.
+- [ ] When a newer relevant template revision exists, generated artifacts are marked stale.
+- [ ] Stale generated artifacts require explicit user action: regenerate chapter, regenerate chart, rerender table, or rerender DOCX.
+- [ ] Final export is blocked when stale generated artifacts remain.
+
+### Editable Template Block Types
+
+The template editor must support these business-facing block groups:
+
+- `fixed_text`
+  - Directly editable fixed chapter text.
+  - Save affects preview immediately and future DOCX rendering.
+
+- `table_definition`
+  - Editable table title, header rows, fixed rows, field bindings, repeating-header option, and table note text.
+  - Save affects preview immediately and future DOCX/table rendering.
+
+- `asset_placeholder`
+  - Editable company qualification/proof asset slot: label, placeholder key, asset type, required flag, matching rule, and help text.
+  - Save affects future material binding and future DOCX rendering.
+
+- `ai_prompt`
+  - Editable AI writing prompt for chapter content.
+  - Save affects future AI text generation and marks existing generated draft stale.
+
+- `chart_prompt`
+  - Editable AI chart generation prompt, chart type, Mermaid/source-code guidance, and placeholder key.
+  - Save affects future chart generation and marks existing chart assets stale.
+
+- `page_format`
+  - Editable page break, title level, section break, header/footer reference, margins, orientation, and page numbering rule.
+  - Save affects preview immediately and future DOCX rendering.
+
+Existing block compatibility:
+
+- Existing `page_break` and `header_footer` blocks should be normalized into the `page_format` panel in the frontend.
+- Existing chart metadata can initially be stored in `render_options_json` on `chart_prompt` blocks.
+- Existing `fixed_text`, `ai_prompt`, and `asset_placeholder` blocks remain valid.
+
+### Stale Impact Rules
+
+- `fixed_text`
+  - Stales: DOCX render/export artifacts for the same chapter.
+  - Does not stale: AI text draft unless fixed text is included in the AI prompt inputs for that chapter.
+
+- `table_definition`
+  - Stales: table render output, DOCX render/export artifacts for the same chapter.
+  - Does not stale: AI text draft by default.
+
+- `asset_placeholder`
+  - Stales: material binding status and DOCX render/export artifacts for the same chapter.
+  - Does not stale: AI text draft by default.
+
+- `ai_prompt`
+  - Stales: generated chapter text draft for the same chapter.
+  - Stales: DOCX render/export artifacts that include that draft.
+
+- `chart_prompt`
+  - Stales: chart assets for the same chapter and placeholder key.
+  - Stales: DOCX render/export artifacts that include that chart.
+
+- `page_format`
+  - Stales: DOCX render/export artifacts for the same chapter and following section boundary when a section break changes.
+  - Does not stale: generated text or chart content.
+
 ## Frontend Workflow Redesign
 
 The current Authoring module has four tabs:
@@ -221,11 +294,17 @@ Clicking the project card should navigate to the next incomplete workflow step w
   - Compare tender-required directory against current project template instance.
   - Produce add/remove/rename/reorder/split/merge/move suggestions, including source metadata (`tender_document`, `tender_addendum`, or `manual`).
 
+- `backend/tender_backend/services/template_edit_propagation_service.py`
+  - Computes which generated artifacts are affected by a template block edit.
+  - Marks drafts, charts, and export artifacts stale after relevant template edits.
+  - Clears stale markers after explicit regeneration/rerender.
+
 - `backend/tender_backend/api/project_template_instances.py`
   - API endpoints for reading, editing, confirming, previewing, reconciling, and proposing global template promotion.
 
 - `backend/tests/unit/test_project_template_instance_service.py`
 - `backend/tests/unit/test_template_directory_reconciliation_service.py`
+- `backend/tests/unit/test_template_edit_propagation_service.py`
 - `backend/tests/integration/test_project_template_instances_api.py`
 
 ### Backend Modify
@@ -241,15 +320,27 @@ Clicking the project card should navigate to the next incomplete workflow step w
 
 - `backend/tender_backend/api/bid_generation.py`
   - Generate bid content from confirmed project template instance instead of raw global template package when available.
+  - Regeneration endpoints must clear stale-template markers for regenerated artifacts.
 
 - `backend/tender_backend/services/bid_chapter_generation.py`
   - Consume chapter block model: fixed text, AI prompt block, variables, material placeholders, page controls, and conditional rules.
+  - Save template instance and revision metadata on generated chapter drafts.
+
+- `backend/tender_backend/db/repositories/chapter_draft_repo.py`
+  - Store and clear stale-template metadata for generated text drafts.
+
+- `backend/tender_backend/db/repositories/chart_asset_repo.py`
+  - Store and clear stale-template metadata for generated chart assets.
+
+- `backend/tender_backend/services/chart_service/*`
+  - Save template instance and revision metadata on generated chart assets.
 
 - `backend/tender_backend/services/template_service/docx_renderer.py`
   - Render project template instance blocks into DOCX-compatible structure and preview output.
 
 - `backend/tender_backend/workflows/export_bid.py`
   - Use confirmed project template instance for final package gates.
+  - Fail export gates when stale template-generated artifacts remain.
 
 ### Frontend Create
 
@@ -258,6 +349,12 @@ Clicking the project card should navigate to the next incomplete workflow step w
 
 - `frontend/src/modules/authoring/authoringWorkflow.ts`
   - Pure workflow-state helpers for current step, next action, blocked reasons, and tab routing.
+
+- `frontend/src/modules/templates/templateEditPropagation.ts`
+  - Pure helpers for impact labels, stale messages, and whether confirmation/export should be blocked.
+
+- `frontend/src/modules/templates/TemplateBlockPanels.tsx`
+  - Form panels for fixed text, table definition, asset placeholders, AI prompt, chart prompt, and page format.
 
 - `frontend/src/modules/templates/ProjectTemplateWorkbench.tsx`
   - Three-column workbench: chapter tree, form-based chapter template editor, read-only preview.
@@ -275,6 +372,7 @@ Clicking the project card should navigate to the next incomplete workflow step w
   - Frontend types, pure mapping helpers, and validation helpers.
 
 - `frontend/src/modules/authoring/authoringWorkflow.test.ts`
+- `frontend/src/modules/templates/templateEditPropagation.test.ts`
 - `frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx`
 - `frontend/src/modules/templates/templateInstanceModel.test.ts`
 
@@ -285,6 +383,7 @@ Clicking the project card should navigate to the next incomplete workflow step w
 
 - `frontend/src/lib/api.ts`
   - Add project template instance types and API functions.
+  - Add template revision and stale metadata to project template, draft, chart, preview, and export gate types.
 
 - `frontend/src/modules/authoring/AuthoringModule.tsx`
   - Add route/tab entry for template adjustment before bid authoring.
@@ -293,6 +392,11 @@ Clicking the project card should navigate to the next incomplete workflow step w
 - `frontend/src/modules/authoring/EditorContent.tsx`
   - Read confirmed project template instance status.
   - Block or warn generation if template instance has unresolved critical directory/template issues.
+  - Show stale-template badges for generated chapters/charts caused by template edits.
+  - Add explicit actions: `按新模板重新生成正文`, `按新模板重新生成图表`, `重新渲染本章`.
+
+- `frontend/src/modules/export/ExportGateContent.tsx`
+  - Show stale-template gate with direct link back to authoring/template or editor.
 
 - `frontend/src/modules/projects/ProjectsModule.tsx`
   - Surface project template instance status after project creation/template confirmation.
@@ -376,9 +480,12 @@ Status values:
 Block type values:
 
 - `fixed_text`
+- `table_definition`
 - `ai_prompt`
+- `chart_prompt`
 - `variable`
 - `asset_placeholder`
+- `page_format`
 - `page_break`
 - `header_footer`
 - `condition`
@@ -437,6 +544,41 @@ Response status values:
 - `snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb`
 - `created_by TEXT NULL`
 - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+
+Every block edit must record a revision. `change_type` values for template edit propagation:
+
+- `fixed_text_edit`
+- `table_definition_edit`
+- `asset_placeholder_edit`
+- `ai_prompt_edit`
+- `chart_prompt_edit`
+- `page_format_edit`
+
+The `snapshot_json` for these revisions must include:
+
+- `template_block_id`
+- `block_type`
+- `before`
+- `after`
+- `affected_artifact_types`
+
+### Generated artifact template revision metadata
+
+Add these columns to `chapter_draft`:
+
+- `template_instance_id UUID NULL REFERENCES project_template_instance(id) ON DELETE SET NULL`
+- `template_revision_no INT NULL`
+- `is_stale_by_template BOOLEAN NOT NULL DEFAULT FALSE`
+- `template_stale_reason TEXT NULL`
+- `stale_by_template_block_id UUID NULL REFERENCES project_template_block(id) ON DELETE SET NULL`
+
+Add these columns to `chart_asset`:
+
+- `template_instance_id UUID NULL REFERENCES project_template_instance(id) ON DELETE SET NULL`
+- `template_revision_no INT NULL`
+- `is_stale_by_template BOOLEAN NOT NULL DEFAULT FALSE`
+- `template_stale_reason TEXT NULL`
+- `stale_by_template_block_id UUID NULL REFERENCES project_template_block(id) ON DELETE SET NULL`
 
 ### `template_promotion_proposal`
 
@@ -514,6 +656,41 @@ Response status values:
 
 - `POST /api/project-template-instances/{instance_id}/promotion-proposals`
   - Creates a proposal to merge project template changes back to global template.
+
+- `PATCH /api/project-template-blocks/{block_id}`
+  - Updates the block.
+  - Records a `project_template_revision`.
+  - Runs stale-impact propagation.
+  - Returns updated block plus impact summary:
+
+```json
+{
+  "block": { "id": "block-id", "block_type": "ai_prompt" },
+  "revision_no": 12,
+  "impact": {
+    "stale_draft_count": 1,
+    "stale_chart_count": 0,
+    "stale_export_artifact_count": 1,
+    "message": "AI 提示词已更新，相关章节正文需重新生成。"
+  }
+}
+```
+
+- `GET /api/project-template-instances/{instance_id}/preview`
+  - Returns preview generated from latest saved template blocks.
+  - Includes `template_revision_no`.
+
+- `POST /api/bid-chapters/{chapter_id}/regenerate-from-template`
+  - Regenerates chapter text using the latest `ai_prompt`.
+  - Clears stale template markers for that chapter draft.
+
+- `POST /api/chart-assets/{asset_id}/regenerate-from-template`
+  - Regenerates chart using the latest `chart_prompt`.
+  - Clears stale template markers for that chart asset.
+
+- `POST /api/projects/{project_id}/render-from-template`
+  - Rerenders current DOCX preview/export staging artifacts using latest template blocks.
+  - Clears stale render/export markers when render succeeds.
 
 ## Implementation Tasks
 
@@ -853,7 +1030,181 @@ cd frontend && npx vitest run \
 - [ ] Rerun tests.
 - [ ] Commit: `git add backend/tender_backend/api/project_template_instances.py backend/tender_backend/services/project_template_instance_service.py backend/tender_backend/db/repositories/project_template_instance_repo.py frontend/src/modules/templates/ProjectTemplateWorkbench.tsx backend/tests/integration/test_project_template_instances_api.py frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx && git commit -m "Add project template promotion proposals"`
 
-### Task 10: End-To-End Verification
+### Task 10: Add Template Revision Metadata To Generated Artifacts
+
+**Files:**
+- Create: `backend/tender_backend/db/alembic/versions/0053_template_edit_propagation.py`
+- Modify: `backend/tender_backend/db/repositories/chapter_draft_repo.py`
+- Modify: `backend/tender_backend/db/repositories/chart_asset_repo.py`
+- Test: `backend/tests/unit/test_template_edit_propagation_service.py`
+
+- [ ] Write failing tests that a generated chapter draft can store `template_instance_id`, `template_revision_no`, and stale-template fields.
+- [ ] Write failing tests that a chart asset can store `template_instance_id`, `template_revision_no`, and stale-template fields.
+- [ ] Run:
+
+```bash
+cd backend && ../.venv/bin/pytest tests/unit/test_template_edit_propagation_service.py -q
+```
+
+- [ ] Expected initial result: FAIL because migration/repository fields do not exist.
+- [ ] Add migration columns listed in **Generated artifact template revision metadata**.
+- [ ] Update repository row dataclasses and mappers for chapter drafts and chart assets.
+- [ ] Add repository methods:
+  - `mark_stale_by_template(conn, *, project_id, chapter_id=None, template_block_id, reason)`
+  - `clear_template_stale(conn, *, artifact_id)`
+- [ ] Rerun the unit test and confirm PASS.
+- [ ] Commit: `git add backend/tender_backend/db/alembic/versions/0053_template_edit_propagation.py backend/tender_backend/db/repositories/chapter_draft_repo.py backend/tender_backend/db/repositories/chart_asset_repo.py backend/tests/unit/test_template_edit_propagation_service.py && git commit -m "Track template revision on generated artifacts"`
+
+### Task 11: Record Template Revisions And Propagate Stale Impact
+
+**Files:**
+- Create: `backend/tender_backend/services/template_edit_propagation_service.py`
+- Modify: `backend/tender_backend/api/project_template_instances.py`
+- Modify: `backend/tender_backend/db/repositories/project_template_instance_repo.py`
+- Test: `backend/tests/unit/test_template_edit_propagation_service.py`
+- Test: `backend/tests/integration/test_project_template_instances_api.py`
+
+- [ ] Write failing tests for stale impact rules:
+  - `ai_prompt` edit stales chapter draft.
+  - `chart_prompt` edit stales matching chart asset.
+  - `page_format` edit stales DOCX/export metadata but not AI text.
+  - `fixed_text` edit stales render/export metadata.
+- [ ] Run: `cd backend && ../.venv/bin/pytest tests/unit/test_template_edit_propagation_service.py tests/integration/test_project_template_instances_api.py -q`
+- [ ] Expected initial result: FAIL because propagation service and API impact response do not exist.
+- [ ] Update `ProjectTemplateInstanceRepository.record_revision` to return the inserted revision row or revision number.
+- [ ] Implement `TemplateEditPropagationService.classify_block_edit(block_type, before, after)`.
+- [ ] Implement `TemplateEditPropagationService.apply_stale_impact(conn, *, block, revision_no, actor)`.
+- [ ] Update `PATCH /api/project-template-blocks/{block_id}` to load old block, update block, record revision, propagate stale impact, and return impact summary.
+- [ ] Rerun tests and confirm PASS.
+- [ ] Commit: `git add backend/tender_backend/services/template_edit_propagation_service.py backend/tender_backend/api/project_template_instances.py backend/tender_backend/db/repositories/project_template_instance_repo.py backend/tests/unit/test_template_edit_propagation_service.py backend/tests/integration/test_project_template_instances_api.py && git commit -m "Propagate stale impact after template edits"`
+
+### Task 12: Save Generation Outputs With Template Revision
+
+**Files:**
+- Modify: `backend/tender_backend/services/bid_chapter_generation.py`
+- Modify: `backend/tender_backend/api/bid_generation.py`
+- Modify: `backend/tender_backend/services/chart_service/*`
+- Test: `backend/tests/unit/test_template_edit_propagation_service.py`
+- Test: `backend/tests/integration/test_project_template_instances_api.py`
+
+- [ ] Write failing tests that generated chapter text stores the current project template instance id and revision number.
+- [ ] Write failing tests that generated chart assets store the current project template instance id and revision number.
+- [ ] Run: `cd backend && ../.venv/bin/pytest tests/unit/test_template_edit_propagation_service.py tests/integration/test_project_template_instances_api.py -q`
+- [ ] Expected initial result: FAIL because generation does not persist template revision metadata.
+- [ ] Resolve current project template instance and latest revision before generating chapter text.
+- [ ] Save `template_instance_id` and `template_revision_no` on the generated draft.
+- [ ] Resolve current project template instance and latest revision before generating chart assets.
+- [ ] Save `template_instance_id` and `template_revision_no` on the generated chart asset.
+- [ ] Clear `is_stale_by_template` and stale reason after successful regeneration.
+- [ ] Rerun tests and confirm PASS.
+- [ ] Commit: `git add backend/tender_backend/services/bid_chapter_generation.py backend/tender_backend/api/bid_generation.py backend/tender_backend/services/chart_service backend/tests/unit/test_template_edit_propagation_service.py backend/tests/integration/test_project_template_instances_api.py && git commit -m "Stamp generated outputs with template revision"`
+
+### Task 13: Block Export When Template-Stale Artifacts Remain
+
+**Files:**
+- Modify: `backend/tender_backend/workflows/export_bid.py`
+- Modify: `frontend/src/modules/export/ExportGateContent.tsx`
+- Modify: `frontend/src/lib/api.ts`
+- Test: `frontend/src/modules/export/ExportGateContent.test.tsx`
+- Test: backend export gate tests if present
+
+- [ ] Write failing frontend test that export gate shows `模板修改后未重新生成` when stale-template artifacts remain.
+- [ ] Write failing backend test that export gate reports `stale_template_artifact_count > 0` when drafts/charts are stale by template.
+- [ ] Run:
+
+```bash
+cd frontend && npx vitest run src/modules/export/ExportGateContent.test.tsx
+cd backend && ../.venv/bin/pytest tests/integration -q -k export
+```
+
+- [ ] Expected initial result: frontend FAIL for missing gate; backend may fail or report no matching tests. If backend has no export-specific test file, add coverage to the nearest export gate integration test.
+- [ ] Update export gate response type in `frontend/src/lib/api.ts`.
+- [ ] Update `export_bid.py` to compute stale-template artifacts.
+- [ ] Render gate label and blocked state in `ExportGateContent.tsx`.
+- [ ] Add direct action label `返回模板调整` or `重新生成标书内容`.
+- [ ] Rerun tests and confirm PASS.
+- [ ] Commit: `git add backend/tender_backend/workflows/export_bid.py frontend/src/lib/api.ts frontend/src/modules/export/ExportGateContent.tsx frontend/src/modules/export/ExportGateContent.test.tsx backend/tests && git commit -m "Block export on template-stale artifacts"`
+
+### Task 14: Build Editable Template Block Panels
+
+**Files:**
+- Create: `frontend/src/modules/templates/templateEditPropagation.ts`
+- Create: `frontend/src/modules/templates/templateEditPropagation.test.ts`
+- Create: `frontend/src/modules/templates/TemplateBlockPanels.tsx`
+- Modify: `frontend/src/modules/templates/ChapterTemplateForm.tsx`
+- Modify: `frontend/src/modules/templates/ProjectTemplateWorkbench.tsx`
+- Modify: `frontend/src/lib/api.ts`
+- Test: `frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx`
+
+- [ ] Write helper tests for impact message mapping:
+  - `ai_prompt` -> "相关章节正文需重新生成"
+  - `chart_prompt` -> "相关图表需重新生成"
+  - `table_definition` -> "相关表格和 DOCX 需重新渲染"
+  - `asset_placeholder` -> "相关资料位和 DOCX 需重新渲染"
+  - `page_format` -> "相关页面需重新渲染"
+- [ ] Write React tests that each panel appears for its block type:
+  - fixed text textarea
+  - table title/header form
+  - asset placeholder form
+  - AI prompt textarea
+  - chart prompt/code textarea
+  - page format fields
+- [ ] Run: `cd frontend && npx vitest run src/modules/templates/templateEditPropagation.test.ts src/modules/templates/ProjectTemplateWorkbench.test.tsx`
+- [ ] Expected initial result: FAIL because helper and panels do not exist.
+- [ ] Implement `templateEditPropagation.ts`.
+- [ ] Implement `TemplateBlockPanels.tsx`.
+- [ ] Replace minimal fixed-text-only UI in `ChapterTemplateForm.tsx` with the six block panels.
+- [ ] Update `ProjectTemplateWorkbench.tsx` so successful block save invalidates `["project-template-instance", projectId]`, `["project-template-preview", instanceId]`, and relevant authoring queries for drafts/charts.
+- [ ] Show save impact banner from API response.
+- [ ] Rerun tests and confirm PASS.
+- [ ] Commit: `git add frontend/src/modules/templates/templateEditPropagation.ts frontend/src/modules/templates/templateEditPropagation.test.ts frontend/src/modules/templates/TemplateBlockPanels.tsx frontend/src/modules/templates/ChapterTemplateForm.tsx frontend/src/modules/templates/ProjectTemplateWorkbench.tsx frontend/src/lib/api.ts frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx && git commit -m "Add editable template block panels"`
+
+### Task 15: Refresh Template Preview From Latest Saved Blocks
+
+**Files:**
+- Modify: `backend/tender_backend/api/project_template_instances.py`
+- Modify: `backend/tender_backend/services/template_service/docx_renderer.py`
+- Modify: `frontend/src/modules/templates/TemplatePreviewPane.tsx`
+- Modify: `frontend/src/modules/templates/ProjectTemplateWorkbench.tsx`
+- Test: `frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx`
+- Test: `backend/tests/integration/test_project_template_instances_api.py`
+
+- [ ] Write failing backend test that preview reflects saved fixed text, table definition, asset placeholder, chart prompt marker, and page format.
+- [ ] Write failing frontend test that right preview updates after saving fixed text.
+- [ ] Run:
+
+```bash
+cd backend && ../.venv/bin/pytest tests/integration/test_project_template_instances_api.py -q
+cd frontend && npx vitest run src/modules/templates/ProjectTemplateWorkbench.test.tsx
+```
+
+- [ ] Expected initial result: FAIL because preview is currently structural and not tied to all block types.
+- [ ] Update preview endpoint to include `template_revision_no`, `pages`, and block render markers.
+- [ ] Update `TemplatePreviewPane.tsx` to render fixed text, table preview, asset placeholder chips, AI prompt marker, chart prompt/code marker, and page/header/footer markers.
+- [ ] Refresh preview after save without requiring full page reload.
+- [ ] Rerun tests and confirm PASS.
+- [ ] Commit: `git add backend/tender_backend/api/project_template_instances.py backend/tender_backend/services/template_service/docx_renderer.py frontend/src/modules/templates/TemplatePreviewPane.tsx frontend/src/modules/templates/ProjectTemplateWorkbench.tsx backend/tests/integration/test_project_template_instances_api.py frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx && git commit -m "Refresh template preview from saved blocks"`
+
+### Task 16: Surface Stale Template Warnings In Bid Authoring
+
+**Files:**
+- Modify: `frontend/src/modules/authoring/EditorContent.tsx`
+- Modify: `frontend/src/modules/authoring/EditorContent.test.tsx`
+- Modify: `frontend/src/lib/api.ts`
+
+- [ ] Write failing tests that stale drafts show `模板已更新，需重新生成正文`.
+- [ ] Write failing tests that stale chart assets show `模板已更新，需重新生成图表`.
+- [ ] Write failing tests that regenerate buttons call the correct API.
+- [ ] Run: `cd frontend && npx vitest run src/modules/authoring/EditorContent.test.tsx`
+- [ ] Expected initial result: FAIL because template-stale fields/actions are not surfaced.
+- [ ] Add stale-template fields to draft and chart asset frontend types.
+- [ ] Add stale banners next to affected chapter drafts and chart task cards.
+- [ ] Add explicit regeneration actions: `按新模板重新生成正文`, `按新模板重新生成图表`, `重新渲染本章`.
+- [ ] Invalidate authoring queries after regeneration succeeds.
+- [ ] Rerun tests and confirm PASS.
+- [ ] Commit: `git add frontend/src/lib/api.ts frontend/src/modules/authoring/EditorContent.tsx frontend/src/modules/authoring/EditorContent.test.tsx && git commit -m "Show template-stale warnings in authoring"`
+
+### Task 17: End-To-End Verification
 
 **Files:**
 - Modify as needed:
@@ -861,6 +1212,7 @@ cd frontend && npx vitest run \
   - `frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx`
   - `frontend/src/modules/projects/ProjectsModule.test.tsx`
   - `frontend/src/modules/authoring/EditorContent.test.tsx`
+  - `frontend/src/modules/export/ExportGateContent.test.tsx`
 
 - [ ] Run backend targeted suite:
 
@@ -868,6 +1220,7 @@ cd frontend && npx vitest run \
 cd backend && ../.venv/bin/pytest \
   tests/unit/test_project_template_instance_service.py \
   tests/unit/test_template_directory_reconciliation_service.py \
+  tests/unit/test_template_edit_propagation_service.py \
   tests/integration/test_project_template_instances_api.py \
   tests/integration/test_template_package_api.py \
   tests/integration/test_authz_routes.py \
@@ -881,9 +1234,11 @@ cd backend && ../.venv/bin/pytest \
 cd frontend && npx vitest run \
   src/modules/authoring/authoringWorkflow.test.ts \
   src/modules/templates/templateInstanceModel.test.ts \
+  src/modules/templates/templateEditPropagation.test.ts \
   src/modules/templates/ProjectTemplateWorkbench.test.tsx \
   src/modules/projects/ProjectsModule.test.tsx \
-  src/modules/authoring/EditorContent.test.tsx
+  src/modules/authoring/EditorContent.test.tsx \
+  src/modules/export/ExportGateContent.test.tsx
 ```
 
 - [ ] Expected: all selected tests PASS.
@@ -917,7 +1272,17 @@ git commit -m "Document project template instance workflow plan"
 - [ ] Tender directory differences are visible, actionable, and tracked.
 - [ ] Operators can freely reorder project template chapters by mouse drag-and-drop in the template adjustment page, including moving original Chapter 5 to the Chapter 7 position, with persisted order, renumbered display, and revision audit trail.
 - [ ] The template adjustment UI is form-based for tender engineers.
-- [ ] Header, footer, page break, fixed text, AI prompt, variables, material placeholders, seal/signature marks, and pricing attachment boundaries are explicit template blocks.
+- [ ] Header, footer, page break, page format, fixed text, table definition, AI prompt, chart prompt/code, variables, material placeholders, seal/signature marks, and pricing attachment boundaries are explicit template blocks.
+- [ ] Editing fixed text saves to the project template instance and refreshes preview.
+- [ ] Editing table definition saves to the project template instance and refreshes preview.
+- [ ] Editing asset placeholders saves to the project template instance and refreshes preview.
+- [ ] Editing AI prompts marks existing generated text stale.
+- [ ] Editing chart prompts/code marks existing chart assets stale.
+- [ ] Editing page format marks DOCX render/export artifacts stale.
+- [ ] Existing generated bid content is never silently overwritten by template saves.
+- [ ] Authoring shows stale-template warnings and explicit regeneration actions.
+- [ ] Export is blocked while stale-template artifacts remain.
+- [ ] Regeneration/rerender clears stale markers only for artifacts actually regenerated or rerendered.
 - [ ] 答疑/补遗/澄清 can trigger incremental reconciliation against the confirmed project template instance, and critical impacts cannot be silently skipped.
 - [ ] Every non-stale required tender requirement has a `project_requirement_response` row and a resolved status before generation/export.
 - [ ] Required seal/signature marks are visible in preview and appear in a pre-submission checklist.
@@ -935,6 +1300,9 @@ git commit -m "Document project template instance workflow plan"
 - [ ] Prevent workflow drift by keeping `upload -> parse -> requirements -> template -> editor` as the only primary forward path for new projects.
 - [ ] Prevent low-quality generation by blocking generation when critical template reconciliation issues, unanswered requirements, or pending required seal confirmations are unresolved.
 - [ ] Prevent template/content confusion by adding review issue source classification.
+- [ ] Prevent silent data loss by never overwriting generated content after template saves; force explicit regeneration/rerender.
+- [ ] If an edit affects only preview/rendering, do not force AI regeneration.
+- [ ] If an edit affects AI or chart prompts, do not silently rerun AI; require explicit user action.
 - [ ] Prevent form complexity from overwhelming tender engineers by collapsing AI prompt advanced controls by default.
 - [ ] Preserve auditability with revision snapshots for every template confirmation, manual drag-and-drop chapter reorder, clarification reconciliation, seal checklist confirmation, and reconciliation apply action.
 - [ ] Keep pricing/BOQ out of this plan except for explicit external attachment boundaries; do not half-build a formula engine inside template blocks.

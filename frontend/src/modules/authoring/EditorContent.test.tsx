@@ -245,6 +245,57 @@ describe("EditorContent chart workflow", () => {
     );
   });
 
+  it("shows template stale warnings for drafts and chart assets", async () => {
+    fetchProjectTemplateInstanceMock.mockResolvedValue({ id: "inst-1", project_id: "proj-1", display_name: "项目模板", status: "ready_for_authoring", unanswered_requirement_count: 0, pending_seal_checklist_count: 0, chapters: [] });
+    fetchDraftsMock.mockResolvedValue([
+      {
+        id: "draft-1",
+        chapter_code: "10.1",
+        content_md: "正文",
+        updated_at: "2026-05-14T00:00:00Z",
+        is_stale: true,
+        is_stale_by_template: true,
+        stale_reason: "项目模板修订 7 更新了本章 AI 提示词",
+      },
+    ]);
+    fetchBidOutlineMock.mockResolvedValue({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "技术标",
+      status: "confirmed",
+      chapters: [{ id: "chapter-1", chapter_code: "10.1", chapter_title: "质量保证措施", volume_type: "technical", sort_order: 1 }],
+    });
+    fetchTechnicalChapterContextMock.mockResolvedValue({
+      recommended_charts: ["quality_system"],
+      chart_assets: [{ id: "asset-1" }],
+    });
+    listChartAssetsMock.mockResolvedValue([
+      {
+        id: "asset-1",
+        project_id: "proj-1",
+        outline_node_id: null,
+        chart_type: "quality_system",
+        title: "质量管理体系图",
+        spec_json: {},
+        placeholder_key: "quality_system",
+        rendered_svg: null,
+        status: "stale_pending_regeneration",
+        is_stale_by_template: true,
+        metadata_json: {},
+        created_at: "2026-05-14T00:00:00Z",
+      },
+    ]);
+
+    render(withClient(<EditorContent />));
+
+    fireEvent.click((await screen.findAllByText("10.1", { selector: ".outline-code" }))[1]);
+
+    expect(await screen.findByText("模板已更新，需重新生成正文")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "按新模板重新生成正文" })).toBeInTheDocument();
+    expect(await screen.findByText("模板已更新，需重新生成图表")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "按新模板重新生成图表" })).toBeInTheDocument();
+  });
+
   it("saves target pages and passes them to technical generation", async () => {
     render(withClient(<EditorContent />));
 

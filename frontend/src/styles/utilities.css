@@ -4422,6 +4422,61 @@ button.authoring-workflow-status__step:hover { border-color: var(--color-primary
   min-height: 120px;
   margin: var(--space-2) 0;
 }
+.project-template-workbench__block {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+}
+.project-template-workbench__block:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.project-template-workbench__block-header,
+.project-template-workbench__preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.project-template-workbench__block-header span,
+.project-template-workbench__preview-head span {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+.project-template-workbench__fields {
+  display: grid;
+  gap: var(--space-3);
+}
+.project-template-workbench__fields--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.project-template-workbench__fields-full {
+  grid-column: 1 / -1;
+}
+.project-template-workbench__check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.project-template-workbench__docx-page {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 620px;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--color-surface) 94%, var(--color-bg));
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+.template-edit-impact {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  color: var(--color-text);
+  padding: var(--space-2) var(--space-3);
+}
 .project-template-workbench__mini-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

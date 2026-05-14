@@ -30,6 +30,9 @@ docs/samples/**/*.docx
 tmp/
 backend/data/
 backend/rerun_missing_files.py
+outputs/
+companybase/backups/*
+!companybase/backups/.gitkeep
 
 # Local tender test and parsing bundles
 .codex

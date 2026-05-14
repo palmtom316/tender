@@ -778,7 +778,12 @@ export interface Draft {
   content_md: string;
   updated_at: string;
   is_stale?: boolean;
+  is_stale_by_template?: boolean;
   stale_reason?: string | null;
+  template_instance_id?: string | null;
+  template_revision_no?: number | null;
+  stale_by_template_revision_no?: number | null;
+  stale_by_template_block_id?: string | null;
 }
 
 export function fetchDrafts(
@@ -877,6 +882,11 @@ export interface ChartAsset {
   mermaid_source?: string | null;
   status: string;
   version?: number;
+  template_instance_id?: string | null;
+  template_revision_no?: number | null;
+  is_stale_by_template?: boolean;
+  stale_by_template_revision_no?: number | null;
+  stale_by_template_block_id?: string | null;
   metadata_json?: Record<string, unknown>;
   created_at: string;
   updated_at?: string;
@@ -1094,6 +1104,8 @@ export interface ExportGates {
     failed_required_template_items?: string[];
     stale_artifacts_clear: boolean;
     stale_artifact_count: number;
+    template_stale_artifacts_clear?: boolean;
+    stale_template_artifact_count?: number;
     format_passed: boolean;
     format_status: "passed" | "failed" | "warning_not_checked";
     format_message?: string;
@@ -2825,6 +2837,21 @@ export interface ProjectTemplateInstanceApi {
   pending_seal_checklist_count?: number;
 }
 
+export interface ProjectTemplateEditImpactApi {
+  stale_drafts: number;
+  stale_charts: number;
+  stale_docx: number;
+  stale_draft_count: number;
+  stale_chart_count: number;
+  stale_export_artifact_count: number;
+}
+
+export interface ProjectTemplateBlockUpdateApi {
+  block: Record<string, unknown>;
+  revision_no: number;
+  impact: ProjectTemplateEditImpactApi;
+}
+
 export function fetchProjectTemplateInstance(projectId: string, options?: { signal?: AbortSignal }): Promise<ProjectTemplateInstanceApi> {
   return request<ProjectTemplateInstanceApi>(`/projects/${projectId}/template-instance`, { signal: options?.signal });
 }
@@ -2837,8 +2864,8 @@ export function reorderProjectTemplateChapters(instanceId: string, data: { order
   });
 }
 
-export function updateProjectTemplateBlock(blockId: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
-  return request<Record<string, unknown>>(`/project-template-blocks/${blockId}`, {
+export function updateProjectTemplateBlock(blockId: string, data: Record<string, unknown>): Promise<ProjectTemplateBlockUpdateApi | Record<string, unknown>> {
+  return request<ProjectTemplateBlockUpdateApi | Record<string, unknown>>(`/project-template-blocks/${blockId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),

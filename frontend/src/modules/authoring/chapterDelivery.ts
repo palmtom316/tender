@@ -23,6 +23,7 @@ export interface ChartTaskCard {
   status: ChartTaskStatus;
   assetId: string | null;
   renderedSvg: string | null;
+  isStaleByTemplate: boolean;
 }
 
 const CHART_LABELS: Record<string, string> = {
@@ -193,6 +194,7 @@ export function buildChartTaskCards(recommendedChartKeys: string[], assets: Char
       status: asset?.status ?? "not_generated",
       assetId: asset?.id ?? null,
       renderedSvg: asset?.rendered_svg ?? null,
+      isStaleByTemplate: Boolean(asset?.is_stale_by_template),
     };
   });
 }

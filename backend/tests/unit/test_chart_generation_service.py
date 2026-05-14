@@ -1,11 +1,14 @@
+import json
 from uuid import uuid4
 
 from tender_backend.services.chart_generation_service import (
     ChartGenerationService,
     _chart_spec_system_prompt,
+    _generate_spec_with_ai,
     _prepare_payload,
     default_chart_spec,
 )
+from tender_backend.db.repositories.chart_asset_repo import ChartAssetRepository
 from tender_backend.services.chart_service.redactor import redact_context_for_chart, scan_blind_bid_keywords
 
 
@@ -128,6 +131,116 @@ def test_blind_bid_blacklist_metadata_is_not_scanned_as_spec_content() -> None:
     assert issues == []
 
 
+def test_generate_spec_with_ai_serializes_uuid_context(monkeypatch) -> None:
+    captured = {}
+
+    class _Settings:
+        ai_gateway_url = "http://ai-gateway:8100"
+        chart_ai_gateway_timeout_seconds = 1.0
+        ai_gateway_shared_secret = ""
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"content":"{\\"nodes\\":[]}"}'
+
+    def _urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr("tender_backend.services.chart_generation_service.get_settings", lambda: _Settings())
+    monkeypatch.setattr("tender_backend.services.chart_generation_service.urllib.request.urlopen", _urlopen)
+
+    result = _generate_spec_with_ai(
+        chart_type="risk_matrix",
+        title="风险分级管控矩阵",
+        placeholder_key="risk_matrix",
+        context={"chapter": {"id": uuid4(), "chapter_code": "8"}},
+    )
+
+    user_message = captured["payload"]["messages"][1]["content"]
+    assert result == {"nodes": []}
+    assert '"id": "' in user_message
+    assert captured["timeout"] == 1.0
+
+
+def test_chart_asset_repository_upserts_by_placeholder() -> None:
+    queries = []
+    project_id = uuid4()
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            queries.append((query, params))
+            self.params = params
+            return self
+
+        def fetchone(self):
+            return {
+                "id": uuid4(),
+                "project_id": project_id,
+                "outline_node_id": None,
+                "chart_type": "schedule_gantt",
+                "title": "施工进度计划图",
+                "spec_json": self.params[5].obj,
+                "rendered_svg": "<svg/>",
+                "rendered_path": None,
+                "placeholder_key": self.params[7],
+                "mermaid_source": self.params[8],
+                "rendered_png_path": self.params[9],
+                "status": self.params[10],
+                "version": 2,
+                "template_instance_id": None,
+                "template_revision_no": None,
+                "is_stale_by_template": False,
+                "stale_by_template_revision_no": None,
+                "stale_by_template_block_id": None,
+                "metadata_json": self.params[14].obj,
+                "created_at": _Time(),
+                "updated_at": _Time(),
+            }
+
+    class _Time:
+        def isoformat(self):
+            return "2026-05-14T00:00:00"
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    result = ChartAssetRepository().create(
+        _Conn(),
+        project_id=project_id,
+        chart_type="schedule_gantt",
+        title="施工进度计划图",
+        spec_json={"placeholder_key": "schedule_gantt", "source_refs": [{"constraint_id": uuid4()}]},
+        rendered_svg="<svg/>",
+        rendered_png_path="/tmp/schedule.png",
+        placeholder_key="schedule_gantt",
+        mermaid_source="gantt",
+        status="draft",
+        metadata_json={"source_context": {"constraint_id": uuid4()}},
+    )
+
+    assert "ON CONFLICT (project_id, placeholder_key)" in queries[0][0]
+    assert result.placeholder_key == "schedule_gantt"
+    assert isinstance(queries[0][1][5].obj["source_refs"][0]["constraint_id"], str)
+
+
 def test_create_or_update_marks_default_specs_as_needs_review() -> None:
     rows = []
 
@@ -172,6 +285,59 @@ def test_create_or_update_marks_default_specs_as_needs_review() -> None:
 
     assert result["status"] == "needs_review"
     assert rows[0]["metadata_json"]["source_kind"] == "default_spec"
+
+
+def test_create_or_update_stamps_template_revision_metadata() -> None:
+    rows = []
+    template_instance_id = uuid4()
+
+    class _Repo:
+        def create(self, _conn, **kwargs):
+            rows.append(kwargs)
+
+            class _Row:
+                id = uuid4()
+                project_id = kwargs["project_id"]
+                outline_node_id = kwargs.get("outline_node_id")
+                chart_type = kwargs["chart_type"]
+                title = kwargs["title"]
+                spec_json = kwargs["spec_json"]
+                rendered_svg = kwargs["rendered_svg"]
+                rendered_path = None
+                placeholder_key = kwargs["placeholder_key"]
+                mermaid_source = kwargs["mermaid_source"]
+                rendered_png_path = kwargs["rendered_png_path"]
+                status = kwargs["status"]
+                version = 1
+                metadata_json = kwargs["metadata_json"]
+                template_instance_id = kwargs["template_instance_id"]
+                template_revision_no = kwargs["template_revision_no"]
+                is_stale_by_template = kwargs["is_stale_by_template"]
+
+                class _Time:
+                    def isoformat(self):
+                        return "2026-05-11T00:00:00"
+
+                created_at = _Time()
+                updated_at = _Time()
+
+            return _Row()
+
+    service = ChartGenerationService(repo=_Repo())
+    result = service.create_or_update(
+        object(),
+        project_id=uuid4(),
+        chart_type="indicator_table",
+        title="指标台账",
+        spec_json={"placeholder_key": "indicator_table", "columns": ["指标"], "rows": [["质量"]]},
+        template_instance_id=template_instance_id,
+        template_revision_no=12,
+    )
+
+    assert rows[0]["template_instance_id"] == template_instance_id
+    assert rows[0]["template_revision_no"] == 12
+    assert rows[0]["is_stale_by_template"] is False
+    assert result["template_revision_no"] == 12
 
 
 def test_default_schedule_spec_does_not_invent_dates() -> None:

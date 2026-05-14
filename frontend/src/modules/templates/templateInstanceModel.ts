@@ -54,10 +54,13 @@ export function groupBlocksByFormSection(blocks: ProjectTemplateBlock[]) {
   return {
     fixedText: sorted.filter((block) => block.block_type === "fixed_text"),
     aiPrompts: sorted.filter((block) => block.block_type === "ai_prompt"),
+    tableDefinitions: sorted.filter((block) => block.block_type === "table_definition"),
+    chartPrompts: sorted.filter((block) => block.block_type === "chart_prompt"),
     variables: sorted.filter((block) => block.block_type === "variable"),
     assetPlaceholders: sorted.filter((block) => block.block_type === "asset_placeholder"),
     pageBreaks: sorted.filter((block) => block.block_type === "page_break"),
     headerFooters: sorted.filter((block) => block.block_type === "header_footer"),
+    pageFormats: sorted.filter((block) => block.block_type === "page_format" || block.block_type === "page_break" || block.block_type === "header_footer"),
     sealMarks: sorted.filter((block) => block.block_type === "seal_mark"),
     pricingAttachments: sorted.filter((block) => block.block_type === "pricing_block" || block.block_type === "excel_attachment"),
     requirementResponses: sorted.filter((block) => block.block_type === "requirement_response"),
