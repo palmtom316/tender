@@ -2529,7 +2529,7 @@
 /* Template field panel */
 .template-field-shell {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
 }
@@ -3067,12 +3067,18 @@
 .template-list__item {
   width: 100%;
   text-align: left;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3);
   border-radius: var(--radius-md);
   border: 1px solid transparent;
   background: var(--color-panel-translucent);
   color: var(--color-text);
+  cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+
+.template-list__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .template-list__item:hover {
@@ -3112,17 +3118,48 @@
   margin-bottom: 6px;
 }
 
+.template-list__item-shell {
+  display: grid;
+  grid-template-columns: minmax(44px, max-content) minmax(0, 1fr) max-content;
+  column-gap: var(--space-3);
+  align-items: start;
+  min-width: 0;
+}
+
 .template-list__code {
   color: var(--color-primary-active);
   font-weight: 700;
   font-size: var(--text-xs);
 }
 
+.template-list__code-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  max-width: 72px;
+  min-height: 24px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-subtle-translucent);
+  border: 1px solid var(--color-primary-hairline);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.template-list__content-cell {
+  min-width: 0;
+}
+
 .template-list__title {
   display: block;
   font-size: var(--text-sm);
   font-weight: 600;
-  line-height: 1.55;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .template-list__meta {
@@ -3130,6 +3167,19 @@
   margin-top: 4px;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.template-list__status {
+  display: inline-flex;
+  justify-content: flex-end;
+  max-width: 92px;
+  line-height: 1;
+}
+
+.template-list__status .clay-badge {
+  white-space: nowrap;
 }
 
 .template-inline-actions {

@@ -16,11 +16,46 @@
 - 模板维护界面必须表单化，不做自由源码式模板编辑器。
 - 模板调整区只调整“项目模板实例”，默认不修改全局基础模板。
 - 招标文件解析出的目录要求与原模板目录不一致时，在模板调整区做差异融合和人工确认。
+- 答疑、补遗、澄清到达后，不新建一套流程；复用现有 `tender_clarification` / `ClarificationMergeService`，触发项目模板实例的增量差异融合，受影响项必须重新确认。
+- 盖章、签字、骑缝章不是普通文本提示，必须是可预览、可审查、可提交前勾选的结构化模板块。
+- 条款响应/偏离不是目录对齐的副产品，必须逐条绑定 `project_requirement` 与模板章节/块，未响应条款阻断生成/导出。
+- 格式规则本期先固化为 `project_template_instance.metadata_json.format_profile` 和 `seal_units`，渲染深度可分阶段实现，但数据边界现在确定。
 - 标书编写区按确认后的项目模板实例生成投标文件。
 - 标书生成质量或审查不过时，先判断问题来源：
   - 模板结构、提示词、占位符、素材位、分页、页眉页脚问题：回到模板调整区修项目模板实例。
   - 项目资料缺失、AI正文事实错误、素材错配问题：在标书编写区修生成内容或项目资料。
 - 项目结束后，项目模板实例中的有效改动可以“提议合并”回全局模板，形成新版模板。
+
+## Review Verification Notes
+
+对 `2026-05-14-project-template-instance-workflow-bidding-engineer-review.md` 的核实结果：
+
+- P0-1 答疑/补遗：代码库已有 `tender_clarification`、`ClarificationMergeService`、`RequirementsContent` 的澄清/补遗入口，并会把受影响 requirement/outline/chapter/draft 标记 stale。原计划缺口不是“没有答疑模块”，而是“答疑影响未进入项目模板实例 reconciliation”。本计划补增量 reconciliation，不重复新增 `tender_document.document_type`。
+- P0-2 盖章签字：代码库已有签章类 requirement 识别和提交清单雏形，但模板块只覆盖 `fixed_text/page_break/header_footer`，无法在模板预览和提交前形成硬确认。本计划新增 `seal_mark` 块和盖章确认清单。
+- P0-3 格式规则：原计划只把 `formatting_rule` 当 review source，没有明确格式配置落点。本计划在 `metadata_json` 固化 `format_profile` 与 `seal_units`；复杂 DOCX 样式渲染不扩成独立大模块。
+- P0-4 条款级响应：代码库已有 `bid_chapter_requirement`、`compliance_matrix` 和偏差表 UI，但没有“每条 requirement 至少一个响应块”的硬约束。本计划新增 `project_requirement_response`，作为模板实例到生成内容之间的响应覆盖账本。
+- P1-1 资质/业绩/人员：已有 master-data 与人员/设备选择基础，本计划只增强 `asset_placeholder.render_options_json.asset_filter` 与过期告警边界，不在本计划重做资料库。
+- P1-2 报价/BOQ：已有 `external_bid_attachment` 和 pricing volume 边界。本计划不做结构化报价引擎，只声明 `pricing_block/excel_attachment` 为外部报价挂载边界。
+- P1-3 多人协作锁：当前项目模板章节尚不存在，必须在新表中预留乐观锁/短锁字段，避免上线后多人编辑互相覆盖。
+- P1-4 截止时间：`project.submission_deadline` 已存在。本计划把它和 `locked_for_generation`、导出 gate 联动，不新增重复 `bid_deadline` 字段。
+
+## Scope Decisions From Review
+
+### Must enter this plan
+
+- 答疑/补遗触发的项目模板实例增量 reconciliation。
+- `seal_mark` 模板块、预览标记、提交前盖章/签字硬确认。
+- `format_profile`、`seal_units` 数据边界。
+- `project_requirement_response` 条款级响应覆盖账本。
+- 三级目录/跨层移动 reconciliation 测试、200+ 章节生成性能基线、三类新增 issue source。
+- 章节短锁和 `lock_version`，因为项目模板实例表是本计划新建，预留成本最低。
+- 截止时间联动最终锁定，因为字段已存在，属于流程闭环。
+
+### Explicitly defer
+
+- 独立资质/业绩/人员证书库重构：沿用现有 master-data，本计划只做模板占位符筛选和过期提示接口。
+- 结构化报价/BOQ 公式引擎：本计划只支持报价附件挂载边界，后续单独计划。
+- 多方案变体、历史标书反向沉淀、多级会签流：不进入当前 MVP，避免把模板实例工作流扩成全量投标平台重构。
 
 ## Existing Context
 
@@ -58,7 +93,7 @@ Existing code already contains these foundations:
 - [ ] System creates a project template instance from the selected global package.
 - [ ] Tender files are parsed into requirements, directory requirements, format rules, material requirements, and review constraints.
 - [ ] Template adjustment workbench compares parsed tender directory requirements against the project template instance.
-- [ ] Tender engineer adjusts chapter order, chapter inclusion, AI prompts, fixed text, variables, material placeholders, page breaks, header/footer references, and conditional rules through forms.
+- [ ] Tender engineer adjusts chapter order by mouse drag-and-drop in the project template chapter tree, e.g. moving original Chapter 5 after Chapter 7, and adjusts chapter inclusion, AI prompts, fixed text, variables, material placeholders, page breaks, header/footer references, and conditional rules through forms.
 - [ ] User confirms the project template instance.
 - [ ] Bid authoring workspace generates bid content from the confirmed project template instance.
 - [ ] Review/compliance issues are classified by source and routed either to template adjustment or bid authoring.
@@ -120,6 +155,9 @@ The `template` tab is a three-column form-based workbench:
   - Shows tender-directory diff badges.
   - Shows unresolved issue count per chapter.
   - Supports selecting a chapter.
+  - Supports mouse drag-and-drop reorder within the same parent, e.g. moving original Chapter 5 to the Chapter 7 position.
+  - Supports drag-and-drop move across hierarchy levels only when the target parent is valid for the volume/chapter type.
+  - After drop, renumbers visible chapter codes from persisted tree order and marks tender-directory order diff as manually overridden.
 
 - Center: selected chapter template form.
   - Fixed text section.
@@ -128,20 +166,23 @@ The `template` tab is a three-column form-based workbench:
   - Material/asset placeholders section.
   - Page break section.
   - Header/footer section.
+  - Seal/signature mark section.
+  - Requirement response coverage section.
+  - Format profile section.
   - Conditional display section.
   - Chapter actions: save, disable, duplicate, mark resolved.
 
 - Right: read-only template preview.
   - Uses sample project data.
   - Shows fixed text and placeholders.
-  - Makes page break, header, footer, and unresolved placeholder markers visible.
+  - Makes page break, header, footer, seal/signature, requirement-response, and unresolved placeholder markers visible.
   - Shows preview limitations explicitly through status labels, not long instructional copy.
 
 ### Bid Authoring Page Adjustment
 
 The current `EditorContent` should stop behaving as if it owns template structure. It should consume the confirmed project template instance:
 
-- Show template instance name, version, confirmation time, and unresolved issue count.
+- Show template instance name, version, confirmation time, unresolved issue count, unanswered requirement count, and pending seal checklist count.
 - Generate chapters from the confirmed template instance.
 - For business/qualification chapters, keep material binding and composition in the authoring context.
 - For technical chapters, keep AI writing and chart tasks in the authoring context.
@@ -178,7 +219,7 @@ Clicking the project card should navigate to the next incomplete workflow step w
 
 - `backend/tender_backend/services/template_directory_reconciliation_service.py`
   - Compare tender-required directory against current project template instance.
-  - Produce add/remove/rename/reorder/split/merge suggestions.
+  - Produce add/remove/rename/reorder/split/merge/move suggestions, including source metadata (`tender_document`, `tender_addendum`, or `manual`).
 
 - `backend/tender_backend/api/project_template_instances.py`
   - API endpoints for reading, editing, confirming, previewing, reconciling, and proposing global template promotion.
@@ -274,6 +315,10 @@ Clicking the project card should navigate to the next incomplete workflow step w
 - `confirmed_at TIMESTAMPTZ NULL`
 - `confirmed_by TEXT NULL`
 - `metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb`
+  - `format_profile`: font family/size, paragraph spacing, line spacing, margins, heading levels, page numbering rules.
+  - `seal_units`: sealed/printed volumes, binding method, separate-envelope rules, copy-count rules.
+  - `standard_variables`: project-level variable dictionary extracted from tender summary, e.g. `project.name`, `project.tender_no`, `project.tenderer`, `project.bidder`, `project.legal_representative`, `project.manager`, `project.duration`, `project.price`.
+  - `clarification_reconciliation`: latest applied clarification id/round and unresolved impact counts.
 - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 - `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 
@@ -300,6 +345,9 @@ Status values:
 - `chapter_status TEXT NOT NULL DEFAULT 'draft'`
 - `tender_requirement_status TEXT NOT NULL DEFAULT 'not_checked'`
 - `metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb`
+- `lock_owner TEXT NULL`
+- `locked_until TIMESTAMPTZ NULL`
+- `lock_version INT NOT NULL DEFAULT 1`
 - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 - `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 
@@ -319,6 +367,9 @@ Status values:
 - `render_options_json JSONB NOT NULL DEFAULT '{}'::jsonb`
 - `condition_json JSONB NOT NULL DEFAULT '{}'::jsonb`
 - `metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb`
+  - for `seal_mark`: `seal_subtype`, `required_position`, `applies_to_pages`, `confirmation_required`.
+  - for `asset_placeholder`: `asset_filter`, `valid_until_field`, `expiry_warning_days`.
+  - for `pricing_block` / `excel_attachment`: `volume_type`, `attachment_type`, `required_sheet_names`.
 - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 - `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 
@@ -331,6 +382,49 @@ Block type values:
 - `page_break`
 - `header_footer`
 - `condition`
+- `seal_mark`
+- `pricing_block`
+- `excel_attachment`
+
+### `project_requirement_response`
+
+- `id UUID PRIMARY KEY`
+- `project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE`
+- `template_instance_id UUID NOT NULL REFERENCES project_template_instance(id) ON DELETE CASCADE`
+- `requirement_id UUID NOT NULL REFERENCES project_requirement(id) ON DELETE CASCADE`
+- `template_chapter_id UUID NULL REFERENCES project_template_chapter(id) ON DELETE SET NULL`
+- `template_block_id UUID NULL REFERENCES project_template_block(id) ON DELETE SET NULL`
+- `response_status TEXT NOT NULL DEFAULT 'unanswered'`
+- `response_text TEXT NOT NULL DEFAULT ''`
+- `deviation_note TEXT NOT NULL DEFAULT ''`
+- `source_type TEXT NOT NULL DEFAULT 'tender_requirement'`
+- `source_clarification_id UUID NULL REFERENCES tender_clarification(id) ON DELETE SET NULL`
+- `metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb`
+- `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- `UNIQUE (template_instance_id, requirement_id)`
+
+Response status values:
+
+- `unanswered`
+- `full_response`
+- `partial_response`
+- `deviation`
+- `not_applicable`
+
+### `project_template_seal_confirmation`
+
+- `id UUID PRIMARY KEY`
+- `project_id UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE`
+- `template_instance_id UUID NOT NULL REFERENCES project_template_instance(id) ON DELETE CASCADE`
+- `seal_block_id UUID NOT NULL REFERENCES project_template_block(id) ON DELETE CASCADE`
+- `confirmation_status TEXT NOT NULL DEFAULT 'pending'`
+- `confirmed_by TEXT NULL`
+- `confirmed_at TIMESTAMPTZ NULL`
+- `note TEXT NOT NULL DEFAULT ''`
+- `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- `UNIQUE (template_instance_id, seal_block_id)`
 
 ### `project_template_revision`
 
@@ -371,6 +465,12 @@ Block type values:
 - `PATCH /api/project-template-chapters/{chapter_id}`
   - Updates chapter title, code, order, enabled state, and status.
 
+- `POST /api/project-template-instances/{instance_id}/chapters/reorder`
+  - Persists drag-and-drop chapter tree order.
+  - Request body: `ordered_tree` with `{chapter_id, parent_id, sort_order}` rows for the complete affected sibling set or subtree.
+  - Records a `manual_reorder` revision with before/after chapter paths.
+  - Rejects moves that put a chapter under itself/descendant, cross incompatible volume boundaries, or conflict with another user's active chapter lock.
+
 - `POST /api/project-template-chapters/{chapter_id}/blocks`
   - Adds a structured block to a chapter.
 
@@ -382,9 +482,29 @@ Block type values:
 
 - `POST /api/projects/{project_id}/template-instance/reconcile-directory`
   - Compares tender parsed directory requirements with the current project template instance.
+  - Accepts optional `base_revision_no` and `clarification_id`; when present, performs incremental comparison against the last confirmed snapshot and marks clarification/addendum impacts as non-skippable until handled.
 
 - `POST /api/projects/{project_id}/template-instance/apply-reconciliation`
   - Applies selected reconciliation suggestions.
+  - Rejects skipping suggestions with `source_type === "tender_addendum"` and `severity === "critical"` unless an explicit `not_applicable` reason is supplied.
+
+- `GET /api/project-template-instances/{instance_id}/requirement-responses`
+  - Returns per-requirement response coverage, mapped chapter/block, response status, and unresolved count.
+
+- `PATCH /api/project-requirement-responses/{response_id}`
+  - Updates response status, response text, deviation note, and mapped template block.
+
+- `GET /api/project-template-instances/{instance_id}/seal-checklist`
+  - Returns all required `seal_mark` blocks as a submission checklist.
+
+- `POST /api/project-template-instances/{instance_id}/seal-checklist/{seal_block_id}/confirm`
+  - Confirms one required seal/signature item before final generation/export.
+
+- `POST /api/project-template-chapters/{chapter_id}/lock`
+  - Acquires or refreshes a short edit lock for a chapter.
+
+- `DELETE /api/project-template-chapters/{chapter_id}/lock`
+  - Releases the chapter lock held by the current actor.
 
 - `POST /api/project-template-instances/{instance_id}/confirm`
   - Marks template instance ready for bid authoring if no critical unresolved issues remain.
@@ -407,18 +527,25 @@ Block type values:
 - [ ] Write repository tests for creating a project template instance with chapters and blocks cloned from a package.
 - [ ] Run: `cd backend && ../.venv/bin/pytest tests/unit/test_project_template_instance_service.py -q`
 - [ ] Expected initial result: FAIL because repository/service files do not exist.
-- [ ] Add Alembic migration with the four tables listed in **Data Model**.
-- [ ] Implement dataclasses for instance, chapter, block, revision, and promotion proposal.
+- [ ] Add Alembic migration with all tables listed in **Data Model**: project template instance, chapter, block, requirement response, seal confirmation, revision, and promotion proposal.
+- [ ] Implement dataclasses for instance, chapter, block, requirement response, seal confirmation, revision, and promotion proposal.
 - [ ] Implement repository methods:
   - `create_instance(conn, project_id, base_template_package_id, category_code, display_name)`
   - `get_current_for_project(conn, project_id)`
   - `list_chapters(conn, instance_id)`
   - `list_blocks(conn, chapter_id)`
   - `replace_chapter_order(conn, instance_id, ordered_chapter_ids)`
+  - `move_chapter(conn, chapter_id, new_parent_id, new_sort_order, actor)`
   - `update_chapter(conn, chapter_id, fields)`
   - `create_block(conn, chapter_id, fields)`
   - `update_block(conn, block_id, fields)`
   - `delete_block(conn, block_id)`
+  - `list_requirement_responses(conn, instance_id)`
+  - `upsert_requirement_response(conn, instance_id, requirement_id, template_chapter_id, template_block_id, fields)`
+  - `list_seal_checklist(conn, instance_id)`
+  - `confirm_seal_item(conn, instance_id, seal_block_id, actor, note)`
+  - `try_lock_chapter(conn, chapter_id, actor, ttl_seconds)`
+  - `release_chapter_lock(conn, chapter_id, actor)`
   - `record_revision(conn, instance_id, change_type, change_summary, snapshot_json, created_by)`
 - [ ] Rerun repository tests and confirm PASS.
 - [ ] Commit: `git add backend/tender_backend/db/alembic/versions/0051_project_template_instances.py backend/tender_backend/db/repositories/project_template_instance_repo.py backend/tests/unit/test_project_template_instance_service.py && git commit -m "Add project template instance persistence"`
@@ -443,6 +570,10 @@ Block type values:
   - `ai_prompt` only when source item or category indicates AI-written content.
   - `page_break` at chapter boundaries.
   - `header_footer` reference inherited from package metadata.
+  - `seal_mark` blocks when source requirements or template text contain `签章` / `盖章` / `签字` / `骑缝章` / `法定代表人`.
+  - `excel_attachment` placeholder for pricing volumes so the template workflow has an explicit boundary to the external pricing module.
+- [ ] Initialize `project_requirement_response` rows for confirmed non-stale `project_requirement` rows; default status is `unanswered` until a chapter/block mapping exists.
+- [ ] Initialize `metadata_json.format_profile`, `metadata_json.seal_units`, and `metadata_json.standard_variables` from tender summary/project fields when available.
 - [ ] Update project template selection confirmation path so it creates the project template instance after `selected_template_package_id` is set.
 - [ ] Rerun tests and confirm PASS.
 - [ ] Commit: `git add backend/tender_backend/services/project_template_instance_service.py backend/tender_backend/api/projects.py backend/tender_backend/api/template_packages.py backend/tests/unit/test_project_template_instance_service.py && git commit -m "Clone selected templates into project instances"`
@@ -458,9 +589,14 @@ Block type values:
   - `GET /api/projects/{project_id}/template-instance`
   - `POST /api/projects/{project_id}/template-instance`
   - `PATCH /api/project-template-chapters/{chapter_id}`
+  - `POST /api/project-template-instances/{instance_id}/chapters/reorder`
   - `POST /api/project-template-chapters/{chapter_id}/blocks`
   - `PATCH /api/project-template-blocks/{block_id}`
   - `POST /api/project-template-instances/{instance_id}/confirm`
+  - `GET /api/project-template-instances/{instance_id}/requirement-responses`
+  - `PATCH /api/project-requirement-responses/{response_id}`
+  - `GET /api/project-template-instances/{instance_id}/seal-checklist`
+  - `POST /api/project-template-chapters/{chapter_id}/lock`
 - [ ] Run: `cd backend && ../.venv/bin/pytest tests/integration/test_project_template_instances_api.py -q`
 - [ ] Expected initial result: FAIL with missing routes.
 - [ ] Implement Pydantic models:
@@ -468,11 +604,18 @@ Block type values:
   - `ProjectTemplateChapterOut`
   - `ProjectTemplateBlockOut`
   - `ProjectTemplateChapterUpdate`
+  - `ProjectTemplateChapterReorderBody`
+  - `ProjectTemplateChapterReorderOut`
   - `ProjectTemplateBlockCreate`
   - `ProjectTemplateBlockUpdate`
   - `ProjectTemplateConfirmOut`
+  - `RequirementResponseOut`
+  - `RequirementResponseUpdate`
+  - `SealChecklistItemOut`
+  - `ChapterLockOut`
 - [ ] Enforce project access for all project-scoped operations.
-- [ ] Reject confirmation when critical reconciliation issues remain.
+- [ ] Implement chapter reorder endpoint so drag-and-drop can move Chapter 5 after Chapter 7 by updating `parent_id`, `sort_order`, and revision snapshot atomically.
+- [ ] Reject confirmation when critical reconciliation issues remain, any non-stale required requirement has `unanswered` response status, or required `seal_mark` blocks are missing checklist entries.
 - [ ] Register router in `backend/tender_backend/main.py`.
 - [ ] Rerun integration tests and confirm PASS.
 - [ ] Commit: `git add backend/tender_backend/api/project_template_instances.py backend/tender_backend/main.py backend/tests/integration/test_project_template_instances_api.py && git commit -m "Add project template instance API"`
@@ -492,10 +635,14 @@ Block type values:
   - order mismatch -> `reorder_chapter`
   - tender chapter is more detailed -> `split_chapter`
   - template chapters can map to one tender chapter -> `merge_chapter`
+  - three-level nested tender directory `1.2.3` maps without flattening into the wrong parent
+  - cross-level movement from `2.1` to `1.3.1` produces `move_chapter` instead of delete+add when identity is stable
+  - clarification/addendum changed a previously confirmed chapter title -> suggestion source is `tender_addendum` and severity is `critical`
+  - clarification/addendum adds a new mandatory format/signature requirement -> suggestion cannot be skipped without explicit `not_applicable` reason
 - [ ] Run: `cd backend && ../.venv/bin/pytest tests/unit/test_template_directory_reconciliation_service.py -q`
 - [ ] Expected initial result: FAIL because service does not exist.
 - [ ] Implement `TemplateDirectoryReconciliationService.build_suggestions(project_requirements, template_chapters)`.
-- [ ] Store reconciliation summary in `project_template_instance.metadata_json.reconciliation`.
+- [ ] Store reconciliation summary in `project_template_instance.metadata_json.reconciliation` and clarification impact summary in `metadata_json.clarification_reconciliation`.
 - [ ] Implement apply endpoint that accepts selected suggestion IDs and records a template revision.
 - [ ] Add integration tests for reconcile/apply endpoints.
 - [ ] Rerun unit and integration tests.
@@ -576,22 +723,37 @@ cd frontend && npx vitest run \
   - disabled
   - changed order
   - unresolved critical issue
+- [ ] Implement mouse drag-and-drop in `ChapterTree`:
+  - dragging original Chapter 5 below Chapter 7 updates the in-memory tree immediately
+  - dropping calls `POST /api/project-template-instances/{instance_id}/chapters/reorder`
+  - failed save rolls the tree back and shows a concise error
+  - locked chapters cannot be dragged or used as drop targets by another actor
+  - same-parent reorder is supported in MVP; cross-parent drag is allowed only when backend validation accepts the target parent
 - [ ] Implement `ChapterTemplateForm` as form sections:
   - fixed text
   - AI prompt
   - variables
-  - asset placeholders
+  - asset placeholders, including `asset_filter` and expiry warning fields
   - page breaks
   - header/footer
+  - seal marks: company seal, legal representative seal/signature, project manager signature, paging seal
+  - pricing/excel attachment boundary blocks
+  - requirement responses: full response, partial response, deviation, not applicable
+  - format profile: font, spacing, margins, binding/seal unit notes
   - conditions
-- [ ] Implement `TemplatePreviewPane` as read-only preview with visible page/header/footer markers.
+- [ ] Implement `TemplatePreviewPane` as read-only preview with visible page/header/footer/seal/signature/requirement-response markers.
 - [ ] Implement `ProjectTemplateWorkbench` three-column layout and mutations.
 - [ ] Render `ProjectTemplateWorkbench` from `AuthoringModule.tsx` when `tab === "template"`.
 - [ ] Write React tests for:
   - chapter tree loads
+  - dragging Chapter 5 after Chapter 7 calls reorder API with updated sibling order and rerenders Chapter 7 before Chapter 5
+  - reorder API failure rolls back the visible chapter order
   - fixed text edits save
   - AI prompt section is collapsed by default and can be expanded
   - unresolved critical directory issue disables confirmation
+  - unanswered required requirement disables confirmation
+  - required seal mark appears in preview and seal checklist
+  - chapter locked by another actor disables editing and shows lock owner
   - successful confirmation enables bid authoring path
 - [ ] Run: `cd frontend && npx vitest run src/modules/templates/templateInstanceModel.test.ts src/modules/templates/ProjectTemplateWorkbench.test.tsx`
 - [ ] Commit: `git add frontend/src/lib/api.ts frontend/src/modules/templates frontend/src/modules/authoring/AuthoringModule.tsx && git commit -m "Add project template adjustment workbench"`
@@ -609,7 +771,9 @@ cd frontend && npx vitest run \
 - Test: `frontend/src/modules/authoring/EditorContent.test.tsx`
 
 - [ ] Write backend tests that generation is blocked when no confirmed project template instance exists.
-- [ ] Write backend tests that fixed text, AI prompt blocks, asset placeholders, and page breaks are included in generation inputs.
+- [ ] Write backend tests that fixed text, AI prompt blocks, asset placeholders, seal marks, requirement responses, format profile, and page breaks are included in generation inputs.
+- [ ] Write backend performance test that building generation inputs for a 200+ chapter project template instance stays under 2 seconds on the test database and does not issue per-block N+1 queries.
+- [ ] Write backend tests that generation is blocked when `project.submission_deadline` has passed unless the instance status is already `locked_for_generation`.
 - [ ] Run backend tests and verify initial FAIL.
 - [ ] Update generation services to resolve template source in this order:
   - confirmed project template instance
@@ -618,7 +782,10 @@ cd frontend && npx vitest run \
   - `template_instance_id`
   - `template_instance_version`
   - `template_revision_no`
-- [ ] Update frontend authoring to show template instance status before generation.
+  - `requirement_response_coverage`
+  - `format_profile_hash`
+  - `seal_checklist_status`
+- [ ] Update frontend authoring to show template instance status, unanswered requirement count, pending seal checklist count, and deadline/lock status before generation.
 - [ ] Add frontend tests that bid generation requires a confirmed template instance for new projects.
 - [ ] Run:
   - `cd backend && ../.venv/bin/pytest tests/unit/test_project_template_instance_service.py tests/integration/test_project_template_instances_api.py -q`
@@ -628,6 +795,7 @@ cd frontend && npx vitest run \
 ### Task 8: Route Review Failures Back To Template Or Content
 
 **Files:**
+- Create: `backend/tender_backend/db/alembic/versions/0052_review_issue_template_routing.py`
 - Modify: `backend/tender_backend/api/post_bid.py`
 - Modify: `backend/tender_backend/db/repositories/post_bid_review_repo.py`
 - Modify: `frontend/src/modules/authoring/EditorContent.tsx`
@@ -640,20 +808,26 @@ cd frontend && npx vitest run \
   - `template_prompt`
   - `template_placeholder`
   - `formatting_rule`
+  - `tender_addendum`
+  - `seal_missing`
+  - `requirement_not_responded`
   - `project_material`
   - `generated_content`
 - [ ] Run tests and verify initial FAIL.
-- [ ] Add review issue metadata fields via migration if existing `metadata_json` is not enough:
+- [ ] Add `review_issue` routing columns in `0052_review_issue_template_routing.py`:
   - `issue_source`
   - `template_chapter_id`
   - `template_block_id`
   - `suggested_workspace`
+  - `requirement_response_id`
+  - `seal_block_id`
+  - `source_clarification_id`
 - [ ] Update review issue creation so template-caused problems deep-link to the template adjustment workbench.
 - [ ] Update frontend review issue cards with actions that navigate through `useNavigation().navigate`:
   - `去模板调整`
   - `去标书编写`
 - [ ] Rerun tests.
-- [ ] Commit: `git add backend/tender_backend/api/post_bid.py backend/tender_backend/db/repositories/post_bid_review_repo.py frontend/src/modules/authoring/EditorContent.tsx frontend/src/modules/templates/ProjectTemplateWorkbench.tsx backend/tests frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx && git commit -m "Route review issues to template or content workspaces"`
+- [ ] Commit: `git add backend/tender_backend/db/alembic/versions/0052_review_issue_template_routing.py backend/tender_backend/api/post_bid.py backend/tender_backend/db/repositories/post_bid_review_repo.py frontend/src/modules/authoring/EditorContent.tsx frontend/src/modules/templates/ProjectTemplateWorkbench.tsx backend/tests frontend/src/modules/templates/ProjectTemplateWorkbench.test.tsx && git commit -m "Route review issues to template or content workspaces"`
 
 ### Task 9: Promote Project Template Changes Back To Global Template
 
@@ -741,8 +915,15 @@ git commit -m "Document project template instance workflow plan"
 - [ ] Project cards and Authoring tabs can route users to the next incomplete workflow step.
 - [ ] Template adjustment edits project template instances only.
 - [ ] Tender directory differences are visible, actionable, and tracked.
+- [ ] Operators can freely reorder project template chapters by mouse drag-and-drop in the template adjustment page, including moving original Chapter 5 to the Chapter 7 position, with persisted order, renumbered display, and revision audit trail.
 - [ ] The template adjustment UI is form-based for tender engineers.
-- [ ] Header, footer, page break, fixed text, AI prompt, variables, and material placeholders are explicit template blocks.
+- [ ] Header, footer, page break, fixed text, AI prompt, variables, material placeholders, seal/signature marks, and pricing attachment boundaries are explicit template blocks.
+- [ ] 答疑/补遗/澄清 can trigger incremental reconciliation against the confirmed project template instance, and critical impacts cannot be silently skipped.
+- [ ] Every non-stale required tender requirement has a `project_requirement_response` row and a resolved status before generation/export.
+- [ ] Required seal/signature marks are visible in preview and appear in a pre-submission checklist.
+- [ ] Format profile and seal unit data are persisted on the project template instance even if advanced DOCX styling is implemented later.
+- [ ] Chapter edit locking prevents two users from overwriting the same project template chapter.
+- [ ] `project.submission_deadline` participates in final lock/export gating without adding a duplicate deadline field.
 - [ ] Bid generation uses the confirmed project template instance.
 - [ ] Review failures can route users to the right workspace.
 - [ ] Project-specific template improvements can be proposed back to global templates without automatic global mutation.
@@ -752,10 +933,11 @@ git commit -m "Document project template instance workflow plan"
 
 - [ ] Prevent global template pollution by making project template instances the default edit target.
 - [ ] Prevent workflow drift by keeping `upload -> parse -> requirements -> template -> editor` as the only primary forward path for new projects.
-- [ ] Prevent low-quality generation by blocking generation when critical template reconciliation issues are unresolved.
+- [ ] Prevent low-quality generation by blocking generation when critical template reconciliation issues, unanswered requirements, or pending required seal confirmations are unresolved.
 - [ ] Prevent template/content confusion by adding review issue source classification.
 - [ ] Prevent form complexity from overwhelming tender engineers by collapsing AI prompt advanced controls by default.
-- [ ] Preserve auditability with revision snapshots for every template confirmation and reconciliation apply action.
+- [ ] Preserve auditability with revision snapshots for every template confirmation, manual drag-and-drop chapter reorder, clarification reconciliation, seal checklist confirmation, and reconciliation apply action.
+- [ ] Keep pricing/BOQ out of this plan except for explicit external attachment boundaries; do not half-build a formula engine inside template blocks.
 
 ## Tracking Notes
 

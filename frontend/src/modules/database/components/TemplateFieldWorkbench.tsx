@@ -666,17 +666,21 @@ export function TemplateFieldWorkbench() {
                     setSelectedBindingId(null);
                   }}
                 >
-                  <div className="template-list__row">
-                    <span className="template-list__code">{item.item_code ?? "-"}</span>
-                    <Badge variant={preflightListItem ? preflightStatusVariant(preflightListItem) : itemStatusVariant(contextItem)}>
-                      {preflightListItem ? preflightStatusLabel(preflightListItem) : contextItem?.ready ? "已就绪" : contextItem?.binding_count ? "待完善" : "未绑定"}
-                    </Badge>
+                  <div className="template-list__item-shell">
+                    <span className="template-list__code template-list__code-cell">{item.item_code ?? "-"}</span>
+                    <div className="template-list__content-cell">
+                      <span className="template-list__title">{item.item_name}</span>
+                      <span className="template-list__meta">
+                        {item.render_mode} / {item.item_type}
+                        {preflightListItem && preflightListItem.issue_count > 0 ? ` / ${preflightListItem.issue_count} 个问题` : ""}
+                      </span>
+                    </div>
+                    <span className="template-list__status">
+                      <Badge variant={preflightListItem ? preflightStatusVariant(preflightListItem) : itemStatusVariant(contextItem)}>
+                        {preflightListItem ? preflightStatusLabel(preflightListItem) : contextItem?.ready ? "已就绪" : contextItem?.binding_count ? "待完善" : "未绑定"}
+                      </Badge>
+                    </span>
                   </div>
-                  <span className="template-list__title">{item.item_name}</span>
-                  <span className="template-list__meta">
-                    {item.render_mode} / {item.item_type}
-                    {preflightListItem && preflightListItem.issue_count > 0 ? ` / ${preflightListItem.issue_count} 个问题` : ""}
-                  </span>
                 </button>
               );
             })}
