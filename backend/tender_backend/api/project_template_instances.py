@@ -12,13 +12,20 @@ from tender_backend.core.project_access import require_project_access
 from tender_backend.core.security import CurrentUser, get_current_user, require_role, Role
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.project_template_instance_repo import ProjectTemplateInstanceRepository
+from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
+from tender_backend.services.template_directory_reconciliation_service import (
+    DirectoryReconciliationSuggestion,
+    TemplateDirectoryReconciliationService,
+)
 
 
 router = APIRouter(tags=["project-template-instances"])
 
 _repo = ProjectTemplateInstanceRepository()
 _service = ProjectTemplateInstanceService(instance_repo=_repo)
+_requirements = RequirementRepository()
+_reconciliation = TemplateDirectoryReconciliationService()
 
 
 class ProjectTemplateBlockOut(BaseModel):
@@ -77,6 +84,40 @@ class ProjectTemplateInstanceOut(BaseModel):
     updated_at: datetime | None = None
     chapters: list[ProjectTemplateChapterOut] = Field(default_factory=list)
 
+
+
+
+class DirectoryReconcileBody(BaseModel):
+    base_revision_no: int | None = None
+    clarification_id: UUID | None = None
+
+
+class DirectoryReconciliationSuggestionOut(BaseModel):
+    id: str
+    suggestion_type: str
+    severity: str
+    source_type: str
+    skippable: bool
+    required_code: str | None = None
+    required_title: str | None = None
+    chapter_id: UUID | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DirectoryReconcileOut(BaseModel):
+    suggestions: list[DirectoryReconciliationSuggestionOut]
+    summary: dict[str, Any]
+
+
+class ApplyReconciliationBody(BaseModel):
+    selected_suggestion_ids: list[str] = Field(default_factory=list)
+    skipped_suggestion_ids: list[str] = Field(default_factory=list)
+    not_applicable_reasons: dict[str, str] = Field(default_factory=dict)
+
+
+class ApplyReconciliationOut(BaseModel):
+    applied_suggestion_ids: list[str]
+    summary: dict[str, Any]
 
 class ProjectTemplateInstanceUpdate(BaseModel):
     display_name: str | None = None
@@ -452,3 +493,79 @@ async def release_project_template_chapter_lock(
     user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
 ) -> dict[str, bool]:
     return {"released": _repo.release_chapter_lock(conn, chapter_id, user.display_name)}
+
+
+@router.post("/projects/{project_id}/template-instance/reconcile-directory", response_model=DirectoryReconcileOut)
+async def reconcile_project_template_directory(
+    project_id: UUID,
+    payload: DirectoryReconcileBody | None = None,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
+) -> DirectoryReconcileOut:
+    _ensure_project_access(conn, project_id=project_id, user=user)
+    instance = _repo.get_current_for_project(conn, project_id)
+    if instance is None:
+        try:
+            instance = _service.ensure_for_project(conn, project_id=project_id, actor=user.display_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    requirements = _requirements.list_by_project(conn, project_id=project_id, include_stale=False)
+    chapters = _repo.list_chapters(conn, instance.id)
+    suggestions = _reconciliation.build_suggestions(requirements, chapters)
+    summary = _reconciliation.summary(suggestions)
+    metadata = dict(instance.metadata_json or {})
+    metadata["reconciliation"] = summary
+    if payload and payload.clarification_id:
+        metadata["clarification_reconciliation"] = {
+            "clarification_id": str(payload.clarification_id),
+            "unresolved_impact_count": len([item for item in suggestions if item.source_type == "tender_addendum"]),
+        }
+    if hasattr(_repo, "update_instance"):
+        _repo.update_instance(conn, instance.id, {"metadata_json": metadata})
+        # Keep in-memory fakes coherent when they mutate by replacement.
+        refreshed = _repo.get_current_for_project(conn, project_id)
+        if refreshed is not None:
+            instance = refreshed
+    return DirectoryReconcileOut(
+        suggestions=[DirectoryReconciliationSuggestionOut(**item.__dict__) for item in suggestions],
+        summary=summary,
+    )
+
+
+@router.post("/projects/{project_id}/template-instance/apply-reconciliation", response_model=ApplyReconciliationOut)
+async def apply_project_template_directory_reconciliation(
+    project_id: UUID,
+    payload: ApplyReconciliationBody,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(require_role(Role.EDITOR, Role.ADMIN)),
+) -> ApplyReconciliationOut:
+    _ensure_project_access(conn, project_id=project_id, user=user)
+    instance = _repo.get_current_for_project(conn, project_id)
+    if instance is None:
+        raise HTTPException(status_code=404, detail="template instance not found")
+    requirements = _requirements.list_by_project(conn, project_id=project_id, include_stale=False)
+    suggestions = _reconciliation.build_suggestions(requirements, _repo.list_chapters(conn, instance.id))
+    try:
+        _reconciliation.validate_apply_selection(
+            suggestions,
+            skipped_suggestion_ids=payload.skipped_suggestion_ids,
+            not_applicable_reasons=payload.not_applicable_reasons,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    selected = set(payload.selected_suggestion_ids)
+    applied = [item for item in suggestions if item.id in selected]
+    summary = _reconciliation.summary(suggestions)
+    metadata = dict(instance.metadata_json or {})
+    metadata["reconciliation"] = {**summary, "applied_suggestion_ids": [item.id for item in applied]}
+    if hasattr(_repo, "update_instance"):
+        _repo.update_instance(conn, instance.id, {"metadata_json": metadata})
+    _repo.record_revision(
+        conn,
+        instance.id,
+        "apply_reconciliation",
+        "apply tender directory reconciliation suggestions",
+        {"applied_suggestion_ids": [item.id for item in applied]},
+        user.display_name,
+    )
+    return ApplyReconciliationOut(applied_suggestion_ids=[item.id for item in applied], summary=summary)

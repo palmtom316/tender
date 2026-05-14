@@ -216,6 +216,14 @@ class _FakeRepo:
         return None
 
 
+class _FakeRequirements:
+    def list_by_project(self, _conn, *, project_id, include_stale=False, **_kwargs):
+        return [
+            {"id": uuid4(), "category": "directory", "directory_code": "6", "title": "进度计划"},
+            {"id": uuid4(), "category": "directory", "directory_code": "5", "title": "施工组织设计"},
+        ]
+
+
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch):
     import tender_backend.api.project_template_instances as api
@@ -226,6 +234,7 @@ def client(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(security, "_token_map", None)
     monkeypatch.setattr(api, "_repo", fake_repo)
     monkeypatch.setattr(api, "_service", _FakeService(fake_repo.instance))
+    monkeypatch.setattr(api, "_requirements", _FakeRequirements())
     monkeypatch.setattr(api, "require_project_access", lambda *args, **kwargs: None)
     sync_client = SyncASGIClient(app)
     sync_client.headers.update({"Authorization": "Bearer dev-token"})
@@ -296,3 +305,21 @@ def test_project_template_instance_routes_cover_read_edit_confirm_and_locks(clie
     confirm = sync_client.post(f"/api/project-template-instances/{repo.instance_id}/confirm")
     assert confirm.status_code == 200
     assert confirm.json()["status"] == "ready_for_authoring"
+
+
+def test_reconcile_and_apply_directory_updates_instance_metadata(client) -> None:
+    sync_client, repo = client
+
+    reconciled = sync_client.post(f"/api/projects/{repo.project_id}/template-instance/reconcile-directory", json={})
+    assert reconciled.status_code == 200
+    body = reconciled.json()
+    assert body["summary"]["counts_by_type"]["add_chapter"] >= 1
+    suggestion_id = body["suggestions"][0]["id"]
+
+    applied = sync_client.post(
+        f"/api/projects/{repo.project_id}/template-instance/apply-reconciliation",
+        json={"selected_suggestion_ids": [suggestion_id], "skipped_suggestion_ids": [], "not_applicable_reasons": {}},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["applied_suggestion_ids"] == [suggestion_id]
+    assert "reconciliation" in repo.instance.metadata_json
