@@ -53,6 +53,7 @@ export const MODULE_CONFIG: ModuleConfig[] = [
       { id: "upload", label: "文件上传" },
       { id: "parse", label: "解析结果" },
       { id: "requirements", label: "需求确认" },
+      { id: "template", label: "模板调整" },
       { id: "editor", label: "章节编辑" },
     ],
   },

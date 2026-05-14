@@ -8,6 +8,7 @@ import {
   confirmTemplateSelection,
   type Project,
 } from "../../lib/api";
+import { projectNextAction, projectStatusFromProject } from "../authoring/authoringWorkflow";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
@@ -129,8 +130,9 @@ export function ProjectsModule() {
   };
 
   const handleProjectClick = (project: Project) => {
+    const next = projectNextAction(projectStatusFromProject(project));
     setProjectId(project.id);
-    navigate("authoring", "upload", project.id);
+    navigate("authoring", next.tab, project.id);
   };
 
   const handleProjectDelete = (event: React.MouseEvent, project: Project) => {
@@ -301,7 +303,8 @@ export function ProjectsModule() {
               {p.submission_deadline && <span>截止 {formatProjectDate(p.submission_deadline)}</span>}
             </div>
             <div className="project-card__meta">
-              <span>{p.selected_template_package_id ? "已选模板" : "未选模板"}</span>
+              <span>模板状态: {p.selected_template_package_id ? "待调整" : "未生成"}</span>
+              <span>下一步: {projectNextAction(projectStatusFromProject(p)).label}</span>
             </div>
           </Card>
         ))}

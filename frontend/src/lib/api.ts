@@ -127,6 +127,14 @@ export interface Project {
   category_code?: string | null;
   selected_template_package_id?: string | null;
   workflow_status?: string | null;
+  has_document?: boolean;
+  parse_status?: string | null;
+  requirements_confirmed?: boolean;
+  template_status?: string | null;
+  project_template_status?: string | null;
+  unresolved_template_issue_count?: number;
+  unanswered_requirement_count?: number;
+  pending_seal_checklist_count?: number;
 }
 
 export function listProjects(options?: {

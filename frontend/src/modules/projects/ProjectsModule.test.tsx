@@ -197,3 +197,27 @@ describe("ProjectsModule", () => {
     expect(screen.getByRole("button", { name: "创建" })).toBeDisabled();
   });
 });
+
+  it("routes project cards to template when requirements are confirmed and template is draft", async () => {
+    listTemplatePackagesMock.mockResolvedValue([]);
+    listProjectsMock.mockResolvedValue([
+      {
+        id: "p-template",
+        name: "模板待调整项目",
+        created_at: "2026-05-13T08:30:00Z",
+        status: "outline_pending_confirmation",
+        workflow_status: "outline_pending_confirmation",
+        selected_template_package_id: "pkg-1",
+        requirements_confirmed: true,
+        template_status: "draft",
+      },
+    ]);
+
+    renderModule();
+
+    fireEvent.click(await screen.findByText("模板待调整项目"));
+
+    expect(navValue.navigate).toHaveBeenCalledWith("authoring", "template", "p-template");
+    expect(screen.getByText("模板状态: 待调整")).toBeInTheDocument();
+    expect(screen.getByText("下一步: 调整模板")).toBeInTheDocument();
+  });
