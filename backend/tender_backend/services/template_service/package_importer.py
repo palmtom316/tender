@@ -4,6 +4,8 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
+from xml.etree import ElementTree as ET
 
 from tender_backend.core.config import get_settings
 from tender_backend.core.path_safety import ensure_path_within_roots, parse_root_list
@@ -14,7 +16,9 @@ from tender_backend.db.repositories.bid_template_package_repo import (
 
 
 _CODED_NAME_RE = re.compile(r"^(?P<code>\d+(?:\.\d+)*)\.(?P<title>.+)$")
+_DOCX_HEADING_RE = re.compile(r"^(?P<code>[一二三四五六七八九十]+|\d+(?:\.\d+)*)(?P<sep>、|．|\.)(?P<title>.+)$")
 _KEY_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_DOCX_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 _OPTIONAL_MARKERS = ("如有", "若", "适用于", "联合体", "无需递交")
 _EVIDENCE_MARKERS = (
     "证明材料",
@@ -94,6 +98,89 @@ def _sort_key(path: Path) -> tuple[tuple[int, ...], str]:
     return (10**9,), path.stem
 
 
+def _chinese_number_to_int(value: str) -> int | None:
+    digits = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if value == "十":
+        return 10
+    if value.startswith("十"):
+        tail = value[1:]
+        return 10 + (digits.get(tail, 0) if tail else 0)
+    if "十" in value:
+        head, tail = value.split("十", 1)
+        if head not in digits:
+            return None
+        return digits[head] * 10 + (digits.get(tail, 0) if tail else 0)
+    return digits.get(value)
+
+
+def _normalize_docx_heading_code(raw: str) -> str:
+    if re.fullmatch(r"\d+(?:\.\d+)*", raw):
+        return raw
+    converted = _chinese_number_to_int(raw)
+    return str(converted) if converted is not None else raw
+
+
+def _docx_heading_match(text: str) -> tuple[str, str] | None:
+    match = _DOCX_HEADING_RE.match(text.strip())
+    if match is None:
+        return None
+    raw_code = match.group("code")
+    sep = match.group("sep")
+    title = match.group("title").strip()
+    if re.fullmatch(r"[一二三四五六七八九十]+", raw_code):
+        if sep != "、":
+            return None
+        return _normalize_docx_heading_code(raw_code), title
+    # Accept numeric dotted headings like "23.1.保证金明细表", but reject body
+    # numbered clauses such as "1．截止应答截止日，..." inside a chapter.
+    if sep != "." or len(title) > 60 or title.endswith(("；", "。", "，", ";", ".")):
+        return None
+    return raw_code, title
+
+
+def _paragraph_text(paragraph: ET.Element) -> str:
+    return "".join(node.text or "" for node in paragraph.findall(".//w:t", _DOCX_NS)).strip()
+
+
+def _docx_heading_items(source: SingleDocxTemplateSource) -> list[BidTemplateItemCreate]:
+    try:
+        with ZipFile(source.docx_path) as archive:
+            document_xml = archive.read("word/document.xml")
+    except (BadZipFile, KeyError):
+        return []
+
+    root = ET.fromstring(document_xml)
+    items: list[BidTemplateItemCreate] = []
+    seen_codes: set[str] = set()
+    for paragraph in root.findall(".//w:body/w:p", _DOCX_NS):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        heading = _docx_heading_match(text)
+        if heading is None:
+            continue
+        code, item_name = heading
+        if code in seen_codes:
+            continue
+        seen_codes.add(code)
+        item_type = infer_item_type(item_name)
+        relative_docx = str(source.docx_path.relative_to(source.root_dir))
+        items.append(
+            BidTemplateItemCreate(
+                item_code=code,
+                item_name=item_name,
+                filename=source.docx_path.name,
+                relative_path=f"{relative_docx}#{code}",
+                source_kind="docx",
+                item_type=item_type,
+                render_mode="single_docx_section",
+                is_required=infer_required(item_name),
+                sort_order=len(items),
+            )
+        )
+    return items
+
+
 def _resolve_single_docx_template_source(source_path: str | Path) -> SingleDocxTemplateSource:
     settings = get_settings()
     allowed_roots = parse_root_list(settings.template_import_roots)
@@ -131,6 +218,9 @@ def _resolve_single_docx_template_source(source_path: str | Path) -> SingleDocxT
 
 def build_template_items_from_directory(source_dir: str | Path) -> list[BidTemplateItemCreate]:
     source = _resolve_single_docx_template_source(source_dir)
+    heading_items = _docx_heading_items(source)
+    if heading_items:
+        return heading_items
     item_code, item_name = _parse_item_name(source.docx_path.stem)
     return [
         BidTemplateItemCreate(

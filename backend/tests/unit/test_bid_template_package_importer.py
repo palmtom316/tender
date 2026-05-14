@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from docx import Document
 
 from tender_backend.core.config import get_settings
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemCreate
@@ -85,6 +86,39 @@ def test_build_template_items_from_docx_file(tmp_path: Path, monkeypatch: pytest
     assert items[0].filename == "商务标完整模板.docx"
     assert items[0].relative_path == "商务标完整模板.docx"
     assert items[0].render_mode == "single_docx"
+
+
+def test_build_template_items_from_business_single_docx_splits_chapter_headings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    import_root = tmp_path / "imports"
+    import_root.mkdir()
+    template_path = import_root / "国网配网工程商务标.docx"
+    document = Document()
+    document.add_paragraph("一、商务偏差表")
+    document.add_paragraph("商务偏差表正文")
+    document.add_paragraph("二、关于无违法失信行为的承诺函")
+    document.add_paragraph("承诺函正文")
+    document.add_paragraph("23.1.保证金明细表")
+    document.add_paragraph("保证金正文")
+    document.save(template_path)
+
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    get_settings.cache_clear()
+
+    items = build_template_items_from_directory(template_path)
+
+    assert [(item.item_code, item.item_name) for item in items] == [
+        ("1", "商务偏差表"),
+        ("2", "关于无违法失信行为的承诺函"),
+        ("23.1", "保证金明细表"),
+    ]
+    assert {item.filename for item in items} == {"国网配网工程商务标.docx"}
+    assert [item.relative_path for item in items] == [
+        "国网配网工程商务标.docx#1",
+        "国网配网工程商务标.docx#2",
+        "国网配网工程商务标.docx#23.1",
+    ]
+    assert all(item.render_mode == "single_docx_section" for item in items)
 
 
 def test_build_template_items_from_directory_rejects_empty_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -337,7 +337,7 @@ async def get_project_business_template_preview(
     template_path = parse_root_list(str(package.source_root))[0] / items[0].relative_path if False else None
     from pathlib import Path
 
-    docx_path = Path(package.source_root) / items[0].relative_path
+    docx_path = Path(package.source_root) / items[0].relative_path.split("#", 1)[0]
     if not docx_path.is_file():
         raise HTTPException(status_code=404, detail="template docx file not found")
 
