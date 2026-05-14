@@ -327,6 +327,52 @@ class ProjectTemplateInstanceRepository:
             ).fetchone()
         return _to_instance(dict(row)) if row else None
 
+
+    def get_by_id(self, conn: Connection, instance_id: UUID) -> ProjectTemplateInstanceRow | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"SELECT {_INSTANCE_COLUMNS} FROM project_template_instance WHERE id = %s",
+                (instance_id,),
+            ).fetchone()
+        return _to_instance(dict(row)) if row else None
+
+    def update_instance(self, conn: Connection, instance_id: UUID, fields: dict[str, Any]) -> ProjectTemplateInstanceRow | None:
+        allowed = {"display_name", "status", "version", "confirmed_at", "confirmed_by", "metadata_json"}
+        updates = {key: value for key, value in fields.items() if key in allowed}
+        if not updates:
+            return self.get_by_id(conn, instance_id)
+        sets: list[str] = []
+        params: list[Any] = []
+        for key, value in updates.items():
+            sets.append(f"{key} = %s")
+            params.append(_jsonb(value) if key == "metadata_json" else value)
+        sets.append("updated_at = now()")
+        params.append(instance_id)
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"UPDATE project_template_instance SET {', '.join(sets)} WHERE id = %s RETURNING {_INSTANCE_COLUMNS}",
+                params,
+            ).fetchone()
+        return _to_instance(dict(row)) if row else None
+
+    def confirm_instance(self, conn: Connection, instance_id: UUID, actor: str | None) -> ProjectTemplateInstanceRow:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"""
+                UPDATE project_template_instance
+                SET status = 'ready_for_authoring',
+                    confirmed_at = now(),
+                    confirmed_by = %s,
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING {_INSTANCE_COLUMNS}
+                """,
+                (actor, instance_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError("template instance not found")
+        return _to_instance(dict(row))
+
     def list_chapters(self, conn: Connection, instance_id: UUID) -> list[ProjectTemplateChapterRow]:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(
@@ -414,6 +460,48 @@ class ProjectTemplateInstanceRepository:
                     """,
                     (sort_order, instance_id, chapter_id),
                 )
+
+
+    def replace_chapter_tree_order(
+        self,
+        conn: Connection,
+        instance_id: UUID,
+        ordered_tree: list[dict[str, Any]],
+        actor: str | None = None,
+    ) -> list[ProjectTemplateChapterRow]:
+        seen: set[UUID] = set()
+        with conn.cursor(row_factory=dict_row) as cur:
+            for row in ordered_tree:
+                chapter_id = row["chapter_id"]
+                parent_id = row.get("parent_id")
+                if chapter_id == parent_id:
+                    raise ValueError("chapter cannot be moved under itself")
+                if chapter_id in seen:
+                    raise ValueError("duplicate chapter in ordered_tree")
+                seen.add(chapter_id)
+                cur.execute(
+                    """
+                    UPDATE project_template_chapter
+                    SET parent_id = %s,
+                        sort_order = %s,
+                        lock_version = lock_version + 1,
+                        updated_at = now()
+                    WHERE template_instance_id = %s
+                      AND id = %s
+                      AND (locked_until IS NULL OR locked_until < now() OR lock_owner = %s OR %s IS NULL)
+                    """,
+                    (parent_id, row["sort_order"], instance_id, chapter_id, actor, actor),
+                )
+            rows = cur.execute(
+                f"""
+                SELECT {_CHAPTER_COLUMNS}
+                FROM project_template_chapter
+                WHERE template_instance_id = %s
+                ORDER BY parent_id NULLS FIRST, sort_order, chapter_code
+                """,
+                (instance_id,),
+            ).fetchall()
+        return [_to_chapter(dict(row)) for row in rows]
 
     def move_chapter(
         self,
@@ -607,6 +695,42 @@ class ProjectTemplateInstanceRepository:
             ).fetchone()
         assert row is not None
         return _to_response(dict(row))
+
+
+    def update_requirement_response(
+        self,
+        conn: Connection,
+        response_id: UUID,
+        fields: dict[str, Any],
+    ) -> ProjectRequirementResponseRow | None:
+        allowed = {
+            "template_chapter_id",
+            "template_block_id",
+            "response_status",
+            "response_text",
+            "deviation_note",
+            "source_type",
+            "source_clarification_id",
+            "metadata_json",
+        }
+        updates = {key: value for key, value in fields.items() if key in allowed}
+        if not updates:
+            with conn.cursor(row_factory=dict_row) as cur:
+                row = cur.execute(f"SELECT {_RESPONSE_COLUMNS} FROM project_requirement_response WHERE id = %s", (response_id,)).fetchone()
+            return _to_response(dict(row)) if row else None
+        sets: list[str] = []
+        params: list[Any] = []
+        for key, value in updates.items():
+            sets.append(f"{key} = %s")
+            params.append(_jsonb(value) if key == "metadata_json" else value)
+        sets.append("updated_at = now()")
+        params.append(response_id)
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"UPDATE project_requirement_response SET {', '.join(sets)} WHERE id = %s RETURNING {_RESPONSE_COLUMNS}",
+                params,
+            ).fetchone()
+        return _to_response(dict(row)) if row else None
 
     def list_seal_checklist(self, conn: Connection, instance_id: UUID) -> list[ProjectTemplateSealConfirmationRow]:
         with conn.cursor(row_factory=dict_row) as cur:
