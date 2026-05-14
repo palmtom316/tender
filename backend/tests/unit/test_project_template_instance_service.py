@@ -272,3 +272,193 @@ def test_move_chapter_rejects_moving_chapter_under_itself_before_database_write(
         repo.move_chapter(_FakeConn(cursor), chapter_id=chapter_id, new_parent_id=chapter_id, new_sort_order=1, actor="alice")
 
     assert cursor.executed == []
+
+
+def test_service_ensure_for_project_is_idempotent_and_clones_selected_package_items() -> None:
+    from tender_backend.db.repositories.bid_template_package_repo import BidTemplateItemRow, BidTemplatePackageRow
+    from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
+
+    project_id = uuid4()
+    package_id = uuid4()
+    item_a = uuid4()
+    item_b = uuid4()
+    instance_id = uuid4()
+    project = type(
+        "Project",
+        (),
+        {
+            "id": project_id,
+            "name": "配网施工项目",
+            "category_code": "sgcc_distribution",
+            "selected_template_package_id": package_id,
+            "tender_no": "T-2026-001",
+            "employer_name": "国网某公司",
+            "metadata_json": {},
+        },
+    )()
+    package = BidTemplatePackageRow(
+        id=package_id,
+        package_key="sgcc-distribution-technical",
+        display_name="配网技术标模板",
+        package_type="technical",
+        category_code="sgcc_distribution",
+        source_root="/templates",
+        source_manifest={"metadata": {"format_profile": {"font_family": "宋体"}, "seal_units": ["正本"]}},
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    items = [
+        BidTemplateItemRow(
+            id=item_a,
+            package_id=package_id,
+            item_code="5",
+            item_name="施工组织设计",
+            filename="5.docx",
+            relative_path="5.docx",
+            source_kind="docx",
+            item_type="chapter",
+            render_mode="ai_written",
+            is_required=True,
+            sort_order=5,
+            created_at=_now(),
+        ),
+        BidTemplateItemRow(
+            id=item_b,
+            package_id=package_id,
+            item_code="8",
+            item_name="法定代表人签字盖章",
+            filename="8.docx",
+            relative_path="8.docx",
+            source_kind="docx",
+            item_type="chapter",
+            render_mode="templated",
+            is_required=True,
+            sort_order=8,
+            created_at=_now(),
+        ),
+    ]
+
+    class ProjectRepo:
+        def get(self, conn, *, project_id):
+            return project
+
+    class TemplateRepo:
+        def __init__(self) -> None:
+            self.writes = 0
+
+        def get_by_id(self, conn, *, package_id):
+            return package
+
+        def list_items(self, conn, *, package_id):
+            return items
+
+        def replace_items(self, *args, **kwargs):
+            self.writes += 1
+            raise AssertionError("project instance cloning must not mutate global template items")
+
+    class InstanceRepo:
+        def __init__(self) -> None:
+            self.current_calls = 0
+            self.created_instances = []
+            self.created_chapters = []
+            self.created_blocks = []
+            self.responses = []
+            self.revisions = []
+
+        def get_current_for_project(self, conn, project_id):
+            self.current_calls += 1
+            if self.current_calls > 1:
+                return type("Instance", (), {"id": instance_id, "project_id": project_id})()
+            return None
+
+        def create_instance(self, conn, project_id, base_template_package_id, category_code, display_name, metadata=None):
+            instance = type(
+                "Instance",
+                (),
+                {
+                    "id": instance_id,
+                    "project_id": project_id,
+                    "base_template_package_id": base_template_package_id,
+                    "category_code": category_code,
+                    "display_name": display_name,
+                    "metadata_json": metadata or {},
+                },
+            )()
+            self.created_instances.append(instance)
+            return instance
+
+        def create_chapter(self, conn, **kwargs):
+            chapter = type("Chapter", (), {"id": uuid4(), **kwargs})()
+            self.created_chapters.append(chapter)
+            return chapter
+
+        def create_block(self, conn, chapter_id, fields):
+            block = type("Block", (), {"id": uuid4(), "template_chapter_id": chapter_id, **fields})()
+            self.created_blocks.append(block)
+            return block
+
+        def upsert_requirement_response(self, conn, instance_id, requirement_id, template_chapter_id, template_block_id, fields):
+            self.responses.append((instance_id, requirement_id, template_chapter_id, template_block_id, fields))
+
+        def record_revision(self, conn, instance_id, change_type, change_summary, snapshot_json, created_by):
+            self.revisions.append((instance_id, change_type, change_summary, snapshot_json, created_by))
+
+    class RequirementRepo:
+        def list_by_project(self, conn, *, project_id, include_stale=False, **kwargs):
+            return [
+                {"id": uuid4(), "review_status": "confirmed", "is_stale": False},
+                {"id": uuid4(), "review_status": "pending", "is_stale": False},
+                {"id": uuid4(), "review_status": "confirmed", "is_stale": True},
+            ]
+
+    template_repo = TemplateRepo()
+    instance_repo = InstanceRepo()
+    service = ProjectTemplateInstanceService(
+        project_repo=ProjectRepo(),
+        template_repo=template_repo,
+        instance_repo=instance_repo,
+        requirement_repo=RequirementRepo(),
+    )
+
+    first = service.ensure_for_project(None, project_id=project_id, actor="tester")
+    second = service.ensure_for_project(None, project_id=project_id, actor="tester")
+
+    assert first.id == instance_id
+    assert second.id == instance_id
+    assert len(instance_repo.created_instances) == 1
+    assert instance_repo.created_instances[0].base_template_package_id == package_id
+    assert instance_repo.created_instances[0].metadata_json["format_profile"] == {"font_family": "宋体"}
+    assert instance_repo.created_instances[0].metadata_json["standard_variables"]["project.name"] == "配网施工项目"
+    assert [chapter.source_template_item_id for chapter in instance_repo.created_chapters] == [item_a, item_b]
+    block_types = [block.block_type for block in instance_repo.created_blocks]
+    assert "fixed_text" in block_types
+    assert "page_break" in block_types
+    assert "header_footer" in block_types
+    assert "ai_prompt" in block_types
+    assert "seal_mark" in block_types
+    assert len(instance_repo.responses) == 1, "only confirmed non-stale project requirements become response rows"
+    assert instance_repo.revisions[0][1] == "create_instance"
+    assert template_repo.writes == 0
+
+
+def test_service_raises_when_project_has_no_selected_template_package() -> None:
+    from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
+
+    project = type(
+        "Project",
+        (),
+        {"id": uuid4(), "name": "无模板项目", "category_code": "sgcc_distribution", "selected_template_package_id": None},
+    )()
+
+    class ProjectRepo:
+        def get(self, conn, *, project_id):
+            return project
+
+    class InstanceRepo:
+        def get_current_for_project(self, conn, project_id):
+            return None
+
+    service = ProjectTemplateInstanceService(project_repo=ProjectRepo(), instance_repo=InstanceRepo())
+
+    with pytest.raises(ValueError, match="selected template package"):
+        service.ensure_for_project(None, project_id=project.id)
