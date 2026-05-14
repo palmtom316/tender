@@ -68,3 +68,19 @@ describe("ReviewIssuesContent", () => {
     expect(screen.getByText("泛化密度 2")).toBeInTheDocument();
   });
 });
+
+it("routes template-caused and content-caused issues to the right workspace", async () => {
+  const navigate = vi.fn();
+  useNavigationMock.mockReturnValue({ projectId: "proj-1", navigate });
+  fetchReviewIssuesMock.mockResolvedValue([
+    { id: "issue-template", severity: "P1", title: "模板提示词问题", detail: "prompt", resolved: false, issue_source: "template_prompt", suggested_workspace: "template", metadata_json: {} },
+    { id: "issue-editor", severity: "P2", title: "正文事实错误", detail: "fact", resolved: false, issue_source: "generated_content", suggested_workspace: "editor", metadata_json: {} },
+  ]);
+
+  render(withClient(<ReviewIssuesContent />));
+
+  (await screen.findByRole("button", { name: "去模板调整" })).click();
+  expect(navigate).toHaveBeenCalledWith("authoring", "template", "proj-1");
+  screen.getByRole("button", { name: "去标书编写" }).click();
+  expect(navigate).toHaveBeenCalledWith("authoring", "editor", "proj-1");
+});

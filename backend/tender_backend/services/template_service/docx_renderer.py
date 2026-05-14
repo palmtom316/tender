@@ -385,3 +385,28 @@ def render_template_item_docx(
         "ready": True,
         "context_keys": sorted(context.keys()),
     }
+
+
+def render_project_template_blocks_for_preview(chapters: list[dict]) -> list[dict]:
+    """Return DOCX-compatible preview markers for project template instance blocks.
+
+    This intentionally keeps the boundary structured: final DOCX styling can consume
+    these markers later without treating template editing as free-form source text.
+    """
+    rendered: list[dict] = []
+    for chapter in chapters:
+        blocks = []
+        for block in chapter.get("blocks") or []:
+            block_type = block.get("block_type")
+            if block_type == "fixed_text":
+                blocks.append({"kind": "paragraph", "text": block.get("content_text") or ""})
+            elif block_type == "page_break":
+                blocks.append({"kind": "page_break", "label": block.get("label")})
+            elif block_type == "header_footer":
+                blocks.append({"kind": "header_footer", "options": block.get("render_options_json") or {}})
+            elif block_type == "seal_mark":
+                blocks.append({"kind": "seal_mark", "label": block.get("label"), "metadata": block.get("metadata_json") or {}})
+            else:
+                blocks.append({"kind": "placeholder", "block_type": block_type, "label": block.get("label")})
+        rendered.append({"chapter_code": chapter.get("chapter_code"), "chapter_title": chapter.get("chapter_title"), "blocks": blocks})
+    return rendered

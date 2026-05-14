@@ -10,6 +10,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 from tender_backend.services.technical_chapter_strategies import strategy_for_chapter
+from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 
 
 PRICING_TERMS = ("报价", "投标报价", "价格", "最高限价", "单价", "总价")
@@ -226,9 +227,24 @@ def generate_bid_chapter_draft(
         f"# {chapter['chapter_code']} {chapter['chapter_title']}",
         "",
         "## 编制原则",
-        "本章节依据招标文件解析出的约束编写；当模板与招标文件要求冲突时，以招标文件解析结果为准。",
+        "本章节依据已确认的项目模板实例和招标文件解析出的约束编写；当模板与招标文件要求冲突时，以招标文件解析结果为准。",
         "",
     ]
+    try:
+        template_inputs = ProjectTemplateInstanceService().build_generation_inputs(conn, project_id=project_id)
+        template_chapter = next((item for item in template_inputs.get("chapters", []) if item.get("chapter_code") == chapter.get("chapter_code")), None)
+        if template_chapter:
+            fixed_blocks = [block for block in template_chapter.get("blocks", []) if block.get("block_type") == "fixed_text" and block.get("content_text")]
+            prompt_blocks = [block for block in template_chapter.get("blocks", []) if block.get("block_type") == "ai_prompt" and block.get("prompt_text")]
+            seal_blocks = [block for block in template_chapter.get("blocks", []) if block.get("block_type") == "seal_mark"]
+            if fixed_blocks or prompt_blocks or seal_blocks:
+                lines.extend(["## 项目模板实例约束"])
+                lines.extend(f"- 固定文本：{block['content_text']}" for block in fixed_blocks)
+                lines.extend(f"- 写作提示：{block['prompt_text']}" for block in prompt_blocks)
+                lines.extend(f"- 签章要求：{block['label']}" for block in seal_blocks)
+                lines.append("")
+    except ValueError:
+        pass
     if _strategy_for_chapter(chapter):
         lines.extend(_strategy_lines(chapter, requirements, matches, recommended_charts=recommended_charts))
     else:

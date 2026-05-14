@@ -127,6 +127,14 @@ export interface Project {
   category_code?: string | null;
   selected_template_package_id?: string | null;
   workflow_status?: string | null;
+  has_document?: boolean;
+  parse_status?: string | null;
+  requirements_confirmed?: boolean;
+  template_status?: string | null;
+  project_template_status?: string | null;
+  unresolved_template_issue_count?: number;
+  unanswered_requirement_count?: number;
+  pending_seal_checklist_count?: number;
 }
 
 export function listProjects(options?: {
@@ -1009,6 +1017,13 @@ export interface ReviewIssue {
   title: string;
   detail: string | null;
   resolved: boolean;
+  issue_source?: string | null;
+  suggested_workspace?: "template" | "editor" | string | null;
+  template_chapter_id?: string | null;
+  template_block_id?: string | null;
+  requirement_response_id?: string | null;
+  seal_block_id?: string | null;
+  source_clarification_id?: string | null;
   metadata_json?: Record<string, unknown>;
 }
 
@@ -2783,4 +2798,57 @@ export function updateDeviationTable(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+}
+
+
+// ── Project template instances ──
+export interface TemplatePromotionProposalApi {
+  id: string;
+  template_instance_id: string;
+  base_template_package_id?: string | null;
+  project_id: string;
+  proposal_status: "draft" | "submitted" | "approved" | "rejected" | string;
+  diff_json?: Record<string, unknown>;
+  created_by?: string | null;
+  reviewed_by?: string | null;
+}
+
+export interface ProjectTemplateInstanceApi {
+  id: string;
+  project_id: string;
+  display_name: string;
+  status: string;
+  chapters: Array<Record<string, unknown>>;
+  promotion_proposals?: TemplatePromotionProposalApi[];
+  reconciliation_summary?: Record<string, unknown>;
+  unanswered_requirement_count?: number;
+  pending_seal_checklist_count?: number;
+}
+
+export function fetchProjectTemplateInstance(projectId: string, options?: { signal?: AbortSignal }): Promise<ProjectTemplateInstanceApi> {
+  return request<ProjectTemplateInstanceApi>(`/projects/${projectId}/template-instance`, { signal: options?.signal });
+}
+
+export function reorderProjectTemplateChapters(instanceId: string, data: { ordered_tree: Array<{ chapter_id: string; parent_id?: string | null; sort_order: number }> }): Promise<{ chapters: Array<Record<string, unknown>> }> {
+  return request<{ chapters: Array<Record<string, unknown>> }>(`/project-template-instances/${instanceId}/chapters/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateProjectTemplateBlock(blockId: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/project-template-blocks/${blockId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export function confirmProjectTemplateInstance(instanceId: string): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(`/project-template-instances/${instanceId}/confirm`, { method: "POST" });
+}
+
+export function proposeProjectTemplatePromotion(instanceId: string): Promise<TemplatePromotionProposalApi> {
+  return request<TemplatePromotionProposalApi>(`/project-template-instances/${instanceId}/promotion-proposals`, { method: "POST" });
 }

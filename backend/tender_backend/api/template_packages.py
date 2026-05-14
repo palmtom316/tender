@@ -19,6 +19,7 @@ from tender_backend.services.template_service.package_importer import (
 )
 from tender_backend.services.template_service.business_template_preview import parse_business_template_preview
 from tender_backend.services.template_selection_service import TemplateSelectionService
+from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 from tender_backend.core.project_access import require_project_access
 from tender_backend.core.security import CurrentUser
 
@@ -28,6 +29,7 @@ router = APIRouter(tags=["template-packages"], dependencies=[Depends(get_current
 _repo = BidTemplatePackageRepository()
 _project_repo = ProjectRepository()
 _selection = TemplateSelectionService(template_repo=_repo)
+_project_template_instances = ProjectTemplateInstanceService(project_repo=_project_repo, template_repo=_repo)
 _DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PACKAGE_KEY_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -302,7 +304,12 @@ async def confirm_project_template_selection(
 ) -> dict:
     require_project_access(conn, project_id=project_id, user=user)
     try:
-        return _selection.confirm(conn, project_id=project_id, package_id=payload.package_id)
+        result = _selection.confirm(conn, project_id=project_id, package_id=payload.package_id)
+        instance = _project_template_instances.ensure_for_project(
+            conn, project_id=project_id, actor=user.display_name
+        )
+        result["project_template_instance_id"] = str(instance.id)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

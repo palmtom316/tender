@@ -31,6 +31,35 @@ class ReviewIssue:
     metadata_json: dict[str, Any] | None = None
 
 
+_TEMPLATE_SOURCES = {"template_structure", "template_prompt", "template_placeholder", "formatting_rule", "tender_addendum", "seal_missing", "requirement_not_responded"}
+_CONTENT_SOURCES = {"project_material", "generated_content", "ai_factual_quality", "material_binding"}
+
+
+def classify_review_issue_route(issue: ReviewIssue) -> dict[str, Any]:
+    metadata = dict(issue.metadata_json or {})
+    issue_source = metadata.get("issue_source")
+    if not issue_source:
+        title_blob = f"{issue.title} {issue.detail}"
+        if issue.requirement_id:
+            issue_source = "requirement_not_responded"
+        elif "盖章" in title_blob or "签章" in title_blob or "签字" in title_blob:
+            issue_source = "seal_missing"
+        elif "模板" in title_blob or "占位" in title_blob or "提示词" in title_blob:
+            issue_source = "template_placeholder"
+        else:
+            issue_source = "generated_content"
+    suggested_workspace = "template" if issue_source in _TEMPLATE_SOURCES else "editor"
+    return {
+        "issue_source": issue_source,
+        "suggested_workspace": suggested_workspace,
+        "template_chapter_id": metadata.get("template_chapter_id"),
+        "template_block_id": metadata.get("template_block_id"),
+        "requirement_response_id": metadata.get("requirement_response_id"),
+        "seal_block_id": metadata.get("seal_block_id"),
+        "source_clarification_id": metadata.get("source_clarification_id"),
+    }
+
+
 def review_draft(
     *,
     content: str,
@@ -210,9 +239,11 @@ def persist_review_issues(
             cur.execute(
                 """
                 INSERT INTO review_issue (
-                  id, project_id, requirement_id, chapter_code, severity, title, detail, lifecycle_status, metadata_json
+                  id, project_id, requirement_id, chapter_code, severity, title, detail, lifecycle_status, metadata_json,
+                  issue_source, template_chapter_id, template_block_id, suggested_workspace, requirement_response_id,
+                  seal_block_id, source_clarification_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'open', %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'open', %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     uuid4(),
@@ -223,6 +254,13 @@ def persist_review_issues(
                     issue.title,
                     issue.detail,
                     Jsonb(issue.metadata_json or {}),
+                    classify_review_issue_route(issue)["issue_source"],
+                    UUID(classify_review_issue_route(issue)["template_chapter_id"]) if classify_review_issue_route(issue).get("template_chapter_id") else None,
+                    UUID(classify_review_issue_route(issue)["template_block_id"]) if classify_review_issue_route(issue).get("template_block_id") else None,
+                    classify_review_issue_route(issue)["suggested_workspace"],
+                    UUID(classify_review_issue_route(issue)["requirement_response_id"]) if classify_review_issue_route(issue).get("requirement_response_id") else None,
+                    UUID(classify_review_issue_route(issue)["seal_block_id"]) if classify_review_issue_route(issue).get("seal_block_id") else None,
+                    UUID(classify_review_issue_route(issue)["source_clarification_id"]) if classify_review_issue_route(issue).get("source_clarification_id") else None,
                 ),
             )
             count += 1

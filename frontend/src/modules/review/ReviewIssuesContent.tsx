@@ -23,7 +23,7 @@ function percent(value: unknown) {
 }
 
 export function ReviewIssuesContent() {
-  const { projectId } = useNavigation();
+  const { projectId, navigate } = useNavigation();
   const queryClient = useQueryClient();
 
   const { data: issues = [], isLoading } = useQuery({
@@ -101,6 +101,17 @@ export function ReviewIssuesContent() {
             </div>
             <h3 style={{ margin: "var(--space-2) 0 var(--space-1)" }}>{issue.title}</h3>
             {issue.detail && <p className="source-text">{issue.detail}</p>}
+            {issue.suggested_workspace && (
+              <div className="toolbar-row">
+                <ClayButton
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => navigate("authoring", issue.suggested_workspace === "template" ? "template" : "editor", projectId)}
+                >
+                  {issue.suggested_workspace === "template" ? "去模板调整" : "去标书编写"}
+                </ClayButton>
+              </div>
+            )}
             {qualityMetrics(issue) && (
               <div className="review-metric-strip" aria-label="章节质量指标">
                 <span>策略章节覆盖 {percent(qualityMetrics(issue)?.required_section_coverage)}</span>

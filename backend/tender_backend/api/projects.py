@@ -15,12 +15,14 @@ from tender_backend.core.security import CurrentUser, Role, get_current_user, re
 from tender_backend.db.deps import get_db_conn
 from tender_backend.db.repositories.project_repository import ProjectRepository
 from tender_backend.services.project_setup_service import ProjectSetupService
+from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 
 
 router = APIRouter(tags=["projects"])
 
 _repo = ProjectRepository()
 _setup = ProjectSetupService(_repo)
+_project_template_instances = ProjectTemplateInstanceService(project_repo=_repo)
 
 
 class ProjectCreate(BaseModel):
@@ -177,6 +179,10 @@ async def update_project(
     project = _repo.update(conn, project_id=project_id, fields=fields)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
+    if project.selected_template_package_id is not None:
+        _project_template_instances.ensure_for_project(
+            conn, project_id=project_id, actor=_user.display_name
+        )
     return _project_out(project)
 
 
