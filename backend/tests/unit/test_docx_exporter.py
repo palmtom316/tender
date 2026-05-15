@@ -250,3 +250,22 @@ def test_render_chapter_doc_zip_raises_when_libreoffice_missing(tmp_path: Path, 
         docx_exporter.render_chapter_doc_zip(
             _Conn(_multi_chapter_drafts()), project_id=uuid4(), output_path=output
         )
+
+
+def test_export_evidence_reports_residual_chart_placeholders(tmp_path: Path, monkeypatch) -> None:
+    from tender_backend.services.export_service.docx_exporter import inspect_rendered_docx_evidence
+
+    path = tmp_path / "residual.docx"
+    doc = Document()
+    doc.add_paragraph("正文 {{chart:risk_matrix}}")
+    doc.save(path)
+    monkeypatch.setattr(
+        "tender_backend.services.export_service.docx_exporter.count_docx_pages",
+        lambda path: {"status": "unchecked", "actual_pages": None, "method": "test"},
+    )
+
+    evidence = inspect_rendered_docx_evidence(path)
+
+    assert evidence["residual_chart_placeholders"] == ["risk_matrix"]
+    assert evidence["residual_chart_placeholder_count"] == 1
+    assert evidence["page_count"]["method"] == "test"

@@ -21,9 +21,12 @@ from tender_backend.services.export_service.doc_converter import convert_docx_to
 from tender_backend.services.export_service.chart_asset_injector import ChartAssetInjector
 from tender_backend.services.export_service.equipment_table_injector import EquipmentTableInjector
 from tender_backend.services.export_service.personnel_table_injector import PersonnelTableInjector
+from tender_backend.services.export_service.page_counter import count_docx_pages
 from tender_backend.services.tender_requirement_priority import load_tender_requirement_overrides
 
 logger = structlog.stdlib.get_logger(__name__)
+
+CHART_PLACEHOLDER_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
 
 _EQUIPMENT_TABLE_SECTIONS: tuple[tuple[str, str], ...] = (
     ("车辆", "vehicle"),
@@ -579,6 +582,29 @@ def render_chapter_doc_zip(
         chapter_count=len(converted),
     )
     return output_path
+
+
+
+
+def inspect_rendered_docx_evidence(path: Path) -> dict:
+    """Inspect a rendered DOCX for page-count and chart-placeholder evidence."""
+
+    xml_text = ""
+    media_count = 0
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if name.startswith("word/") and name.endswith(".xml"):
+                xml_text += archive.read(name).decode("utf-8", errors="ignore")
+            elif name.startswith("word/media/"):
+                media_count += 1
+    residual = sorted(set(CHART_PLACEHOLDER_RE.findall(xml_text)))
+    return {
+        "path": str(path),
+        "media_count": media_count,
+        "residual_chart_placeholders": residual,
+        "residual_chart_placeholder_count": len(residual),
+        "page_count": count_docx_pages(path),
+    }
 
 
 def render_export(

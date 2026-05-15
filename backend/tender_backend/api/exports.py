@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from psycopg import Connection
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from tender_backend.services.export_service.docx_exporter import (
     EXPORT_MODE_MULTI_DOC_ZIP,
     EXPORT_MODE_MULTI_DOCX_ZIP,
     EXPORT_MODE_SINGLE_DOCX,
+    inspect_rendered_docx_evidence,
     render_export,
 )
 
@@ -95,6 +97,12 @@ async def create_export(
         raise HTTPException(status_code=409, detail=f"export gates block export: {gate_state.get('gates')}")
     try:
         output = render_export(conn, project_id=project_id, mode=mode)
+        output_path = Path(output)
+        render_evidence = (
+            inspect_rendered_docx_evidence(output_path)
+            if output_path.suffix == ".docx"
+            else {"path": str(output_path), "page_count": {"status": "unchecked", "actual_pages": None}}
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -103,11 +111,11 @@ async def create_export(
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """
-            INSERT INTO export_record (id, project_id, status, template_name, export_key)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO export_record (id, project_id, status, template_name, export_key, metadata_json)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
-            (uuid4(), project_id, "completed", template_name, str(output)),
+            (uuid4(), project_id, "completed", template_name, str(output), Jsonb({"render_evidence": render_evidence})),
         ).fetchone()
     conn.commit()
     if row is None:
