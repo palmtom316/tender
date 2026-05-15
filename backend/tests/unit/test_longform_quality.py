@@ -79,3 +79,43 @@ def test_chart_closure_report_reconciles_references_assets_and_docx_insertions()
     assert report["approved_chart_count"] == 1
     assert report["inserted_chart_count"] == 1
     assert {issue["chart_key"] for issue in report["issues"]} == {"schedule"}
+
+
+def test_coverage_report_requires_charts_in_the_declared_section_body():
+    content = "\n".join(
+        [
+            "## 8.1 编制依据",
+            "{{chart:org_chart}}",
+            "## 8.2 施工组织",
+            "施工组织内容充分。",
+        ]
+    )
+    checklist = [
+        {"section_code": "8.2", "title": "施工组织", "min_chars": 1, "required_charts": ["org_chart"], "required_tables": []},
+    ]
+
+    report = build_coverage_report(content, checklist=checklist, constraints=[])
+
+    assert report["coverage_passed"] is False
+    assert any(
+        issue["code"] == "missing_required_chart"
+        and issue["section_code"] == "8.2"
+        and issue["chart_key"] == "org_chart"
+        for issue in report["issues"]
+    )
+
+
+def test_chart_closure_report_blocks_residual_placeholder_absent_from_source_content():
+    report = build_chart_closure_report(
+        content_md="正文 {{chart:risk_matrix}}",
+        chart_assets=[{"placeholder_key": "risk_matrix", "status": "approved", "rendered_path": "/tmp/risk.png"}],
+        inserted_chart_keys=["risk_matrix"],
+        residual_placeholders=["stale_docx_placeholder"],
+    )
+
+    assert report["chart_closure_passed"] is False
+    assert report["residual_placeholder_count"] == 1
+    assert any(
+        issue["code"] == "chart_placeholder_residual" and issue["chart_key"] == "stale_docx_placeholder"
+        for issue in report["issues"]
+    )

@@ -144,7 +144,6 @@ def build_coverage_report(
     constraints: list[dict[str, Any]],
 ) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
-    chart_keys = set(_CHART_RE.findall(content_md or ""))
     present_sections = _present_section_codes(content_md)
 
     for item in checklist:
@@ -169,8 +168,9 @@ def build_coverage_report(
                     }
                 )
 
+        section_chart_keys = set(_CHART_RE.findall(body))
         for chart_key in item.get("required_charts") or []:
-            if chart_key not in chart_keys:
+            if chart_key not in section_chart_keys:
                 issues.append(
                     {"code": "missing_required_chart", "section_code": section_code, "chart_key": chart_key, "severity": "P0"}
                 )
@@ -250,6 +250,9 @@ def build_chart_closure_report(
             issues.append({"code": "chart_not_inserted", "chart_key": key, "severity": "P0"})
         if key in residual:
             issues.append({"code": "chart_placeholder_residual", "chart_key": key, "severity": "P0"})
+
+    for key in sorted(residual - referenced):
+        issues.append({"code": "chart_placeholder_residual", "chart_key": key, "severity": "P0"})
 
     return {
         "chart_closure_passed": not any(issue.get("severity") == "P0" for issue in issues),
