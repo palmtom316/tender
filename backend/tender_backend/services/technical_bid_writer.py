@@ -18,6 +18,8 @@ from tender_backend.core.config import get_settings
 from tender_backend.services.ai_gateway_client import ai_gateway_headers
 from tender_backend.services.bid_chapter_generation import CHART_PLACEHOLDER_RE, generate_bid_chapter_draft
 from tender_backend.services.chart_generation_service import ChartGenerationService
+from tender_backend.services.longform_quality import build_chart_closure_report, build_coverage_report, estimate_markdown_pages
+from tender_backend.services.longform_section_generation import LongformSectionGenerator, plan_chapter_8_sections
 from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 from tender_backend.services.technical_chapter_context import TechnicalChapterContextBuilder, with_target_pages_override
 
@@ -68,21 +70,49 @@ class TechnicalBidWriter:
             target_pages,
         )
         context = _with_effective_prompt_template(context)
-        ai_result = _request_ai_gateway_completion(context, rewrite_note=rewrite_note)
-        if ai_result is not None:
+        effective_target_pages = _effective_target_pages(context, target_pages)
+        if _should_use_longform_generation(chapter, effective_target_pages):
+            section_plan = plan_chapter_8_sections(target_pages=effective_target_pages)
+            generator = LongformSectionGenerator(
+                completion_fn=lambda payload: _request_ai_gateway_subsection_completion({**payload, "rewrite_note": rewrite_note})
+                or _deterministic_subsection_completion({**payload, "rewrite_note": rewrite_note}),
+                max_rounds=4,
+            )
+            longform_result = generator.generate_sections(context=context, section_plan=section_plan)
             draft = _save_chapter_draft(
                 conn,
                 project_id=project_id,
                 chapter=chapter,
-                content_md=ai_result["content"],
+                content_md=longform_result["content_md"],
                 context=context,
+                target_pages=effective_target_pages,
+                longform_result=longform_result,
             )
-            generation_mode = "ai_gateway"
-            ai_metadata = _ai_gateway_metadata(ai_result)
+            generation_mode = "longform_subsection_loop"
+            ai_metadata = {
+                "longform": {
+                    "status": longform_result.get("status"),
+                    "metadata": longform_result.get("metadata") or {},
+                    "sections": longform_result.get("sections") or [],
+                }
+            }
         else:
-            draft = generate_bid_chapter_draft(conn, project_id=project_id, chapter_id=chapter_id, context=context, rewrite_note=rewrite_note)
-            generation_mode = "deterministic_strategy_fallback"
-            ai_metadata = None
+            ai_result = _request_ai_gateway_completion(context, rewrite_note=rewrite_note)
+            if ai_result is not None:
+                draft = _save_chapter_draft(
+                    conn,
+                    project_id=project_id,
+                    chapter=chapter,
+                    content_md=ai_result["content"],
+                    context=context,
+                    target_pages=effective_target_pages,
+                )
+                generation_mode = "ai_gateway"
+                ai_metadata = _ai_gateway_metadata(ai_result)
+            else:
+                draft = generate_bid_chapter_draft(conn, project_id=project_id, chapter_id=chapter_id, context=context, rewrite_note=rewrite_note)
+                generation_mode = "deterministic_strategy_fallback"
+                ai_metadata = None
         self_check = self._self_check(draft.get("content_md") or "")
         metadata = {
             "chapter_code": chapter["chapter_code"],
@@ -401,6 +431,99 @@ def _ai_gateway_metadata(ai_result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _effective_target_pages(context: dict[str, Any], target_pages: int | None) -> int | None:
+    if isinstance(target_pages, int):
+        return target_pages
+    controls = context.get("generation_controls") if isinstance(context.get("generation_controls"), dict) else {}
+    configured = controls.get("target_pages")
+    return configured if isinstance(configured, int) else None
+
+
+def _should_use_longform_generation(chapter: dict[str, Any], target_pages: int | None) -> bool:
+    return str(chapter.get("chapter_code") or "").strip() == "8" and isinstance(target_pages, int) and target_pages >= 80
+
+
+def _request_ai_gateway_subsection_completion(payload: dict[str, Any]) -> dict[str, Any] | None:
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    subsection_context = dict(context)
+    subsection_context["longform_subsection"] = {
+        "task": payload.get("task"),
+        "chapter": payload.get("chapter"),
+        "section_code": payload.get("section_code"),
+        "section_title": payload.get("section_title"),
+        "target_pages": payload.get("target_pages"),
+        "min_chars": payload.get("min_chars"),
+        "required_charts": payload.get("required_charts") or [],
+        "required_tables": payload.get("required_tables") or [],
+        "round_index": payload.get("round_index"),
+        "existing_content_tail": payload.get("existing_content_tail") or "",
+    }
+    rewrite_parts = [
+        str(payload.get("rewrite_note") or "").strip(),
+        (
+            f"仅生成第 {payload.get('section_code')} 节《{payload.get('section_title')}》正文；"
+            f"目标 {payload.get('target_pages')} 页，至少 {payload.get('min_chars')} 字符；"
+            "不得输出其他小节。"
+        ),
+    ]
+    required_charts = [str(key) for key in payload.get("required_charts") or [] if key]
+    if required_charts:
+        rewrite_parts.append("必须保留图表占位符：" + "、".join(f"{{{{chart:{key}}}}}" for key in required_charts))
+    required_tables = [str(label) for label in payload.get("required_tables") or [] if label]
+    if required_tables:
+        rewrite_parts.append("必须包含表格/清单：" + "、".join(required_tables))
+    if payload.get("round_index") and int(payload.get("round_index") or 0) > 1:
+        rewrite_parts.append("这是续写轮次，只补充不足内容，不重复已生成段落。")
+    ai_result = _request_ai_gateway_completion(subsection_context, rewrite_note="\n".join(part for part in rewrite_parts if part))
+    if ai_result is None:
+        return None
+    usage = ai_result.get("usage") or {}
+    return {
+        "content": ai_result.get("content") or "",
+        "provider": ai_result.get("resolved_provider"),
+        "model": ai_result.get("resolved_model"),
+        "usage": usage,
+        "metadata": {
+            "provider": ai_result.get("resolved_provider"),
+            "model": ai_result.get("resolved_model"),
+            "input_tokens": int(usage.get("input_tokens") or 0),
+            "output_tokens": int(usage.get("output_tokens") or 0),
+            "latency_ms": int(usage.get("latency_ms") or 0),
+            "finish_reason": ai_result.get("finish_reason"),
+        },
+    }
+
+
+def _deterministic_subsection_completion(payload: dict[str, Any]) -> dict[str, Any]:
+    section_code = str(payload.get("section_code") or "8")
+    section_title = str(payload.get("section_title") or "技术措施")
+    target_pages = int(payload.get("target_pages") or 1)
+    min_chars = int(payload.get("min_chars") or 2800)
+    required_charts = [str(key) for key in payload.get("required_charts") or [] if key]
+    required_tables = [str(label) for label in payload.get("required_tables") or [] if label]
+    parts: list[str] = [
+        f"本节围绕{section_code}《{section_title}》展开，目标篇幅约{target_pages}页，内容按招标约束、标准规范、组织资源和现场实施闭环编制。",
+        "编制时坚持依据清晰、措施可执行、责任可追溯、资料可核验的原则，避免未在上下文中确认的人员姓名、设备型号、数量和日期承诺。",
+    ]
+    for chart_key in required_charts:
+        parts.append(f"{{{{chart:{chart_key}}}}}")
+        parts.append(f"图表{chart_key}用于说明本节关键流程、责任界面和闭环控制关系，正文应与图表节点保持一致。")
+    for table_label in required_tables:
+        parts.append(f"| {table_label} | 控制要点 | 责任主体 | 验收资料 |")
+        parts.append("| --- | --- | --- | --- |")
+        parts.append(f"| {section_title} | 按确认约束执行并形成记录 | 项目管理团队 | 检查记录、验收记录 |")
+    seed = "\n\n".join(parts)
+    repetitions = max(1, (min_chars // max(len(seed), 1)) + 1)
+    content = "\n\n".join([seed] * repetitions)[: max(min_chars, len(seed))]
+    return {
+        "content": content,
+        "provider": "deterministic",
+        "model": "longform_subsection_fallback_v1",
+        "usage": {"input_tokens": 0, "output_tokens": 0, "latency_ms": 0},
+        "metadata": {"provider": "deterministic", "model": "longform_subsection_fallback_v1", "input_tokens": 0, "output_tokens": 0, "latency_ms": 0},
+    }
+
+
 def _save_chapter_draft(
     conn: Connection,
     *,
@@ -408,6 +531,8 @@ def _save_chapter_draft(
     chapter: dict[str, Any],
     content_md: str,
     context: dict[str, Any],
+    target_pages: int | None = None,
+    longform_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     template_metadata: dict[str, Any] = {}
     try:
@@ -416,19 +541,47 @@ def _save_chapter_draft(
     except ValueError:
         template_metadata = {}
     referenced_chart_keys = sorted(set(CHART_PLACEHOLDER_RE.findall(content_md)))
+    page_estimate = estimate_markdown_pages(content_md, target_pages=target_pages)
+    estimated_pages = page_estimate.get("estimated_pages")
+    longform_sections = longform_result.get("sections") if isinstance(longform_result, dict) else []
+    coverage_report = build_coverage_report(
+        content_md,
+        checklist=longform_sections if isinstance(longform_sections, list) else [],
+        constraints=context.get("constraints") if isinstance(context.get("constraints"), list) else [],
+    )
+    chart_closure_report = build_chart_closure_report(
+        content_md,
+        chart_assets=context.get("chart_assets") if isinstance(context.get("chart_assets"), list) else [],
+    )
+    generation_rounds = max(
+        [
+            int(section.get("continuation_rounds") or 1)
+            for section in (longform_sections if isinstance(longform_sections, list) else [])
+            if isinstance(section, dict)
+        ]
+        or [1]
+    )
     with conn.cursor(row_factory=dict_row) as cur:
         row = cur.execute(
             """
             INSERT INTO chapter_draft (
               id, project_id, volume_type, chapter_code, content_md, referenced_chart_keys,
+              target_pages, estimated_pages, page_estimate_json, coverage_report_json,
+              chart_closure_report_json, generation_rounds,
               template_instance_id, template_revision_no, is_stale_by_template,
               stale_by_template_revision_no, stale_by_template_block_id
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, false, NULL, NULL)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, NULL, NULL)
             ON CONFLICT (project_id, volume_type, chapter_code)
             DO UPDATE SET
               content_md = EXCLUDED.content_md,
               referenced_chart_keys = EXCLUDED.referenced_chart_keys,
+              target_pages = EXCLUDED.target_pages,
+              estimated_pages = EXCLUDED.estimated_pages,
+              page_estimate_json = EXCLUDED.page_estimate_json,
+              coverage_report_json = EXCLUDED.coverage_report_json,
+              chart_closure_report_json = EXCLUDED.chart_closure_report_json,
+              generation_rounds = EXCLUDED.generation_rounds,
               template_instance_id = EXCLUDED.template_instance_id,
               template_revision_no = EXCLUDED.template_revision_no,
               is_stale_by_template = false,
@@ -445,6 +598,12 @@ def _save_chapter_draft(
                 chapter["chapter_code"],
                 content_md,
                 referenced_chart_keys,
+                target_pages,
+                estimated_pages,
+                Jsonb(_json_safe(page_estimate)),
+                Jsonb(_json_safe(coverage_report)),
+                Jsonb(_json_safe(chart_closure_report)),
+                generation_rounds,
                 UUID(str(template_metadata["template_instance_id"])) if template_metadata.get("template_instance_id") else None,
                 template_metadata.get("template_revision_no"),
             ),

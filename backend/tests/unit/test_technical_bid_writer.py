@@ -98,6 +98,134 @@ def test_technical_writer_uses_ai_gateway_content_when_available(monkeypatch) ->
     assert captured["metadata"]["ai_gateway"]["resolved_model"] == "deepseek-v4-flash"
 
 
+def test_technical_writer_routes_large_chapter_8_through_longform_subsection_loop(monkeypatch) -> None:
+    project_id = uuid4()
+    outline_id = uuid4()
+    chapter_id = uuid4()
+    captured = {}
+
+    class _Writer(TechnicalBidWriter):
+        def _confirmed_outline(self, conn, *, project_id):
+            return {"id": outline_id, "project_id": project_id, "status": "confirmed"}
+
+        def _chapter(self, conn, *, project_id, chapter_id):
+            return {
+                "id": chapter_id,
+                "project_id": project_id,
+                "chapter_code": "8",
+                "chapter_title": "施工方案与技术措施",
+                "volume_type": "technical",
+            }
+
+        def _create_run(self, conn, **kwargs):
+            captured.update(kwargs)
+            return {"id": uuid4(), "metadata_json": kwargs["metadata"]}
+
+    class _ContextBuilder:
+        def build(self, conn, *, project_id, chapter_id):
+            return {
+                "chapter": {"id": chapter_id, "chapter_code": "8", "chapter_title": "施工方案与技术措施", "volume_type": "technical"},
+                "constraints": [{"id": uuid4(), "confirmation_level": "normal"}],
+                "standard_clauses": [],
+                "personnel_selections": [],
+                "equipment_selections": [],
+                "company_assets": [],
+                "recommended_charts": [],
+                "chart_assets": [],
+                "generation_controls": {"target_pages": 80, "target_pages_source": "default"},
+                "strategy": {"key": "construction_plan_and_technical_measures"},
+                "prompt_template": {"status": "loaded", "content_md": "第8章提示词"},
+            }
+
+    class _LongformSectionGenerator:
+        def __init__(self, completion_fn, max_rounds=4):
+            self.completion_fn = completion_fn
+            self.max_rounds = max_rounds
+
+        def generate_sections(self, context, section_plan):
+            assert context["generation_controls"]["target_pages"] == 100
+            assert section_plan[0]["section_code"] == "8.1"
+            return {
+                "status": "completed",
+                "content_md": "## 8.1 编制依据\n\n长篇分节生成正文",
+                "sections": [
+                    {
+                        "section_code": "8.1",
+                        "title": "编制依据",
+                        "target_pages": 100,
+                        "min_chars": 1,
+                        "actual_chars": 8,
+                        "status": "completed",
+                        "continuation_rounds": 3,
+                        "required_charts": [],
+                        "required_tables": [],
+                        "prompt_hash": "hash-8-1",
+                    }
+                ],
+                "metadata": {"total_input_tokens": 10, "total_output_tokens": 20, "latency_ms": 30},
+            }
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "INSERT INTO chapter_draft" in query:
+                self.result = [
+                    {
+                        "id": uuid4(),
+                        "project_id": params[1],
+                        "volume_type": params[2],
+                        "chapter_code": params[3],
+                        "content_md": params[4],
+                        "referenced_chart_keys": params[5],
+                        "target_pages": params[6],
+                        "estimated_pages": params[7],
+                        "page_estimate_json": params[8],
+                        "coverage_report_json": params[9],
+                        "chart_closure_report_json": params[10],
+                        "generation_rounds": params[11],
+                    }
+                ]
+            return self
+
+        def fetchone(self):
+            return self.result[0] if getattr(self, "result", []) else None
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
+    monkeypatch.setattr("tender_backend.services.technical_bid_writer.LongformSectionGenerator", _LongformSectionGenerator, raising=False)
+    monkeypatch.setattr(
+        "tender_backend.services.technical_bid_writer.plan_chapter_8_sections",
+        lambda *, target_pages: [{"section_code": "8.1", "title": "编制依据", "target_pages": target_pages, "min_chars": 1}],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.technical_bid_writer._request_ai_gateway_completion",
+        lambda context, rewrite_note=None: {"content": "THIS_SINGLE_PASS_CONTENT_MUST_NOT_BE_USED", "usage": {}},
+        raising=False,
+    )
+
+    result = _Writer().generate_chapter(_Conn(), project_id=project_id, chapter_id=chapter_id, target_pages=100)
+
+    assert result["draft"]["target_pages"] == 100
+    assert "## 8.1 编制依据" in result["draft"]["content_md"]
+    assert "THIS_SINGLE_PASS_CONTENT_MUST_NOT_BE_USED" not in result["draft"]["content_md"]
+    assert result["draft"]["generation_rounds"] == 3
+    assert captured["metadata"]["generation_mode"] == "longform_subsection_loop"
+    assert captured["metadata"]["ai_gateway"]["longform"]["metadata"]["total_output_tokens"] == 20
+    assert captured["metadata"]["ai_gateway"]["longform"]["sections"][0]["section_code"] == "8.1"
+
+
 def test_technical_writer_clears_only_template_stale_state(monkeypatch) -> None:
     project_id = uuid4()
     outline_id = uuid4()
