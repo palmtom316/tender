@@ -59,6 +59,15 @@ describe("ExportGateContent", () => {
         format_passed: false,
         format_status: "warning_not_checked",
         format_message: "尚未执行自动格式校验",
+        page_count_passed: false,
+        page_count_status: "failed_estimate_below_minimum",
+        page_count_evidence: [{ target_pages: 100, minimum_required_pages: 90, estimated_pages: 88, actual_pages: null }],
+        coverage_passed: false,
+        coverage_issue_count: 1,
+        coverage_issues: [{ code: "missing_section", section_code: "8.2", severity: "P0" }],
+        chart_closure_passed: false,
+        chart_closure_issue_count: 1,
+        chart_closure_issues: [{ code: "chart_not_inserted", chart_key: "risk_matrix", severity: "P0" }],
       },
     });
   });
@@ -77,5 +86,11 @@ describe("ExportGateContent", () => {
     expect(screen.getByText("图表审批")).toBeInTheDocument();
     expect(screen.getByText("1 个引用图表未审批")).toBeInTheDocument();
     expect(screen.getByText("尚未执行自动格式校验")).toBeInTheDocument();
+    expect(screen.getByText("页数硬闸门")).toBeInTheDocument();
+    expect(screen.getByText(/目标 100 页/)).toBeInTheDocument();
+    expect(screen.getByText("内容覆盖完整性")).toBeInTheDocument();
+    expect(screen.getByText(/1 个覆盖缺口/)).toBeInTheDocument();
+    expect(screen.getByText("图表闭环")).toBeInTheDocument();
+    expect(screen.getByText(/risk_matrix/)).toBeInTheDocument();
   });
 });

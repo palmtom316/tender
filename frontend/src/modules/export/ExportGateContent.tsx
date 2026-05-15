@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createDeliveryPackage, createExport, fetchExportGates } from "../../lib/api";
-import type { ExportMode } from "../../lib/api";
+import type { ExportGates, ExportMode } from "../../lib/api";
 import { useNavigation } from "../../lib/NavigationContext";
 import { Card } from "../../components/ui/Card";
 import { ClayButton } from "../../components/ui/ClayButton";
@@ -38,6 +38,14 @@ function GateIndicator({ passed, label, detail }: { passed: boolean; label: stri
       <p className="gate-detail">{detail}</p>
     </Card>
   );
+}
+
+
+function pageEvidenceDetail(gates: ExportGates["gates"]) {
+  const first = gates.page_count_evidence?.[0];
+  if (!first) return gates.page_count_passed ? "未设置目标页数" : "缺少页数证据";
+  const actual = first.actual_pages == null ? "实际未校验" : `实际 ${first.actual_pages} 页`;
+  return `目标 ${first.target_pages ?? "-"} 页，最低 ${first.minimum_required_pages ?? "-"} 页，估算 ${first.estimated_pages ?? "-"} 页，${actual}`;
 }
 
 export function ExportGateContent() {
@@ -170,6 +178,29 @@ export function ExportGateContent() {
               gates.template_stale_artifacts_clear ?? true
                 ? "正文和图表均已按当前模板生成"
                 : `${gates.stale_template_artifact_count ?? 0} 项正文或图表需按新模板重新生成`
+            }
+          />
+          <GateIndicator
+            passed={gates.page_count_passed ?? true}
+            label="页数硬闸门"
+            detail={pageEvidenceDetail(gates)}
+          />
+          <GateIndicator
+            passed={gates.coverage_passed ?? true}
+            label="内容覆盖完整性"
+            detail={
+              gates.coverage_passed ?? true
+                ? "章节、硬约束、必备图表和表格均已覆盖"
+                : `${gates.coverage_issue_count ?? 0} 个覆盖缺口${gates.coverage_issues?.[0]?.section_code ? `：${gates.coverage_issues[0].section_code}` : ""}`
+            }
+          />
+          <GateIndicator
+            passed={gates.chart_closure_passed ?? gates.charts_approved}
+            label="图表闭环"
+            detail={
+              gates.chart_closure_passed ?? gates.charts_approved
+                ? "图表引用、资产、渲染和插入均已闭环"
+                : `${gates.chart_closure_issue_count ?? 0} 个图表缺口${gates.chart_closure_issues?.[0]?.chart_key ? `：${gates.chart_closure_issues[0].chart_key}` : ""}`
             }
           />
           <GateIndicator

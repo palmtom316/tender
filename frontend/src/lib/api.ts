@@ -1106,6 +1106,21 @@ export interface ExportGates {
     stale_artifact_count: number;
     template_stale_artifacts_clear?: boolean;
     stale_template_artifact_count?: number;
+    page_count_passed?: boolean;
+    page_count_status?: "passed" | "not_required" | "failed_actual_below_minimum" | "failed_estimate_below_minimum" | "warning_actual_unchecked" | "failed";
+    page_count_evidence?: Array<{
+      target_pages?: number | null;
+      minimum_required_pages?: number | null;
+      estimated_pages?: number | null;
+      actual_pages?: number | null;
+      page_count_message?: string;
+    }>;
+    coverage_passed?: boolean;
+    coverage_issue_count?: number;
+    coverage_issues?: Array<{ code: string; section_code?: string; chart_key?: string; severity?: string }>;
+    chart_closure_passed?: boolean;
+    chart_closure_issue_count?: number;
+    chart_closure_issues?: Array<{ code: string; chart_key?: string; severity?: string }>;
     format_passed: boolean;
     format_status: "passed" | "failed" | "warning_not_checked";
     format_message?: string;
