@@ -66,6 +66,7 @@ def _asset(*, placeholder_key: str, status: str) -> ChartAssetRow:
         is_stale_by_template=False,
         stale_by_template_revision_no=None,
         stale_by_template_block_id=None,
+        template_stale_reason=None,
         metadata_json={},
         created_at=now,
         updated_at=now,
@@ -411,3 +412,140 @@ def test_create_export_blocks_when_final_gate_fails(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert "export gates block export" in str(exc_info.value.detail)
+
+
+
+def test_export_gate_blocks_when_page_estimate_below_target(monkeypatch):
+    project_id = uuid4()
+
+    class _ReqRepo:
+        def unconfirmed_veto_count(self, conn, *, project_id):
+            return 0
+
+    class _ChartRepo:
+        def list_by_project(self, conn, *, project_id):
+            return []
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"items": []}
+
+        def latest(self, conn, *, project_id):
+            return {"items": []}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+
+        def fetchone(self):
+            if "metadata_json FROM project" in self.query:
+                return {"metadata_json": {}}
+            if "COUNT(*)" in self.query or " AS count" in self.query:
+                return {"count": 0, "stale_template_artifact_count": 0}
+            return None
+
+        def fetchall(self):
+            if "FROM chapter_draft" in self.query:
+                return [
+                    {
+                        "content_md": "# 8",
+                        "referenced_chart_keys": [],
+                        "chapter_code": "8",
+                        "target_pages": 100,
+                        "estimated_pages": 88,
+                        "page_estimate_json": {},
+                        "coverage_report_json": {"coverage_passed": True, "issues": []},
+                        "chart_closure_report_json": {"chart_closure_passed": True, "issues": []},
+                    }
+                ]
+            return []
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    monkeypatch.setattr("tender_backend.services.export_gate_service.RequirementRepository", _ReqRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.ChartAssetRepository", _ChartRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.get_blocking_issues", lambda conn, *, project_id: [])
+
+    state = build_export_gate_state(_Conn(), project_id=project_id)
+
+    assert state["gates"]["page_count_passed"] is False
+    assert state["gates"]["page_count_status"] == "failed_estimate_below_minimum"
+    assert state["can_export"] is False
+
+
+def test_export_gate_blocks_when_coverage_report_has_p0_issue(monkeypatch):
+    project_id = uuid4()
+
+    class _ReqRepo:
+        def unconfirmed_veto_count(self, conn, *, project_id):
+            return 0
+
+    class _ChartRepo:
+        def list_by_project(self, conn, *, project_id):
+            return []
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"items": []}
+
+        def latest(self, conn, *, project_id):
+            return {"items": []}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+
+        def fetchone(self):
+            if "metadata_json FROM project" in self.query:
+                return {"metadata_json": {}}
+            if "COUNT(*)" in self.query or " AS count" in self.query:
+                return {"count": 0, "stale_template_artifact_count": 0}
+            return None
+
+        def fetchall(self):
+            if "FROM chapter_draft" in self.query:
+                return [
+                    {
+                        "content_md": "# 8",
+                        "referenced_chart_keys": [],
+                        "chapter_code": "8",
+                        "target_pages": 100,
+                        "estimated_pages": 95,
+                        "page_estimate_json": {},
+                        "coverage_report_json": {"coverage_passed": False, "issues": [{"code": "missing_section", "severity": "P0"}]},
+                        "chart_closure_report_json": {"chart_closure_passed": True, "issues": []},
+                    }
+                ]
+            return []
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    monkeypatch.setattr("tender_backend.services.export_gate_service.RequirementRepository", _ReqRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.ChartAssetRepository", _ChartRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.get_blocking_issues", lambda conn, *, project_id: [])
+
+    state = build_export_gate_state(_Conn(), project_id=project_id)
+
+    assert state["gates"]["coverage_passed"] is False
+    assert state["gates"]["coverage_issue_count"] == 1
+    assert state["can_export"] is False

@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 
 from tender_backend.db.repositories.chart_asset_repo import ChartAssetRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
+from tender_backend.services.longform_quality import build_page_gate
 from tender_backend.services.review_service.review_engine import get_blocking_issues
 from tender_backend.services.tender_constraint_service import TenderConstraintService
 
@@ -121,6 +122,57 @@ def _unresolved_critical_constraint_count(constraint_set: dict | None) -> int:
     return count
 
 
+
+def _draft_quality_evidence(conn: Connection, *, project_id: UUID) -> list[dict]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            """
+            SELECT chapter_code, target_pages, estimated_pages, page_estimate_json,
+                   coverage_report_json, chart_closure_report_json
+            FROM chapter_draft
+            WHERE project_id = %s
+            """,
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _longform_quality_gates(drafts: list[dict]) -> dict:
+    page_gates = []
+    coverage_issues = []
+    chart_issues = []
+    for row in drafts:
+        page_estimate_json = row.get("page_estimate_json") or {}
+        if row.get("target_pages"):
+            actual_status = page_estimate_json.get("actual_status") or page_estimate_json.get("status") or "unchecked"
+            page_gates.append(
+                build_page_gate(
+                    target_pages=int(row.get("target_pages")),
+                    estimated_pages=row.get("estimated_pages"),
+                    actual_pages=page_estimate_json.get("actual_pages"),
+                    actual_status=str(actual_status),
+                )
+            )
+        coverage = row.get("coverage_report_json") or {}
+        chart = row.get("chart_closure_report_json") or {}
+        coverage_issues.extend(coverage.get("issues") or [])
+        chart_issues.extend(chart.get("issues") or [])
+
+    failed_page_gate = next((gate for gate in page_gates if not gate.get("page_count_passed")), None)
+    page_passed = failed_page_gate is None
+    return {
+        "page_count_passed": page_passed,
+        "page_count_status": "passed" if page_passed else failed_page_gate.get("page_count_status", "failed"),
+        "page_count_evidence": page_gates,
+        "coverage_passed": not any(issue.get("severity") == "P0" for issue in coverage_issues),
+        "coverage_issue_count": len(coverage_issues),
+        "coverage_issues": coverage_issues[:20],
+        "chart_closure_passed": not any(issue.get("severity") == "P0" for issue in chart_issues),
+        "chart_closure_issue_count": len(chart_issues),
+        "chart_closure_issues": chart_issues[:20],
+    }
+
+
 def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
     req_repo = RequirementRepository()
     unconfirmed_veto = req_repo.unconfirmed_veto_count(conn, project_id=project_id)
@@ -139,6 +191,7 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
     stale_artifact_count = _stale_artifact_count(conn, project_id=project_id)
     stale_template_artifact_count = _stale_template_artifact_count(conn, project_id=project_id)
     unresolved_critical_constraint_count = _unresolved_critical_constraint_count(latest_constraint_set)
+    quality_gates = _longform_quality_gates(_draft_quality_evidence(conn, project_id=project_id))
 
     gates = {
         "veto_confirmed": unconfirmed_veto == 0,
@@ -157,6 +210,7 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
         "template_stale_artifacts_clear": stale_template_artifact_count == 0,
         "stale_template_artifact_count": stale_template_artifact_count,
         **template_gate,
+        **quality_gates,
         **format_gate,
     }
     return {
@@ -171,5 +225,8 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
             and gates["template_required_items_rendered"]
             and gates["stale_artifacts_clear"]
             and gates["template_stale_artifacts_clear"]
+            and gates["page_count_passed"]
+            and gates["coverage_passed"]
+            and gates["chart_closure_passed"]
         ),
     }
