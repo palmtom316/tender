@@ -50,10 +50,10 @@ _DEFAULT_TABLES: dict[str, list[str]] = {
 def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
     """Create the 15-section chapter 8 plan with an exact page budget."""
 
-    if target_pages < 0:
-        raise ValueError("target_pages must be non-negative")
-
     section_count = len(_CHAPTER_8_TITLES)
+    if target_pages < section_count:
+        raise ValueError(f"target_pages must be at least {section_count}")
+
     base_pages, extra_pages = divmod(target_pages, section_count)
     sections: list[dict[str, Any]] = []
 
@@ -75,8 +75,22 @@ def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
     return sections
 
 
+def _json_hashable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_hashable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_hashable(item) for item in value]
+    return value
+
+
 def _stable_sha256(payload: dict[str, Any]) -> str:
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded = json.dumps(
+        _json_hashable(payload),
+        default=str,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 

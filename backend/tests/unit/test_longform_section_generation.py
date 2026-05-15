@@ -1,7 +1,18 @@
+from datetime import datetime, timezone
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID
+
+import pytest
+
 from tender_backend.services.longform_section_generation import (
     LongformSectionGenerator,
     plan_chapter_8_sections,
 )
+
+
+class ReviewPriority(Enum):
+    HIGH = "high"
 
 
 def test_plan_chapter_8_sections_creates_8_1_to_8_15_with_page_budget():
@@ -10,6 +21,12 @@ def test_plan_chapter_8_sections_creates_8_1_to_8_15_with_page_budget():
     assert [section["section_code"] for section in sections] == [f"8.{index}" for index in range(1, 16)]
     assert sum(section["target_pages"] for section in sections) == 100
     assert all(section["min_chars"] >= 2800 for section in sections)
+
+
+@pytest.mark.parametrize("target_pages", [0, 14])
+def test_plan_chapter_8_sections_rejects_incoherent_page_budgets(target_pages):
+    with pytest.raises(ValueError, match="target_pages must be at least 15"):
+        plan_chapter_8_sections(target_pages=target_pages)
 
 
 def test_generator_continues_until_section_meets_min_chars():
@@ -40,6 +57,39 @@ def test_generator_continues_until_section_meets_min_chars():
     assert result["status"] == "completed"
     assert result["sections"][0]["continuation_rounds"] == 2
     assert "## 8.1 编制依据" in result["content_md"]
+
+
+def test_generate_sections_succeeds_and_hashes_prompt_with_common_non_json_context_values():
+    calls = []
+
+    def fake_completion(payload):
+        calls.append(payload)
+        return {"content": "足够内容" * 10, "metadata": {}}
+
+    generator = LongformSectionGenerator(completion_fn=fake_completion, max_rounds=1)
+    result = generator.generate_sections(
+        context={
+            "project_id": UUID("12345678-1234-5678-1234-567812345678"),
+            "deadline": datetime(2026, 5, 15, 9, 30, tzinfo=timezone.utc),
+            "budget": Decimal("12.34"),
+            "priority": ReviewPriority.HIGH,
+            7: "mixed non-string key",
+        },
+        section_plan=[
+            {
+                "section_code": "8.1",
+                "title": "编制依据",
+                "target_pages": 1,
+                "min_chars": 10,
+                "required_charts": [],
+                "required_tables": [],
+            }
+        ],
+    )
+
+    assert calls
+    assert result["status"] == "completed"
+    assert len(result["sections"][0]["prompt_hash"]) == 64
 
 
 def test_generator_marks_section_failed_after_max_rounds():
