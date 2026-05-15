@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from typing import Any
 
 _CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
@@ -126,7 +127,7 @@ def _present_section_codes(content_md: str) -> set[str]:
 
 
 def _section_body(content_md: str, section_code: str) -> str:
-    heading_pattern = re.compile(rf"^(#{{2,6}})\s+{re.escape(section_code)}\b.*$", re.MULTILINE)
+    heading_pattern = re.compile(rf"^(#{{2,6}})\s+{re.escape(section_code)}(?=\s|$).*$", re.MULTILINE)
     match = heading_pattern.search(content_md or "")
     if not match:
         return ""
@@ -208,7 +209,7 @@ def build_coverage_report(
 
 
 def _asset_value(asset: Any, key: str) -> Any:
-    if isinstance(asset, dict):
+    if isinstance(asset, Mapping):
         return asset.get(key)
     return getattr(asset, key, None)
 

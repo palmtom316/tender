@@ -1,3 +1,5 @@
+from types import MappingProxyType
+
 from tender_backend.services.longform_quality import (
     build_chart_closure_report,
     build_coverage_report,
@@ -119,3 +121,31 @@ def test_chart_closure_report_blocks_residual_placeholder_absent_from_source_con
         issue["code"] == "chart_placeholder_residual" and issue["chart_key"] == "stale_docx_placeholder"
         for issue in report["issues"]
     )
+
+
+def test_chart_closure_report_accepts_mapping_like_chart_assets():
+    asset = MappingProxyType({"placeholder_key": "risk_matrix", "status": "approved", "rendered_path": "/tmp/risk.png"})
+
+    report = build_chart_closure_report(
+        content_md="正文 {{chart:risk_matrix}}",
+        chart_assets=[asset],
+        inserted_chart_keys=["risk_matrix"],
+    )
+
+    assert report["chart_closure_passed"] is True
+    assert report["asset_chart_count"] == 1
+    assert report["approved_chart_count"] == 1
+    assert report["rendered_chart_count"] == 1
+    assert report["issues"] == []
+
+
+def test_coverage_report_does_not_treat_child_heading_as_required_parent_section():
+    content = "## 8.1.1 子项\n子项内容充分。"
+    checklist = [
+        {"section_code": "8.1", "title": "编制依据", "min_chars": 1, "required_charts": [], "required_tables": []},
+    ]
+
+    report = build_coverage_report(content, checklist=checklist, constraints=[])
+
+    assert report["coverage_passed"] is False
+    assert any(issue["code"] == "missing_section" and issue["section_code"] == "8.1" for issue in report["issues"])
