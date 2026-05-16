@@ -128,14 +128,24 @@ def _present_section_codes(content_md: str) -> set[str]:
 
 def _section_body(content_md: str, section_code: str) -> str:
     heading_pattern = re.compile(rf"^(#{{2,6}})\s+{re.escape(section_code)}(?=\s|$).*$", re.MULTILINE)
-    match = heading_pattern.search(content_md or "")
-    if not match:
+    matches = list(heading_pattern.finditer(content_md or ""))
+    if not matches:
         return ""
 
-    level = len(match.group(1))
-    next_heading = re.search(rf"^#{{2,{level}}}\s+\S.*$", (content_md or "")[match.end() :], re.MULTILINE)
-    end = match.end() + next_heading.start() if next_heading else len(content_md or "")
-    return (content_md or "")[match.end() : end]
+    # 选择同节多次出现时“信息量最高”的正文，避免前置空壳标题把本节误判为 0 字。
+    best_body = ""
+    best_units = -1
+    source = content_md or ""
+    for match in matches:
+        level = len(match.group(1))
+        next_heading = re.search(rf"^#{{2,{level}}}\s+\S.*$", source[match.end() :], re.MULTILINE)
+        end = match.end() + next_heading.start() if next_heading else len(source)
+        body = source[match.end() : end]
+        units = _weighted_text_units(body)
+        if units > best_units:
+            best_units = units
+            best_body = body
+    return best_body
 
 
 def build_coverage_report(
@@ -265,7 +275,11 @@ def build_chart_closure_report(
                 approved_count += 1
             else:
                 issues.append({"code": "chart_not_approved", "chart_key": key, "severity": "P0"})
-            if _asset_value(asset, "rendered_path") or _asset_value(asset, "rendered_svg"):
+            if (
+                _asset_value(asset, "rendered_path")
+                or _asset_value(asset, "rendered_svg")
+                or _asset_value(asset, "rendered_png_path")
+            ):
                 rendered_count += 1
             else:
                 issues.append({"code": "chart_not_rendered", "chart_key": key, "severity": "P0"})

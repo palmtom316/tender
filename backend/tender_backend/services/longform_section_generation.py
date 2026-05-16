@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -28,11 +30,11 @@ _CHAPTER_8_TITLES = [
 ]
 
 _DEFAULT_CHARTS: dict[str, list[str]] = {
-    "8.3": ["construction_organization_chart"],
-    "8.4": ["master_schedule"],
-    "8.7": ["site_layout_plan"],
-    "8.8": ["quality_management_flow"],
-    "8.9": ["safety_management_flow"],
+    "8.3": ["construction_flow"],
+    "8.4": ["schedule_gantt"],
+    "8.7": ["schedule_gantt"],
+    "8.8": ["quality_system"],
+    "8.9": ["safety_system"],
     "8.12": ["risk_matrix"],
 }
 
@@ -45,6 +47,15 @@ _DEFAULT_TABLES: dict[str, list[str]] = {
     "8.11": ["工期保证措施表"],
     "8.12": ["重点难点应对表"],
 }
+
+_CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
+_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _weighted_text_units(content_md: str) -> int:
+    chinese_chars = len(_CHINESE_RE.findall(content_md or ""))
+    western_words = len(_WORD_RE.findall(content_md or ""))
+    return chinese_chars + math.ceil(western_words * 1.8)
 
 
 def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
@@ -121,7 +132,12 @@ class LongformSectionGenerator:
         self.completion_fn = completion_fn
         self.max_rounds = max_rounds
 
-    def generate_sections(self, context: dict, section_plan: list[dict]) -> dict:
+    def generate_sections(
+        self,
+        context: dict,
+        section_plan: list[dict],
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict:
         content_parts: list[str] = []
         section_results: list[dict[str, Any]] = []
         total_input_tokens = 0
@@ -140,6 +156,20 @@ class LongformSectionGenerator:
             rounds = 0
 
             for round_index in range(1, self.max_rounds + 1):
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "round_started",
+                            "section_code": section_code,
+                            "title": title,
+                            "round_index": round_index,
+                            "max_rounds": self.max_rounds,
+                            "completed_sections": len(section_results),
+                            "total_sections": len(section_plan),
+                            "content_md": f"## {section_code} {title}\n\n{generated}".rstrip(),
+                            "percent": int(((len(section_results) + (round_index - 1) / self.max_rounds) / max(len(section_plan), 1)) * 100),
+                        }
+                    )
                 payload = {
                     "task": "generate_longform_subsection",
                     "chapter": "8",
@@ -166,10 +196,26 @@ class LongformSectionGenerator:
                 total_output_tokens += _int_metadata(metadata, "output_tokens")
                 total_latency_ms += _int_metadata(metadata, "latency_ms")
 
-                if len(generated) >= min_chars:
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "event": "round_progress",
+                            "section_code": section_code,
+                            "title": title,
+                            "round_index": round_index,
+                            "max_rounds": self.max_rounds,
+                            "completed_sections": len(section_results),
+                            "total_sections": len(section_plan),
+                            "content_md": f"## {section_code} {title}\n\n{generated}".rstrip(),
+                            "percent": int(((len(section_results) + round_index / self.max_rounds) / max(len(section_plan), 1)) * 100),
+                        }
+                    )
+
+                if _weighted_text_units(generated) >= min_chars:
                     break
 
-            status = "completed" if len(generated) >= min_chars else "failed_min_chars"
+            weighted_chars = _weighted_text_units(generated)
+            status = "completed" if weighted_chars >= min_chars else "failed_min_chars"
             section_md = f"## {section_code} {title}\n\n{generated}".rstrip()
             content_parts.append(section_md)
             page_estimate = estimate_markdown_pages(section_md, target_pages=target_pages)
@@ -179,7 +225,7 @@ class LongformSectionGenerator:
                     "title": title,
                     "target_pages": target_pages,
                     "min_chars": min_chars,
-                    "actual_chars": len(generated),
+                    "actual_chars": weighted_chars,
                     "status": status,
                     "continuation_rounds": rounds,
                     "required_charts": required_charts,
@@ -188,6 +234,21 @@ class LongformSectionGenerator:
                     "page_estimate": page_estimate,
                 }
             )
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "event": "section_completed",
+                        "section_code": section_code,
+                        "title": title,
+                        "round_index": rounds,
+                        "max_rounds": self.max_rounds,
+                        "completed_sections": len(section_results),
+                        "total_sections": len(section_plan),
+                        "content_md": "\n\n".join(content_parts),
+                        "section_result": section_results[-1],
+                        "percent": int((len(section_results) / max(len(section_plan), 1)) * 100),
+                    }
+                )
 
         content_md = "\n\n".join(content_parts)
         overall_status = "completed" if all(section["status"] == "completed" for section in section_results) else "failed"

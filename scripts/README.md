@@ -11,6 +11,10 @@
 
 ## Development / Debug Scripts
 
+- `doctor_local.sh`
+  - 本地 Docker 调试前的健康检查
+  - 验证前端、后端、dev-token 登录和关键模板包是否可用
+  - 若看到“登录已失效”或“当前没有投标文件模版”，先运行它定位是认证问题还是数据问题
 - `generate_sgcc_chapters_docx.py`
   - **仅用于离线提示词调试**
   - **不是生产链路**

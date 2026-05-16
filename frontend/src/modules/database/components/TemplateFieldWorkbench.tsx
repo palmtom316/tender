@@ -620,7 +620,7 @@ export function TemplateFieldWorkbench() {
                 </span>
               </button>
             ))}
-            {(packagesQuery.data?.length ?? 0) === 0 && (
+            {!packagesQuery.isLoading && !packagesQuery.isError && (packagesQuery.data?.length ?? 0) === 0 && (
               <div className="template-strip-empty">
                 {selectedCategory ? `${selectedCategory.display_name} 下暂无投标文件模版。` : "当前没有投标文件模版。"}
               </div>

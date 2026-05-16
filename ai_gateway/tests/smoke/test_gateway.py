@@ -1,6 +1,17 @@
+import pytest
+
 from tender_ai_gateway.core.config import get_settings
 from tender_ai_gateway.main import app
 from tender_ai_gateway.test_support.asgi_client import SyncASGIClient
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("AI_GATEWAY_SHARED_SECRET", "")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _fake_chat_result(

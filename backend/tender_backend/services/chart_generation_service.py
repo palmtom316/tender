@@ -13,6 +13,7 @@ from uuid import UUID
 from psycopg import Connection
 
 from tender_backend.core.config import get_settings
+from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.db.repositories.chart_asset_repo import (
     ChartAssetRepository,
     chart_asset_to_dict,
@@ -194,12 +195,14 @@ class ChartGenerationService:
     def generate_spec(
         self,
         *,
+        conn: Connection | None = None,
         chart_type: str,
         title: str,
         placeholder_key: str | None = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         ai_spec = _generate_spec_with_ai(
+            conn=conn,
             chart_type=chart_type,
             title=title,
             placeholder_key=placeholder_key,
@@ -338,6 +341,7 @@ def default_chart_spec(*, chart_type: str, title: str, placeholder_key: str | No
 
 def _generate_spec_with_ai(
     *,
+    conn: Connection | None,
     chart_type: str,
     title: str,
     placeholder_key: str | None,
@@ -363,6 +367,11 @@ def _generate_spec_with_ai(
         "max_tokens": 1600,
         "response_format": {"type": "json_object"},
     }
+    primary_override, fallback_override = _generate_section_overrides(conn)
+    if primary_override:
+        payload["primary_override"] = primary_override
+    if fallback_override:
+        payload["fallback_override"] = fallback_override
     request = urllib.request.Request(
         settings.ai_gateway_url.rstrip("/") + "/api/ai/chat",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -383,6 +392,32 @@ def _generate_spec_with_ai(
         return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+def _generate_section_overrides(conn: Connection | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if conn is None:
+        return None, None
+    config = AgentConfigRepository().get_by_key(conn, "generate_section")
+    if not config or not config.enabled:
+        return None, None
+
+    primary = None
+    if config.base_url and config.api_key:
+        primary = {
+            "base_url": config.base_url,
+            "api_key": config.api_key,
+            "model": config.primary_model or "deepseek-v4-flash",
+        }
+
+    fallback = None
+    if config.fallback_base_url and config.fallback_api_key:
+        fallback = {
+            "base_url": config.fallback_base_url,
+            "api_key": config.fallback_api_key,
+            "model": config.fallback_model or "qwen-plus",
+        }
+
+    return primary, fallback
 
 
 def _chart_spec_system_prompt(chart_type: str) -> str:

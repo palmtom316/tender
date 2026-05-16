@@ -107,6 +107,25 @@ def test_coverage_report_requires_charts_in_the_declared_section_body():
     )
 
 
+def test_coverage_report_uses_richest_duplicate_section_body_instead_of_empty_shell():
+    content = "\n".join(
+        [
+            "## 8.1 编制依据",
+            "",
+            "## 8.1 编制依据与标准",
+            "施工组织内容充分。" * 40,
+        ]
+    )
+    checklist = [
+        {"section_code": "8.1", "title": "编制依据", "min_chars": 50, "required_charts": [], "required_tables": []},
+    ]
+
+    report = build_coverage_report(content, checklist=checklist, constraints=[])
+
+    assert report["coverage_passed"] is True
+    assert report["issues"] == []
+
+
 def test_chart_closure_report_blocks_residual_placeholder_absent_from_source_content():
     report = build_chart_closure_report(
         content_md="正文 {{chart:risk_matrix}}",
@@ -135,6 +154,18 @@ def test_chart_closure_report_accepts_mapping_like_chart_assets():
     assert report["chart_closure_passed"] is True
     assert report["asset_chart_count"] == 1
     assert report["approved_chart_count"] == 1
+    assert report["rendered_chart_count"] == 1
+    assert report["issues"] == []
+
+
+def test_chart_closure_report_accepts_png_only_render_as_rendered():
+    report = build_chart_closure_report(
+        content_md="正文 {{chart:risk_matrix}}",
+        chart_assets=[{"placeholder_key": "risk_matrix", "status": "approved", "rendered_png_path": "/tmp/risk.png"}],
+        inserted_chart_keys=["risk_matrix"],
+    )
+
+    assert report["chart_closure_passed"] is True
     assert report["rendered_chart_count"] == 1
     assert report["issues"] == []
 

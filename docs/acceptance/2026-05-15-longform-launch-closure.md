@@ -6,7 +6,7 @@ This report verifies the P0 closure work for long technical bid chapter generati
 
 ## Automated Checks
 
-- Backend longform quality tests: pass after running `cd backend && ../.venv/bin/pytest tests/unit/test_longform_quality.py tests/unit/test_longform_section_generation.py tests/unit/test_page_counter.py tests/unit/test_export_gates.py tests/unit/test_technical_bid_writer.py tests/unit/test_docx_exporter.py -q`.
+- Backend longform quality tests: pass after running `cd backend && ../.venv/bin/python -m pytest tests/unit/test_longform_quality.py tests/unit/test_longform_section_generation.py tests/unit/test_page_counter.py tests/unit/test_export_gates.py tests/unit/test_technical_bid_writer.py tests/unit/test_docx_exporter.py -q`.
 - Frontend export gate tests: pass after running `npm --prefix frontend run test -- src/modules/export/ExportGateContent.test.tsx`.
 - Frontend build: pass after running `npm --prefix frontend run build`.
 

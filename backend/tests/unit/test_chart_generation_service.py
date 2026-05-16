@@ -1,6 +1,7 @@
 import json
 from uuid import uuid4
 
+import tender_backend.services.chart_generation_service as chart_generation_service_module
 from tender_backend.services.chart_generation_service import (
     ChartGenerationService,
     _chart_spec_system_prompt,
@@ -155,9 +156,16 @@ def test_generate_spec_with_ai_serializes_uuid_context(monkeypatch) -> None:
         return _Response()
 
     monkeypatch.setattr("tender_backend.services.chart_generation_service.get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        chart_generation_service_module,
+        "AgentConfigRepository",
+        type("_Repo", (), {"get_by_key": lambda self, conn, key: None}),
+        raising=False,
+    )
     monkeypatch.setattr("tender_backend.services.chart_generation_service.urllib.request.urlopen", _urlopen)
 
     result = _generate_spec_with_ai(
+        conn=object(),
         chart_type="risk_matrix",
         title="风险分级管控矩阵",
         placeholder_key="risk_matrix",
@@ -168,6 +176,68 @@ def test_generate_spec_with_ai_serializes_uuid_context(monkeypatch) -> None:
     assert result == {"nodes": []}
     assert '"id": "' in user_message
     assert captured["timeout"] == 1.0
+
+
+def test_generate_spec_with_ai_passes_generate_section_override(monkeypatch) -> None:
+    captured = {}
+
+    class _Settings:
+        ai_gateway_url = "http://ai-gateway:8100"
+        chart_ai_gateway_timeout_seconds = 1.0
+        ai_gateway_shared_secret = ""
+
+    class _Config:
+        enabled = True
+        base_url = "https://api.deepseek.com/v1"
+        api_key = "sk-generate"
+        primary_model = "deepseek-v4-flash"
+        fallback_base_url = "https://fallback.example/v1"
+        fallback_api_key = "sk-fallback"
+        fallback_model = "qwen-plus"
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"content":"{\\"nodes\\":[]}"}'
+
+    def _urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr("tender_backend.services.chart_generation_service.get_settings", lambda: _Settings())
+    monkeypatch.setattr(
+        chart_generation_service_module,
+        "AgentConfigRepository",
+        type("_Repo", (), {"get_by_key": lambda self, conn, key: _Config() if key == "generate_section" else None}),
+        raising=False,
+    )
+    monkeypatch.setattr("tender_backend.services.chart_generation_service.urllib.request.urlopen", _urlopen)
+
+    result = _generate_spec_with_ai(
+        conn=object(),
+        chart_type="risk_matrix",
+        title="风险分级管控矩阵",
+        placeholder_key="risk_matrix",
+        context={"chapter": {"id": uuid4(), "chapter_code": "8"}},
+    )
+
+    assert result == {"nodes": []}
+    assert captured["payload"]["primary_override"] == {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "sk-generate",
+        "model": "deepseek-v4-flash",
+    }
+    assert captured["payload"]["fallback_override"] == {
+        "base_url": "https://fallback.example/v1",
+        "api_key": "sk-fallback",
+        "model": "qwen-plus",
+    }
 
 
 def test_chart_asset_repository_upserts_by_placeholder() -> None:

@@ -7,7 +7,7 @@ import json
 import re
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID, uuid4
 
 from psycopg import Connection
@@ -15,6 +15,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from tender_backend.core.config import get_settings
+from tender_backend.db.repositories.agent_config_repo import AgentConfigRepository
 from tender_backend.services.ai_gateway_client import ai_gateway_headers
 from tender_backend.services.bid_chapter_generation import CHART_PLACEHOLDER_RE, generate_bid_chapter_draft
 from tender_backend.services.chart_generation_service import ChartGenerationService
@@ -53,6 +54,7 @@ class TechnicalBidWriter:
         created_by: str | None = None,
         rewrite_note: str | None = None,
         target_pages: int | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         outline = self._confirmed_outline(conn, project_id=project_id)
         if outline is None:
@@ -74,11 +76,35 @@ class TechnicalBidWriter:
         if _should_use_longform_generation(chapter, effective_target_pages):
             section_plan = plan_chapter_8_sections(target_pages=effective_target_pages)
             generator = LongformSectionGenerator(
-                completion_fn=lambda payload: _request_ai_gateway_subsection_completion({**payload, "rewrite_note": rewrite_note})
+                completion_fn=lambda payload: _request_ai_gateway_subsection_completion(conn, {**payload, "rewrite_note": rewrite_note})
                 or _deterministic_subsection_completion({**payload, "rewrite_note": rewrite_note}),
                 max_rounds=4,
             )
-            longform_result = generator.generate_sections(context=context, section_plan=section_plan)
+
+            def _handle_longform_progress(payload: dict[str, Any]) -> None:
+                if progress_callback is None:
+                    return
+                partial_content = str(payload.get("content_md") or "").strip()
+                draft_id = None
+                heading_only = partial_content == f"## {payload.get('section_code')} {payload.get('title')}".strip()
+                if partial_content and not heading_only:
+                    partial_draft = _save_chapter_draft(
+                        conn,
+                        project_id=project_id,
+                        chapter=chapter,
+                        content_md=partial_content,
+                        context=context,
+                        target_pages=effective_target_pages,
+                    )
+                    if partial_draft.get("id"):
+                        draft_id = str(partial_draft["id"])
+                progress_callback({**payload, "draft_id": draft_id})
+
+            longform_result = generator.generate_sections(
+                context=context,
+                section_plan=section_plan,
+                progress_callback=_handle_longform_progress,
+            )
             draft = _save_chapter_draft(
                 conn,
                 project_id=project_id,
@@ -97,7 +123,7 @@ class TechnicalBidWriter:
                 }
             }
         else:
-            ai_result = _request_ai_gateway_completion(context, rewrite_note=rewrite_note)
+            ai_result = _request_ai_gateway_completion(conn, context, rewrite_note=rewrite_note)
             if ai_result is not None:
                 draft = _save_chapter_draft(
                     conn,
@@ -153,6 +179,7 @@ class TechnicalBidWriter:
             if chart_type in existing:
                 continue
             spec = service.generate_spec(
+                conn=conn,
                 chart_type=chart_type,
                 title=_chart_title(chart_type, chapter),
                 placeholder_key=chart_type,
@@ -333,10 +360,42 @@ class TechnicalBidWriter:
 __all__ = ["TechnicalBidWriter"]
 
 
-def _request_ai_gateway_completion(context: dict[str, Any], *, rewrite_note: str | None = None) -> dict[str, Any] | None:
+def _generate_section_overrides(conn: Connection | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if conn is None:
+        return None, None
+    config = AgentConfigRepository().get_by_key(conn, "generate_section")
+    if not config or not config.enabled:
+        return None, None
+
+    primary = None
+    if config.base_url and config.api_key:
+        primary = {
+            "base_url": config.base_url,
+            "api_key": config.api_key,
+            "model": config.primary_model or "deepseek-v4-flash",
+        }
+
+    fallback = None
+    if config.fallback_base_url and config.fallback_api_key:
+        fallback = {
+            "base_url": config.fallback_base_url,
+            "api_key": config.fallback_api_key,
+            "model": config.fallback_model or "qwen-plus",
+        }
+
+    return primary, fallback
+
+
+def _request_ai_gateway_completion(
+    conn: Connection | None,
+    context: dict[str, Any],
+    *,
+    rewrite_note: str | None = None,
+) -> dict[str, Any] | None:
     settings = get_settings()
     if not settings.ai_gateway_url:
         return None
+    primary_override, fallback_override = _generate_section_overrides(conn)
     payload = {
         "task_type": "generate_section",
         "messages": _ai_gateway_messages(context, rewrite_note=rewrite_note),
@@ -344,6 +403,10 @@ def _request_ai_gateway_completion(context: dict[str, Any], *, rewrite_note: str
         "max_tokens": _ai_gateway_max_tokens(context),
         "stream": False,
     }
+    if primary_override:
+        payload["primary_override"] = primary_override
+    if fallback_override:
+        payload["fallback_override"] = fallback_override
     request = urllib.request.Request(
         settings.ai_gateway_url.rstrip("/") + "/api/ai/chat",
         data=json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"),
@@ -443,7 +506,7 @@ def _should_use_longform_generation(chapter: dict[str, Any], target_pages: int |
     return str(chapter.get("chapter_code") or "").strip() == "8" and isinstance(target_pages, int) and target_pages >= 80
 
 
-def _request_ai_gateway_subsection_completion(payload: dict[str, Any]) -> dict[str, Any] | None:
+def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: dict[str, Any]) -> dict[str, Any] | None:
     context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
     subsection_context = dict(context)
     subsection_context["longform_subsection"] = {
@@ -474,7 +537,7 @@ def _request_ai_gateway_subsection_completion(payload: dict[str, Any]) -> dict[s
         rewrite_parts.append("必须包含表格/清单：" + "、".join(required_tables))
     if payload.get("round_index") and int(payload.get("round_index") or 0) > 1:
         rewrite_parts.append("这是续写轮次，只补充不足内容，不重复已生成段落。")
-    ai_result = _request_ai_gateway_completion(subsection_context, rewrite_note="\n".join(part for part in rewrite_parts if part))
+    ai_result = _request_ai_gateway_completion(conn, subsection_context, rewrite_note="\n".join(part for part in rewrite_parts if part))
     if ai_result is None:
         return None
     usage = ai_result.get("usage") or {}

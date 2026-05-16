@@ -147,4 +147,13 @@ describe("TemplateFieldWorkbench", () => {
     expect(row?.querySelector(".template-list__status")).toHaveTextContent("需修复");
     expect(row?.querySelector(".template-list__meta")).toHaveTextContent("template / chapter / 3 个问题");
   });
+
+  it("shows auth errors instead of the no-template empty state", async () => {
+    listTemplatePackagesMock.mockRejectedValue(new Error("登录已失效，请重新登录"));
+
+    renderWithClient(<TemplateFieldWorkbench />);
+
+    expect(await screen.findByText("登录已失效，请重新登录")).toBeInTheDocument();
+    expect(screen.queryByText("当前没有投标文件模版。")).not.toBeInTheDocument();
+  });
 });
