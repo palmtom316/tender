@@ -1,8 +1,17 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
+from tender_backend.db.deps import get_db_conn
 from tender_backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def _override_db_conn():
+    app.dependency_overrides[get_db_conn] = lambda: object()
+    yield
+    app.dependency_overrides.pop(get_db_conn, None)
 
 
 def test_async_generate_technical_chapter_returns_202_with_run_id(monkeypatch) -> None:

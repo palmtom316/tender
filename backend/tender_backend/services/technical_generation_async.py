@@ -118,6 +118,7 @@ def _run_background_generation(*, run_id: str, project_id: str) -> None:
                 await repo.update_run_state(run_id, WorkflowState.COMPLETED)
                 conn.commit()
             except Exception as exc:
+                conn.rollback()
                 await repo.update_run_state(run_id, WorkflowState.FAILED, error=str(exc))
                 conn.commit()
 
