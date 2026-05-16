@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Generate SGCC technical bid chapters 8/9/10 with DeepSeek and save DOCX."""
+"""DEPRECATED: offline prompt debugging only, not production chapter generation.
+
+Production generation must use the main API flow:
+  POST /api/projects/{project_id}/chapters/{chapter_id}/generate
+
+Long technical chapters (for example chapter 8 with target_pages >= 80) route
+through LongformSectionGenerator and export quality gates in the main flow.
+This script bypasses those controls and may produce unvalidated output.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +16,7 @@ import os
 import re
 import sys
 import time
+import warnings
 from pathlib import Path
 
 from docx import Document
@@ -28,6 +37,14 @@ from tender_backend.services.deepseek_api import (
     DEEPSEEK_V4_PRO_MODEL,
     deepseek_v4_openai_sdk_options,
     is_deepseek_v4_model,
+)
+
+
+warnings.warn(
+    "scripts/generate_sgcc_chapters_docx.py is deprecated for production use. "
+    "Use the main API chapter generation flow with longform quality gates.",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
 

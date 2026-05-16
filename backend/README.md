@@ -36,3 +36,25 @@ The following variables are especially important for the template-package and ma
 - `EVIDENCE_UPLOAD_DIR`, `TEMPLATE_RENDER_ROOT`, and `TEMPLATE_BUNDLE_ROOT` should be backed by writable storage with enough capacity for large attachments and bundle exports.
 - If you run multiple backend workers, prefer a shared persistent volume for `EVIDENCE_UPLOAD_DIR`. Render roots may stay on fast ephemeral storage if bundles are short-lived.
 - Keep import roots and upload roots separate. Imported template packages are treated as trusted read sources; uploaded evidence assets are managed application data.
+
+## Chapter Generation
+
+### Production Flow
+
+All production chapter generation should use the API flow:
+
+```bash
+curl -X POST http://localhost:8000/api/projects/{project_id}/chapters/{chapter_id}/generate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"target_pages": 100}'
+```
+
+Long technical chapters automatically route through the longform generation path
+and produce quality evidence used by export gates.
+
+### Non-Production Debug Flow
+
+`scripts/generate_sgcc_chapters_docx.py` remains available only for offline
+prompt debugging. It bypasses longform quality gates and must not be treated as
+production output.

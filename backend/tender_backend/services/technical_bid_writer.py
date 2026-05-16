@@ -544,10 +544,18 @@ def _save_chapter_draft(
     page_estimate = estimate_markdown_pages(content_md, target_pages=target_pages)
     estimated_pages = page_estimate.get("estimated_pages")
     longform_sections = longform_result.get("sections") if isinstance(longform_result, dict) else []
+    equipment_selections = context.get("equipment_selections") if isinstance(context.get("equipment_selections"), list) else []
+    personnel_selections = context.get("personnel_selections") if isinstance(context.get("personnel_selections"), list) else []
+    equipment_data = {
+        asset_type: [item for item in equipment_selections if isinstance(item, dict) and item.get("asset_type") == asset_type]
+        for asset_type in ("vehicle", "machine", "tool", "safety")
+    }
     coverage_report = build_coverage_report(
         content_md,
         checklist=longform_sections if isinstance(longform_sections, list) else [],
         constraints=context.get("constraints") if isinstance(context.get("constraints"), list) else [],
+        equipment_data=equipment_data,
+        personnel_data=personnel_selections,
     )
     chart_closure_report = build_chart_closure_report(
         content_md,

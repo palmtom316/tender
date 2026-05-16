@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from uuid import UUID
 
+import structlog
 from docx.document import Document
 from docx.shared import Inches
 from psycopg import Connection
@@ -14,6 +15,7 @@ from tender_backend.services.chart_service.png_converter import svg_to_png
 
 
 _ANCHOR_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class ChartAssetInjector:
@@ -41,8 +43,12 @@ class ChartAssetInjector:
             if not match:
                 continue
             key = match.group(1)
-            asset = self._select_asset(key)
-            image_path = self._image_path(asset)
+            try:
+                asset = self._select_asset(key)
+                image_path = self._image_path(asset)
+            except ValueError as exc:
+                logger.warning("chart_asset_unavailable", project_id=str(self._project_id), key=key, error=str(exc))
+                continue
             paragraph.clear()
             paragraph.alignment = 1
             paragraph.add_run().add_picture(str(image_path), width=Inches(self._max_width_inches))

@@ -12,6 +12,8 @@ from tender_backend.services.export_service.docx_exporter import (
     EXPORT_MODE_MULTI_DOC_ZIP,
     EXPORT_MODE_MULTI_DOCX_ZIP,
     EXPORT_MODE_SINGLE_DOCX,
+    _is_skeleton_only,
+    _render_plain_docx,
     render_chapter_docx_zip,
     render_docx,
     render_export,
@@ -269,3 +271,41 @@ def test_export_evidence_reports_residual_chart_placeholders(tmp_path: Path, mon
     assert evidence["residual_chart_placeholders"] == ["risk_matrix"]
     assert evidence["residual_chart_placeholder_count"] == 1
     assert evidence["page_count"]["method"] == "test"
+
+
+def test_is_skeleton_only_detects_boilerplate_only_content() -> None:
+    content = """
+# 8 施工方案与技术措施
+
+## 8.1 编制依据
+- 由项目经理统筹...
+
+## 8.2 总体方案
+- 围绕招标要求设置目标分解...
+- 执行依据包括...
+- 建立预警清单...
+"""
+
+    assert _is_skeleton_only(content) is True
+
+
+def test_is_skeleton_only_accepts_real_content() -> None:
+    content = "# 8 施工方案与技术措施\n\n## 8.1 编制依据\n" + ("本方案结合项目实际开展施工组织部署。" * 80)
+
+    assert _is_skeleton_only(content) is False
+
+
+def test_render_plain_docx_rejects_skeleton_only_content(tmp_path: Path) -> None:
+    drafts = [
+        {
+            "chapter_code": "8",
+            "content_md": "# 8 施工方案与技术措施\n\n## 8.1 编制依据\n- 由项目经理统筹...\n## 8.2 总体方案\n- 围绕招标要求设置目标分解...",
+            "chapter_title": "施工方案与技术措施",
+            "volume_type": "technical",
+            "sort_order": 1,
+            "metadata_json": {},
+        }
+    ]
+
+    with pytest.raises(ValueError, match="skeleton-only"):
+        _render_plain_docx(_Conn(drafts), project_id=uuid4(), output_path=tmp_path / "out.docx")

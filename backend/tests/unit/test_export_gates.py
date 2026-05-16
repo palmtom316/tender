@@ -549,3 +549,74 @@ def test_export_gate_blocks_when_coverage_report_has_p0_issue(monkeypatch):
     assert state["gates"]["coverage_passed"] is False
     assert state["gates"]["coverage_issue_count"] == 1
     assert state["can_export"] is False
+
+
+def test_export_gate_blocks_when_chart_closure_report_has_p0_issue(monkeypatch):
+    project_id = uuid4()
+
+    class _ReqRepo:
+        def unconfirmed_veto_count(self, conn, *, project_id):
+            return 0
+
+    class _ChartRepo:
+        def list_by_project(self, conn, *, project_id):
+            return []
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"items": []}
+
+        def latest(self, conn, *, project_id):
+            return {"items": []}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+
+        def fetchone(self):
+            if "metadata_json FROM project" in self.query:
+                return {"metadata_json": {}}
+            if "COUNT(*)" in self.query or " AS count" in self.query:
+                return {"count": 0, "stale_template_artifact_count": 0}
+            return None
+
+        def fetchall(self):
+            if "FROM chapter_draft" in self.query:
+                return [
+                    {
+                        "content_md": "# 8\n{{chart:construction_flow}}",
+                        "referenced_chart_keys": ["construction_flow"],
+                        "chapter_code": "8",
+                        "target_pages": 100,
+                        "estimated_pages": 95,
+                        "page_estimate_json": {},
+                        "coverage_report_json": {"coverage_passed": True, "issues": []},
+                        "chart_closure_report_json": {
+                            "chart_closure_passed": False,
+                            "issues": [{"code": "chart_placeholder_residual", "chart_key": "construction_flow", "severity": "P0"}],
+                        },
+                    }
+                ]
+            return []
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    monkeypatch.setattr("tender_backend.services.export_gate_service.RequirementRepository", _ReqRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.ChartAssetRepository", _ChartRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.get_blocking_issues", lambda conn, *, project_id: [])
+
+    state = build_export_gate_state(_Conn(), project_id=project_id)
+
+    assert state["gates"]["chart_closure_passed"] is False
+    assert state["gates"]["chart_closure_issue_count"] == 1
+    assert state["can_export"] is False

@@ -149,3 +149,29 @@ def test_coverage_report_does_not_treat_child_heading_as_required_parent_section
 
     assert report["coverage_passed"] is False
     assert any(issue["code"] == "missing_section" and issue["section_code"] == "8.1" for issue in report["issues"])
+
+
+def test_coverage_report_flags_empty_equipment_and_personnel_tables() -> None:
+    content = "## 8.13 资源配置\n{{equipment_table:vehicle}}\n{{equipment_table:machine}}\n{{personnel_table}}"
+    checklist = [
+        {
+            "section_code": "8.13",
+            "title": "资源配置",
+            "min_chars": 0,
+            "required_charts": [],
+            "required_tables": ["equipment_table:vehicle", "equipment_table:machine", "personnel_table"],
+        }
+    ]
+
+    report = build_coverage_report(
+        content,
+        checklist=checklist,
+        constraints=[],
+        equipment_data={"vehicle": [], "machine": []},
+        personnel_data=[],
+    )
+
+    assert report["coverage_passed"] is False
+    assert any(issue["code"] == "required_table_empty" and issue["table_key"] == "equipment_table:vehicle" for issue in report["issues"])
+    assert any(issue["code"] == "required_table_empty" and issue["table_key"] == "equipment_table:machine" for issue in report["issues"])
+    assert any(issue["code"] == "required_table_empty" and issue["table_key"] == "personnel_table" for issue in report["issues"])

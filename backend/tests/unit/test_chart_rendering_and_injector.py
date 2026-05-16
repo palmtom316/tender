@@ -204,6 +204,12 @@ def test_chart_asset_injector_replaces_placeholder_with_image_and_caption(tmp_pa
         rendered_png_path=str(png),
         status="approved",
         version=1,
+        template_instance_id=None,
+        template_revision_no=None,
+        is_stale_by_template=False,
+        stale_by_template_revision_no=None,
+        stale_by_template_block_id=None,
+        template_stale_reason=None,
         metadata_json={},
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -229,3 +235,20 @@ def test_chart_asset_injector_replaces_placeholder_with_image_and_caption(tmp_pa
     assert "{{chart:" not in text
     assert "图8.1-1 施工流程图" in text
     assert len(rendered.inline_shapes) == 1
+
+
+def test_chart_asset_injector_preserves_placeholder_when_asset_missing(monkeypatch) -> None:
+    class _Repo:
+        def find_for_placeholder(self, _conn, *, project_id, key):
+            return []
+
+    monkeypatch.setattr(chart_asset_injector, "ChartAssetRepository", lambda: _Repo())
+
+    document = Document()
+    document.add_paragraph("{{chart:construction_flow}}")
+
+    count = ChartAssetInjector(document, object(), project_id=uuid4()).inject_all()
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert count == 0
+    assert "{{chart:construction_flow}}" in text

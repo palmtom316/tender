@@ -143,6 +143,8 @@ def build_coverage_report(
     *,
     checklist: list[dict[str, Any]],
     constraints: list[dict[str, Any]],
+    equipment_data: dict[str, list[Any]] | None = None,
+    personnel_data: list[Any] | None = None,
 ) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     present_sections = _present_section_codes(content_md)
@@ -185,6 +187,27 @@ def build_coverage_report(
                         "severity": "P0",
                     }
                 )
+
+    equipment_placeholders = re.findall(r"\{\{equipment_table:(vehicle|machine|tool|safety)\}\}", content_md or "")
+    if equipment_data is not None:
+        for asset_type in sorted(set(equipment_placeholders)):
+            if not equipment_data.get(asset_type):
+                issues.append(
+                    {
+                        "code": "required_table_empty",
+                        "table_key": f"equipment_table:{asset_type}",
+                        "severity": "P0",
+                    }
+                )
+
+    if "{{personnel_table}}" in (content_md or "") and personnel_data is not None and not personnel_data:
+        issues.append(
+            {
+                "code": "required_table_empty",
+                "table_key": "personnel_table",
+                "severity": "P0",
+            }
+        )
 
     for constraint in constraints:
         metadata = constraint.get("metadata_json") or {}

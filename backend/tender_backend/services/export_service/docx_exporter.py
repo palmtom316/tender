@@ -27,6 +27,20 @@ from tender_backend.services.tender_requirement_priority import load_tender_requ
 logger = structlog.stdlib.get_logger(__name__)
 
 CHART_PLACEHOLDER_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
+_SKELETON_HEADING_RE = re.compile(r"^#{1,6}\s+.*$", re.MULTILINE)
+_SKELETON_LIST_RE = re.compile(r"^\s*[-*]\s+", re.MULTILINE)
+_SKELETON_PLACEHOLDER_RE = re.compile(r"\{\{[^{}]+\}\}")
+_SKELETON_TABLE_RE = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)
+
+_SKELETON_BOILERPLATE_PHRASES: tuple[str, ...] = (
+    "由项目经理统筹",
+    "围绕招标要求设置",
+    "执行依据包括",
+    "建立预警清单",
+    "按确认约束执行并形成记录",
+    "责任可追溯",
+    "资料可核验",
+)
 
 _EQUIPMENT_TABLE_SECTIONS: tuple[tuple[str, str], ...] = (
     ("车辆", "vehicle"),
@@ -253,6 +267,18 @@ def _append_personnel_table_anchor(document: Document) -> None:
     document.add_paragraph("{{personnel_table}}")
 
 
+def _is_skeleton_only(content_md: str) -> bool:
+    normalized = content_md or ""
+    normalized = _SKELETON_HEADING_RE.sub("", normalized)
+    normalized = _SKELETON_LIST_RE.sub("", normalized)
+    normalized = _SKELETON_PLACEHOLDER_RE.sub("", normalized)
+    normalized = _SKELETON_TABLE_RE.sub("", normalized)
+    for phrase in _SKELETON_BOILERPLATE_PHRASES:
+        normalized = normalized.replace(phrase, "")
+    normalized = re.sub(r"\s+", "", normalized)
+    return len(normalized) < 500
+
+
 def _render_plain_docx(
     conn: Connection,
     *,
@@ -290,6 +316,13 @@ def _render_plain_docx(
                 """,
                 (project_id,),
             ).fetchall()
+
+    for draft in drafts:
+        content_md = str(draft.get("content_md") or "")
+        if str(draft.get("volume_type") or "") == "technical" and _is_skeleton_only(content_md):
+            raise ValueError(
+                f"chapter {draft.get('chapter_code') or '?'} content is skeleton-only, refusing to export. Run generation first."
+            )
 
     document = Document()
     _apply_basic_style(document)
