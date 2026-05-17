@@ -25,6 +25,41 @@ def test_evaluate_svg_quality_reports_extreme_svg_issues() -> None:
     } >= {"text_overflow", "aspect_extreme", "density_overload", "font_below_minimum"}
 
 
+def test_evaluate_svg_quality_exposes_quantitative_metrics() -> None:
+    template = get_chart_template("risk_matrix")
+    svg = (
+        "<svg viewBox='0 0 720 480'>"
+        "<text font-size='12' font-family='Noto Sans CJK SC, sans-serif'>低</text>"
+        "<text font-size='12' font-family='Noto Sans CJK SC, sans-serif'>中</text>"
+        "<text font-size='12' font-family='Noto Sans CJK SC, sans-serif'>高</text>"
+        "</svg>"
+    )
+
+    report = evaluate_svg_quality(svg, template)
+    metrics = report["metrics"]
+
+    assert report["passed"] is True
+    assert metrics["text_overflow_rate"] == 0.0
+    assert metrics["min_font_px"] == 12.0
+    assert metrics["aspect_ratio"] == round(720 / 480, 4)
+    assert metrics["docx_dpi"] == round(720 * 2.0 / 6.0, 1)
+    assert metrics["unknown_font_families"] == []
+
+
+def test_evaluate_svg_quality_flags_floor_violations() -> None:
+    template = get_chart_template("risk_matrix")
+    svg = (
+        "<svg viewBox='0 0 100 800'>"
+        "<text font-size='7' font-family='Comic Sans, fantasy'>极小</text>"
+        "</svg>"
+    )
+
+    report = evaluate_svg_quality(svg, template)
+    codes = {issue["code"] for issue in report["issues"]}
+
+    assert {"font_below_floor", "matrix_aspect_out_of_range", "docx_dpi_below_floor", "font_family_unavailable"} <= codes
+
+
 def test_create_or_update_records_quality_gate_without_changing_status(monkeypatch) -> None:
     rows = []
 

@@ -23,6 +23,10 @@ from tender_backend.services.chart_service.specs import (
     TableChartSpec,
     TableRow,
 )
+from tender_backend.services.chart_service.vega_mapper import (
+    responsibility_matrix_to_vega,
+    risk_matrix_to_vega,
+)
 
 
 @dataclass(frozen=True)
@@ -46,8 +50,16 @@ def render_chart_spec(spec: ChartSpec) -> ChartRenderResult:
                 return ChartRenderResult(svg=_render_gantt_summary_svg(spec), mermaid_source=mermaid, engine="native_gantt_summary")
             return ChartRenderResult(svg=_render_gantt_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
     if spec.chart_type == "risk_matrix":
+        vega_svg = _render_vega_svg(risk_matrix_to_vega(spec)) if _vega_engine_enabled() else None
+        if vega_svg:
+            return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
         return ChartRenderResult(svg=_render_risk_matrix_svg(spec), mermaid_source=None, engine="native_svg")
     if spec.chart_type == "responsibility_matrix":
+        vega_svg = (
+            _render_vega_svg(responsibility_matrix_to_vega(spec)) if _vega_engine_enabled() else None
+        )
+        if vega_svg:
+            return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
         return ChartRenderResult(svg=_render_responsibility_matrix_svg(spec), mermaid_source=None, engine="native_svg")
     if strategy.primary == "native_svg" and isinstance(spec, TableChartSpec):
         return ChartRenderResult(svg=_render_table_svg(spec), mermaid_source=None, engine="native_svg")
@@ -77,6 +89,22 @@ def build_mermaid_source(spec: ChartSpec) -> str | None:
             lines.append(f"  {_mermaid_text(task.label)} :{task.id}, {task.start.isoformat()}, {task.end.isoformat()}")
         return "\n".join(lines)
     return None
+
+
+def _vega_engine_enabled() -> bool:
+    return bool(get_settings().chart_vega_engine_enabled)
+
+
+def _render_vega_svg(spec: dict[str, Any]) -> str | None:
+    try:
+        import vl_convert as vlc
+    except ImportError:
+        return None
+    try:
+        svg = vlc.vegalite_to_svg(spec)
+    except Exception:
+        return None
+    return svg if isinstance(svg, str) and svg.lstrip().startswith("<svg") else None
 
 
 def _render_mermaid_sidecar(source: str | None) -> str | None:

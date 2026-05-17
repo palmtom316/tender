@@ -16,6 +16,7 @@ dependencies = [
   "docxtpl>=0.18,<1.0",
   "PyMuPDF>=1.24,<2.0",
   "openpyxl>=3.1,<4.0",
+  "vl-convert-python>=1.7,<2.0",
 ]
 
 [project.optional-dependencies]
