@@ -13,6 +13,7 @@ from typing import Any
 from tender_backend.core.config import get_settings
 from tender_backend.services.chart_service.layout_flow import compute_flow_layout
 from tender_backend.services.chart_service.render_strategy import resolve_render_strategy
+from tender_backend.services.chart_service.templates import get_chart_template
 from tender_backend.services.chart_service.specs import (
     ChartSpec,
     FlowChartSpec,
@@ -20,6 +21,7 @@ from tender_backend.services.chart_service.specs import (
     ResponsibilityMatrixSpec,
     RiskMatrixSpec,
     TableChartSpec,
+    TableRow,
 )
 
 
@@ -40,6 +42,8 @@ def render_chart_spec(spec: ChartSpec) -> ChartRenderResult:
         if strategy.fallback == "native_flow" and isinstance(spec, FlowChartSpec):
             return ChartRenderResult(svg=_render_flow_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
         if strategy.fallback == "native_gantt" and isinstance(spec, GanttChartSpec):
+            if _should_summarize_gantt(spec):
+                return ChartRenderResult(svg=_render_gantt_summary_svg(spec), mermaid_source=mermaid, engine="native_gantt_summary")
             return ChartRenderResult(svg=_render_gantt_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
     if spec.chart_type == "risk_matrix":
         return ChartRenderResult(svg=_render_risk_matrix_svg(spec), mermaid_source=None, engine="native_svg")
@@ -219,6 +223,32 @@ def _render_gantt_svg(spec: GanttChartSpec) -> str:
         parts.append(_right_arrow(end_x, end_y, "#667085"))
     parts.append("</svg>")
     return "".join(parts)
+
+
+def _should_summarize_gantt(spec: GanttChartSpec) -> bool:
+    template = get_chart_template(spec.chart_type)
+    max_tasks = template.density_limits.get("max_tasks", 20)
+    return len(spec.tasks) > max_tasks
+
+
+def _render_gantt_summary_svg(spec: GanttChartSpec) -> str:
+    seen: set[str] = set()
+    rows: list[TableRow] = []
+    for task in spec.tasks:
+        group = task.group or "未分组"
+        if group in seen:
+            continue
+        seen.add(group)
+        rows.append(TableRow(cells=[group, "阶段汇总", "详见进度明细表"]))
+    if not rows:
+        rows.append(TableRow(cells=["进度计划", "阶段汇总", "详见进度明细表"]))
+    table_spec = TableChartSpec(
+        chart_type="indicator_table",
+        title=spec.title,
+        columns=["阶段", "表达方式", "备注"],
+        rows=rows[: get_chart_template(spec.chart_type).density_limits.get("max_groups", 7)],
+    )
+    return _render_table_svg(table_spec)
 
 
 def _render_risk_matrix_svg(spec: RiskMatrixSpec) -> str:
