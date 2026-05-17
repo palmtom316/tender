@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     ai_gateway_shared_secret: str = ""
     mermaid_render_url: str | None = None
     mermaid_render_timeout_seconds: float = 20.0
+    chart_vega_engine_enabled: bool = True
     template_import_roots: str = ""
     version: str = "1.0.0"
 
