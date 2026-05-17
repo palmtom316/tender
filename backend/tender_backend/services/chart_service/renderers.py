@@ -316,8 +316,8 @@ def _render_responsibility_matrix_svg(spec: ResponsibilityMatrixSpec) -> str:
 def _render_table_svg(spec: TableChartSpec) -> str:
     first_left = 24
     top = 88
-    cell_h = 48
-    cell_w = 150
+    cell_h = 62
+    cell_w = _adaptive_cell_width(spec.columns)
     width = first_left * 2 + len(spec.columns) * cell_w
     height = top + (len(spec.rows) + 1) * cell_h + 36
     parts = [_svg_start(width, height), _title(spec.title, width)]
@@ -325,16 +325,21 @@ def _render_table_svg(spec: TableChartSpec) -> str:
         x = first_left + col_index * cell_w
         parts.append(_rect(x, top, cell_w, cell_h, "#e8eef7", "#8b98a8", 0))
         for line_index, line in enumerate(_wrap(column, 10, 2)):
-            parts.append(_text(line, x + cell_w / 2, top + 21 + line_index * 15, 12, anchor="middle", weight="600"))
+            parts.append(_text(line, x + cell_w / 2, top + 24 + line_index * 15, 12, anchor="middle", weight="600"))
     for row_index, row in enumerate(spec.rows):
         y = top + (row_index + 1) * cell_h
         for col_index, value in enumerate(row.cells):
             x = first_left + col_index * cell_w
             parts.append(_rect(x, y, cell_w, cell_h, "#ffffff", "#8b98a8", 0))
-            for line_index, line in enumerate(_wrap(value, 12, 2)):
+            for line_index, line in enumerate(_wrap(value, 10, 3)):
                 parts.append(_text(line, x + 10, y + 20 + line_index * 15, 11, anchor="start"))
     parts.append("</svg>")
     return "".join(parts)
+
+
+def _adaptive_cell_width(columns: list[str], min_width: int = 150, max_width: int = 220) -> int:
+    longest = max((len(column) for column in columns), default=0)
+    return max(min_width, min(max_width, longest * 20))
 
 
 def _svg_start(width: int | float, height: int | float) -> str:
