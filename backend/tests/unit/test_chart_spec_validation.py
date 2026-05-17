@@ -1,7 +1,37 @@
 from __future__ import annotations
 
+import pytest
+
+from tender_backend.services.chart_generation_service import default_chart_spec
 from tender_backend.services.chart_service.renderers import build_mermaid_source
+from tender_backend.services.chart_service.renderers import render_chart_spec
 from tender_backend.services.chart_service.specs import parse_chart_spec, validate_chart_spec
+from tender_backend.services.chart_service.specs import SUPPORTED_CHART_TYPES
+
+
+@pytest.mark.parametrize("chart_type", sorted(SUPPORTED_CHART_TYPES - {"schedule_gantt", "critical_path"}))
+def test_default_chart_specs_parse_and_render_for_supported_non_schedule_types(chart_type: str) -> None:
+    title = f"{chart_type} 默认图表"
+    spec_json = default_chart_spec(chart_type=chart_type, title=title, placeholder_key=f"{chart_type}_main")
+    payload = {"chart_type": chart_type, "title": title, **spec_json}
+
+    validation = validate_chart_spec(payload)
+
+    assert validation["valid"] is True, validation["issues"]
+    spec = parse_chart_spec(payload)
+    rendered = render_chart_spec(spec)
+    assert rendered.svg.startswith("<svg")
+    assert title in rendered.svg
+
+
+@pytest.mark.parametrize("chart_type", ["schedule_gantt", "critical_path"])
+def test_default_schedule_specs_are_source_safe_table_fallbacks(chart_type: str) -> None:
+    spec_json = default_chart_spec(chart_type=chart_type, title="进度计划图", placeholder_key=f"{chart_type}_main")
+
+    assert spec_json["_default_spec"] is True
+    assert "tasks" not in spec_json
+    assert "fallback_reason" in spec_json
+    assert spec_json["columns"] == ["阶段/工序", "计划开始条件", "计划完成条件", "衔接关系", "来源"]
 
 
 def test_flow_chart_spec_validates_and_builds_mermaid() -> None:
