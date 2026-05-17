@@ -42,11 +42,7 @@ def test_native_risk_matrix_renders_svg_and_png(tmp_path: Path, monkeypatch) -> 
 
 
 def test_risk_matrix_uses_vl_convert_when_flag_enabled(tmp_path: Path, monkeypatch) -> None:
-    pytest = __import__("pytest")
-    try:
-        import vl_convert  # noqa: F401
-    except ImportError:
-        pytest.skip("vl-convert-python not installed in this environment")
+    import vl_convert  # noqa: F401
 
     monkeypatch.setenv("CHART_VEGA_ENGINE_ENABLED", "true")
     from tender_backend.core import config as _config

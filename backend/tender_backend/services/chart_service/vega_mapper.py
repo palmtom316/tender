@@ -247,20 +247,17 @@ def _square_matrix_cell(
     height_ratio: float = 1.0,
     min_total_width: int = 360,
 ) -> tuple[int, int]:
-    """Pick cell dimensions so the resulting chart sits in a near-square aspect.
+    """Pick bounded cell dimensions for matrix charts.
 
-    `base_size` / `max_size` 是细胞最小 / 最大宽度，`min_total_width` 保证小矩阵
+    `base_size` / `max_size` 是单元格宽度的常规下限 / 上限，`min_total_width` 保证小矩阵
     输出仍能撑到 96 DPI（A4 6 英寸 ≈ 576px @ 96 DPI，PNG 2x 缩放 = 内部 SVG ≥288）。
-    `height_ratio` 让文字密度高的矩阵单元更扁。
+    这里不能按 rows / cols 无界拉伸，否则 1×40 这类合法矩阵会生成超大 SVG。
+    `height_ratio` 让文字密度高的矩阵单元更扁，并用 56px 作为可读下限。
     """
     larger_axis = max(cols, rows)
     cell_width = max(base_size, min(max_size, int(base_size * 3 / larger_axis * 1.5)))
-    cell_width = max(cell_width, _ceil_div(min_total_width, cols))
-    cell_height = max(int(cell_width * height_ratio), 56)
-    if cols < rows:
-        cell_width = int(cell_width * rows / cols)
-    elif rows < cols:
-        cell_height = int(cell_height * cols / rows)
+    cell_width = max(cell_width, min(max_size, _ceil_div(min_total_width, cols)))
+    cell_height = max(int(base_size * height_ratio), 56)
     return cell_width, cell_height
 
 

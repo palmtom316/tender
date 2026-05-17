@@ -83,3 +83,20 @@ def test_responsibility_matrix_to_vega_marks_filled_assignments() -> None:
     empty = next(item for item in values if item["activity"] == "技术交底" and item["role"] == "项目经理")
     assert empty["filled"] is False
     assert empty["level"] == ""
+
+
+def test_responsibility_matrix_to_vega_bounds_tall_matrix_dimensions() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "responsibility_matrix",
+            "title": "单角色长活动矩阵",
+            "roles": ["项目经理"],
+            "activities": [f"事项{i}" for i in range(40)],
+            "assignments": [],
+        }
+    )
+
+    chart = responsibility_matrix_to_vega(spec)
+
+    assert chart["width"] <= 900
+    assert chart["height"] <= 2400
