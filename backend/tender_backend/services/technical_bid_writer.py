@@ -19,7 +19,12 @@ from tender_backend.db.repositories.agent_config_repo import AgentConfigReposito
 from tender_backend.services.ai_gateway_client import ai_gateway_headers
 from tender_backend.services.bid_chapter_generation import CHART_PLACEHOLDER_RE, generate_bid_chapter_draft
 from tender_backend.services.chart_generation_service import ChartGenerationService
-from tender_backend.services.longform_quality import build_chart_closure_report, build_coverage_report, estimate_markdown_pages
+from tender_backend.services.longform_quality import (
+    build_chart_closure_report,
+    build_coverage_report,
+    estimate_markdown_pages,
+    normalize_allowed_chart_keys,
+)
 from tender_backend.services.longform_section_generation import LongformSectionGenerator, plan_chapter_8_sections
 from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 from tender_backend.services.technical_chapter_context import TechnicalChapterContextBuilder, with_target_pages_override
@@ -545,6 +550,16 @@ def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: 
     required_charts = [str(key) for key in payload.get("required_charts") or [] if key]
     if required_charts:
         rewrite_parts.append("必须保留图表占位符：" + "、".join(f"{{{{chart:{key}}}}}" for key in required_charts))
+    allowed_chart_keys = normalize_allowed_chart_keys(
+        subsection_context.get("recommended_charts"),
+        subsection_context.get("chart_assets"),
+    )
+    if allowed_chart_keys:
+        rewrite_parts.append(
+            "chart_key 必须从 ["
+            + "、".join(sorted(allowed_chart_keys))
+            + "] 中选；写不在列表中的 chart_key 占位符将被视为错误。"
+        )
     required_tables = [str(label) for label in payload.get("required_tables") or [] if label]
     if required_tables:
         rewrite_parts.append("必须包含表格/清单（标题任选一）：" + "、".join(required_tables))
@@ -655,6 +670,7 @@ def _save_chapter_draft(
     chart_closure_report = build_chart_closure_report(
         content_md,
         chart_assets=context.get("chart_assets") if isinstance(context.get("chart_assets"), list) else [],
+        allowed_chart_keys=normalize_allowed_chart_keys(context.get("recommended_charts"), context.get("chart_assets")),
     )
     generation_rounds = max(
         [

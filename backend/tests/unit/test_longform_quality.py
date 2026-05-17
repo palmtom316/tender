@@ -5,6 +5,7 @@ from tender_backend.services.longform_quality import (
     build_coverage_report,
     build_page_gate,
     estimate_markdown_pages,
+    normalize_allowed_chart_keys,
 )
 
 
@@ -83,6 +84,30 @@ def test_chart_closure_report_reconciles_references_assets_and_docx_insertions()
     assert report["approved_chart_count"] == 1
     assert report["inserted_chart_count"] == 1
     assert {issue["chart_key"] for issue in report["issues"]} == {"schedule"}
+
+
+def test_chart_closure_report_warns_on_unallowed_chart_key_without_blocking():
+    report = build_chart_closure_report(
+        content_md="正文 {{chart:invented_architecture}}",
+        chart_assets=[],
+        allowed_chart_keys={"risk_matrix"},
+    )
+
+    assert report["chart_closure_passed"] is True
+    assert report["issues"] == [
+        {"code": "chart_key_not_allowed", "chart_key": "invented_architecture", "severity": "P1"}
+    ]
+
+
+def test_normalize_allowed_chart_keys_collects_strings_dicts_and_objects():
+    class _Asset:
+        placeholder_key = "schedule_main"
+        chart_type = "schedule_gantt"
+
+    assert normalize_allowed_chart_keys(
+        ["risk_matrix"],
+        [{"placeholder_key": "quality_main", "chart_type": "quality_system"}, _Asset(), "safety_system"],
+    ) == {"quality_main", "quality_system", "risk_matrix", "safety_system", "schedule_gantt", "schedule_main"}
 
 
 def test_coverage_report_requires_charts_in_the_declared_section_body():

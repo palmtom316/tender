@@ -270,16 +270,48 @@ def _asset_value(asset: Any, key: str) -> Any:
     return getattr(asset, key, None)
 
 
+def normalize_allowed_chart_keys(recommended_charts: Any, chart_assets: Any) -> set[str]:
+    keys: set[str] = set()
+    for item in _as_list(recommended_charts):
+        _collect_chart_keys(keys, item)
+    for item in _as_list(chart_assets):
+        _collect_chart_keys(keys, item)
+    return keys
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (str, Mapping)):
+        return [value]
+    if isinstance(value, list | tuple | set):
+        return list(value)
+    return [value]
+
+
+def _collect_chart_keys(keys: set[str], item: Any) -> None:
+    if isinstance(item, str):
+        if item:
+            keys.add(item)
+        return
+    for field in ("placeholder_key", "chart_type"):
+        value = _asset_value(item, field)
+        if value:
+            keys.add(str(value))
+
+
 def build_chart_closure_report(
     content_md: str,
     *,
     chart_assets: list[Any],
     inserted_chart_keys: list[str] | None = None,
     residual_placeholders: list[str] | None = None,
+    allowed_chart_keys: set[str] | list[str] | None = None,
 ) -> dict[str, Any]:
     referenced = set(_CHART_RE.findall(content_md or ""))
     inserted = set(inserted_chart_keys or [])
     residual = set(residual_placeholders or [])
+    allowed = set(allowed_chart_keys or [])
     by_key = {
         str(_asset_value(asset, "placeholder_key") or _asset_value(asset, "chart_type") or ""): asset
         for asset in chart_assets
@@ -290,6 +322,9 @@ def build_chart_closure_report(
     rendered_count = 0
 
     for key in sorted(referenced):
+        if allowed and key not in allowed:
+            issues.append({"code": "chart_key_not_allowed", "chart_key": key, "severity": "P1"})
+            continue
         asset = by_key.get(key)
         if not asset:
             issues.append({"code": "missing_chart_asset", "chart_key": key, "severity": "P0"})
