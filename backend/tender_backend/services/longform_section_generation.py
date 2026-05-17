@@ -128,6 +128,7 @@ def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
             _MIN_CHARS_FLOOR,
             min(_MIN_CHARS_CAP, int(weight * pages_per_weight * _CHARS_PER_PAGE)),
         )
+        density_hint = _subsection_density_hint(min_chars=min_chars, target_pages=pages, weight=weight)
         sections.append(
             {
                 "chapter": "8",
@@ -135,12 +136,25 @@ def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
                 "title": title,
                 "target_pages": pages,
                 "min_chars": min_chars,
+                "subsection_density_hint": density_hint,
                 "required_charts": list(_DEFAULT_CHARTS.get(section_code, [])),
                 "required_tables": [list(synonyms) for synonyms in _DEFAULT_TABLES.get(section_code, ())],
             }
         )
 
     return sections
+
+
+def _subsection_density_hint(*, min_chars: int, target_pages: int, weight: float | None = None) -> dict[str, int | float]:
+    expected_subsections = max(4, min(9, math.ceil(min_chars / 420)))
+    expected_paragraphs = max(expected_subsections * 2, math.ceil(min_chars / 180))
+    return {
+        "expected_chars": min_chars,
+        "expected_paragraphs": expected_paragraphs,
+        "expected_subsections": expected_subsections,
+        "target_pages": target_pages,
+        "section_weight": float(weight or 1.0),
+    }
 
 
 def _json_hashable(value: Any) -> Any:
@@ -206,6 +220,10 @@ class LongformSectionGenerator:
             title = str(planned.get("title") or planned.get("section_title") or "")
             target_pages = int(planned.get("target_pages") or 0)
             min_chars = int(planned.get("min_chars") or 0)
+            density_hint = dict(
+                planned.get("subsection_density_hint")
+                or _subsection_density_hint(min_chars=min_chars, target_pages=target_pages)
+            )
             required_charts = list(planned.get("required_charts") or [])
             required_tables = list(planned.get("required_tables") or [])
             generated = ""
@@ -244,6 +262,7 @@ class LongformSectionGenerator:
                     "section_title": title,
                     "target_pages": target_pages,
                     "min_chars": min_chars,
+                    "subsection_density_hint": density_hint,
                     "required_charts": required_charts,
                     "required_tables": required_tables,
                     "round_index": round_index,
@@ -294,6 +313,7 @@ class LongformSectionGenerator:
                     "title": title,
                     "target_pages": target_pages,
                     "min_chars": min_chars,
+                    "subsection_density_hint": density_hint,
                     "actual_chars": weighted_chars,
                     "status": status,
                     "continuation_rounds": rounds,

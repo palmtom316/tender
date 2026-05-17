@@ -22,6 +22,8 @@ def test_plan_chapter_8_sections_creates_8_1_to_8_15_with_page_budget():
     assert sum(section["target_pages"] for section in sections) == 100
     assert all(section["min_chars"] >= 1500 for section in sections)
     assert all(section["min_chars"] <= 2300 for section in sections)
+    assert all(section["subsection_density_hint"]["expected_chars"] == section["min_chars"] for section in sections)
+    assert all(section["subsection_density_hint"]["expected_subsections"] >= 4 for section in sections)
 
 
 def test_plan_chapter_8_sections_weights_high_priority_sections_higher():
@@ -73,6 +75,8 @@ def test_generator_continues_until_section_meets_min_chars():
     )
 
     assert len(calls) == 2
+    assert calls[0]["subsection_density_hint"]["expected_chars"] == 20
+    assert calls[0]["subsection_density_hint"]["expected_subsections"] >= 4
     assert result["status"] == "completed"
     assert result["sections"][0]["continuation_rounds"] == 2
     assert "## 8.1 编制依据" in result["content_md"]

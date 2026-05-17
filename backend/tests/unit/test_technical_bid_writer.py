@@ -1,4 +1,5 @@
 import json
+import re
 from uuid import uuid4
 
 import tender_backend.services.technical_bid_writer as technical_bid_writer_module
@@ -226,6 +227,52 @@ def test_technical_writer_passes_generate_section_override_to_ai_gateway(monkeyp
         "api_key": "sk-fallback",
         "model": "qwen-plus",
     }
+
+
+def test_longform_subsection_rewrite_note_includes_density_hint(monkeypatch) -> None:
+    captured = {}
+
+    def fake_completion(_conn, context, rewrite_note=None, task_type=None):
+        captured["context"] = context
+        captured["rewrite_note"] = rewrite_note
+        captured["task_type"] = task_type
+        return {
+            "content": "正文",
+            "resolved_model": "deepseek-v4-flash",
+            "resolved_provider": "deepseek",
+            "usage": {},
+        }
+
+    monkeypatch.setattr(
+        "tender_backend.services.technical_bid_writer._request_ai_gateway_completion",
+        fake_completion,
+        raising=False,
+    )
+
+    result = technical_bid_writer_module._request_ai_gateway_subsection_completion(
+        None,
+        {
+            "context": {"recommended_charts": ["quality_system"], "chart_assets": []},
+            "section_code": "8.5",
+            "section_title": "质量管理体系与措施",
+            "target_pages": 10,
+            "min_chars": 2300,
+            "subsection_density_hint": {
+                "expected_chars": 2300,
+                "expected_paragraphs": 13,
+                "expected_subsections": 6,
+            },
+            "required_charts": ["quality_system"],
+            "required_tables": [],
+            "round_index": 1,
+        },
+    )
+
+    assert result["content"] == "正文"
+    assert captured["task_type"] == "generate_longform_subsection"
+    assert captured["context"]["longform_subsection"]["subsection_density_hint"]["expected_chars"] == 2300
+    assert "展开 6 个独立子专题" in captured["rewrite_note"]
+    assert re.search(r"至少\s*13\s*个自然段", captured["rewrite_note"])
 
 
 def test_technical_writer_routes_large_chapter_8_through_longform_subsection_loop(monkeypatch) -> None:

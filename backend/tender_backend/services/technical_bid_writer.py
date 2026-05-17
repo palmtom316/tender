@@ -531,6 +531,7 @@ def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: 
         "min_chars": payload.get("min_chars"),
         "required_charts": payload.get("required_charts") or [],
         "required_tables": payload.get("required_tables") or [],
+        "subsection_density_hint": payload.get("subsection_density_hint") or {},
         "round_index": payload.get("round_index"),
         "existing_content_tail": payload.get("existing_content_tail") or "",
         "current_char_count": payload.get("current_char_count") or 0,
@@ -550,6 +551,17 @@ def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: 
     required_charts = [str(key) for key in payload.get("required_charts") or [] if key]
     if required_charts:
         rewrite_parts.append("必须保留图表占位符：" + "、".join(f"{{{{chart:{key}}}}}" for key in required_charts))
+    density_hint = payload.get("subsection_density_hint") if isinstance(payload.get("subsection_density_hint"), dict) else {}
+    expected_subsections = int(density_hint.get("expected_subsections") or 0)
+    expected_paragraphs = int(density_hint.get("expected_paragraphs") or 0)
+    expected_chars = int(density_hint.get("expected_chars") or min_chars or 0)
+    if expected_subsections or expected_paragraphs or expected_chars:
+        rewrite_parts.append(
+            f"本节密度要求：目标约 {expected_chars} 字符，"
+            f"展开 {max(expected_subsections, 1)} 个独立子专题，"
+            f"至少 {max(expected_paragraphs, 1)} 个自然段；"
+            "每个子专题必须包含措施、责任、检查资料或闭环要求，避免只写制度口号。"
+        )
     allowed_chart_keys = normalize_allowed_chart_keys(
         subsection_context.get("recommended_charts"),
         subsection_context.get("chart_assets"),
