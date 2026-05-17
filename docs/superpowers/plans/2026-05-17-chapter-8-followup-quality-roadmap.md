@@ -1,8 +1,8 @@
-# Chapter 8 Followup Quality Roadmap (Trackable)
+# 配网技术标第 8/9/10 章质量统一路线图 (Trackable)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development` 或 `superpowers:executing-plans`，按 checkbox 顺序推进。
 
-**Context（背景）：** 2026-05-16/17 的 Phase A+B 修复（commit `73685f0`）已让第 8 章 `can_export=true` 并产出 78 页可投标 DOCX。但 `docs/acceptance/2026-05-15-longform-launch-closure.md` 仍有 4 项 P1/P2 遗留，且 `docs/superpowers/plans/2026-05-17-chart-generation-quality-upgrade.md` 提出了图表流水线升级方案。本文档承接两者，给出统一的可执行路线图。
+**Context（背景）：** 2026-05-16/17 的 Phase A+B 修复（commit `73685f0`）已让第 8 章 `can_export=true` 并产出 78 页可投标 DOCX。但 `docs/acceptance/2026-05-15-longform-launch-closure.md` 仍有 4 项 P1/P2 遗留，且 `docs/superpowers/plans/2026-05-17-chart-generation-quality-upgrade.md` 提出了图表流水线升级方案。进一步代码审查发现：第 8 章走 `LongformSectionGenerator` 子节循环路径，而第 9 章、10.1/10.2/10.3 仍走单次 `generate_section`，质量和篇幅上限不一致。本文档承接上述问题，给出第 8/9/10 章统一质量路线图。
 
 **输入文档：**
 - 接续 RCA：`docs/reports/2026-05-16-chapter-8-live-test-rca.md` § 11.4
@@ -11,9 +11,9 @@
 - 待合并的遗留项：`docs/acceptance/2026-05-15-longform-launch-closure.md` "后续遗留"段
 - 5/11 整改方案（仍有效）：`docs/reviews/2026-05-11-配网技术标第8-10.3章提示词及图表整改方案.md`
 
-**Goal:** 把第 8 章 DOCX 从"勉强能用"(78 页 + can_export=true) 升级到"达到原 acceptance hard rule"(90+ 页实际 + 评标专家盲评通过 + 0 视觉缺陷)，同时整合 chart pipeline 治理。
+**Goal:** 把第 8 章 DOCX 从"勉强能用"(78 页 + can_export=true) 升级到"达到原 acceptance hard rule"(90+ 页实际 + 评标专家盲评通过 + 0 视觉缺陷)，并把 longform 子节生成路径泛化到第 9 章、10.1/10.2/10.3，最终形成约 200~250 页、质量口径一致的配网技术标正文生成能力。
 
-**Architecture:** 三个并行 track，依赖图见 § 五。Track A 紧扣 chart pipeline；Track B 攻 LLM 输出量；Track C 整顿质量评估口径。
+**Architecture:** 五个 track，依赖图见 § 八。Track A 紧扣 chart pipeline；Track B 攻第 8 章 LLM 输出量；Track C 整顿质量评估口径；Track D 做回归验收；Track E 把 longform 路径泛化到第 9/10 章。
 
 **Tech Stack:** Python (pydantic / pytest), Mermaid sidecar, deepseek-v4-flash/pro, FastAPI, psycopg, LibreOffice + PyMuPDF.
 
@@ -26,10 +26,10 @@
 | # | 问题 | 修订要求 |
 | --- | --- | --- |
 | **R1** | Task 8 "Standardize Fallback" 与 73685f0 已落地的 `_render_fallback` 重复 | Task 8 改为"在 73685f0 基础上补 `stage` / `degradation_chain` metadata 字段"，**不要重建 fallback 逻辑**；测试只新增 metadata 字段断言 |
-| **R2** | Task 1 `_TEMPLATES` 列了 15 种 chart_type，但 SUPPORTED_CHART_TYPES 当前只支持 9 种 | 拆为 Task 1A（先用 5/11 整改方案 REM-C-5 把 SUPPORTED_CHART_TYPES 扩展到 15）+ Task 1B（再定义 templates）。两者不能并行 |
+| **R2** | 原审核意见认为 SUPPORTED_CHART_TYPES 当前只支持 9 种；复核代码后确认当前已支持 15 种 | A-1A 改为"审计 15 种现有支持并补齐 spec/render/default/test 覆盖"，**不要重复扩展 chart_type** |
 | **R3** | Task 5 Gantt degradation 与 mermaid_sidecar 冲突路径不清 | 明确：mermaid_sidecar 成功时**跳过** native degradation；仅在 sidecar fail + native renderer 拒绝渲染 >20 个 task 时切到 summary table |
 | **R4** | Task 7 quality gate 检查项过弱（仅查 `data-overflow='true'` / `font-size='10'`），renderer 不会主动写这些属性，gate 永远不触发 | 改为可执行检查：(a) text 单节点 length > template.text_rules.node_chars 时报 `text_overflow`；(b) SVG `viewBox` 宽高比 > 5 时报 `aspect_extreme`；(c) `<text>` 总数 > template.density_limits.max_nodes \* 2 时报 `density_overload` |
-| **R5** | 缺失"prompt 收紧"任务的代码侧 enforcement | Task 10 之外新增 Task 11：在 `_request_ai_gateway_subsection_completion` rewrite_parts 中追加"chart_key 必须命中 recommended_charts 白名单"硬约束；服务侧 `build_chart_closure_report` 把 LLM 自创 chart_key（不在 recommended_charts 中）降级为 P1 警告而非 P0 |
+| **R5** | 缺失"prompt 收紧"任务的代码侧 enforcement | Task 10 之外新增 Task 11：先规范化 `recommended_charts + chart_assets` 为 allowed chart keys，再在 `_request_ai_gateway_subsection_completion` rewrite_parts 中追加白名单硬约束；服务侧 `build_chart_closure_report` 把 LLM 自创 chart_key（不在 allowed_chart_keys 中）降级为 P1 警告而非 P0 |
 
 此外，原 plan **缺以下 5 项**，已纳入下方 § 一/二/三：
 
@@ -38,6 +38,7 @@
 - 没有覆盖 estimated_pages 公式校准
 - 没有 e2e 验收
 - format_passed 自动校验
+- 没有覆盖 longform 路径从第 8 章泛化到第 9/10 章
 
 ---
 
@@ -59,9 +60,10 @@ Track A (Chart Pipeline 升级)     ← 修订后的 chart-generation-quality-up
 Track B (LLM 输出量提升)          ← 接 L1
 Track C (质量评估口径整顿)         ← 接 L2 / L4 + 编号回归 + 视觉抽检
 Track D (回归 e2e)                ← 最终验收
+Track E (Longform 泛化到 9/10 章) ← 统一生成路径
 ```
 
-每 track 内任务带 ID（`A-1`/`B-2`/`C-3`），可独立 PR。Track 间依赖见 § 五。
+每 track 内任务带 ID（`A-1`/`B-2`/`C-3`），可独立 PR。Track 间依赖见 § 八。
 
 ---
 
@@ -69,7 +71,7 @@ Track D (回归 e2e)                ← 最终验收
 
 **Goal:** 让所有图表稳定通过 mermaid_sidecar 或 native renderer 输出可读 SVG/PNG，AI 只生成语义结构，质量门兜底视觉缺陷。
 
-### A-1A：扩展 SUPPORTED_CHART_TYPES 到 15 种（REM-C-5）
+### A-1A：审计 15 种 SUPPORTED_CHART_TYPES 覆盖（REM-C-5 收口）
 
 **Files:**
 - Modify: `backend/tender_backend/services/chart_service/specs.py`
@@ -78,13 +80,14 @@ Track D (回归 e2e)                ← 最终验收
 - Test: `backend/tests/unit/test_chart_spec_validation.py`、`backend/tests/unit/test_chart_rendering_and_injector.py`
 
 **Steps:**
-- [ ] 新增 spec class：`ResponseMatrixSpec`、`IndicatorTableSpec`、`InterfaceTableSpec`、`EquipmentTableSpec`、`ClosureFlowSpec`、`DataFlowSpec`、`CriticalPathSpec`（5/11 REM-C-5 批次 1+2+3）
-- [ ] 表格类（response_matrix/indicator_table/interface_table/equipment_table）复用 `_render_responsibility_matrix_svg` 网格布局
-- [ ] 流程类（closure_flow/data_flow）复用 flow renderer，允许 cycle
-- [ ] critical_path 初版可复用 schedule_gantt + `is_critical` 高亮
-- [ ] 每类至少 3 个单测（最小 spec / 完整 spec / 错误 spec）
+- [ ] 复核 `SUPPORTED_CHART_TYPES` 当前 15 种：`org_chart / construction_flow / schedule_gantt / critical_path / responsibility_matrix / risk_matrix / quality_system / safety_system / emergency_org / response_matrix / indicator_table / interface_table / equipment_table / closure_flow / data_flow`
+- [ ] 保留现有 union 分类：`critical_path` 继续归入 `GanttChartSpec`；`closure_flow/data_flow` 继续归入 `FlowChartSpec`；`response_matrix/indicator_table/interface_table/equipment_table` 继续归入 `TableChartSpec`
+- [ ] 不新增独立 spec class，除非某类图确实需要不同字段模型
+- [ ] 表格类继续复用 `_render_table_svg` 或后续自适应 table renderer；责任矩阵继续走 `_render_responsibility_matrix_svg`
+- [ ] 流程类继续复用 flow renderer，允许 cycle 的行为由 renderer/layout 层处理，不放宽 schema 的 id/edge 引用校验
+- [ ] 每类至少 3 个单测（最小 spec / 完整 spec / 错误 spec），重点补当前覆盖缺口
 
-**Acceptance:** SUPPORTED_CHART_TYPES 扩到 15；现有 9 种向下兼容。
+**Acceptance:** 15 种已支持 chart_type 都有 spec/default/render/test 覆盖；现有行为向下兼容。
 
 ### A-1B：Chart Template Definitions（来自原 plan Task 1）
 
@@ -185,10 +188,12 @@ Track D (回归 e2e)                ← 最终验收
   - `aspect_extreme`: 解析 `viewBox`，宽高比 > 5 或 < 0.2
   - `density_overload`: `<text>` 节点总数 > `template.density_limits.max_nodes * 2`
   - `font_below_minimum`: `font-size` 属性值 < `template.text_rules.min_font_px`
-- [ ] `create_or_update` 在 render 成功后跑 quality_gate；issues 写入 `metadata_json.quality_gate`；**不阻塞**写库（status 仍由其他分支决定），但作为 review_engine 阻塞条件之一
+- [ ] `create_or_update` 在 render 成功后跑 quality_gate；issues 写入 `metadata_json.quality_gate`
+- [ ] v1 阶段 quality_gate **只记录不阻塞**：不改变 chart asset status，不接入 review_engine，不改变 export gate
+- [ ] 后续如要阻塞，另开 v2 task 接入 review_engine/export_gate，并先定义误杀豁免规则
 - [ ] 单测：构造极端 SVG → 报告 issues 列表非空
 
-**Acceptance:** 视觉缺陷有 evidence trail；导出前可由 review_engine 拦截。
+**Acceptance:** 视觉缺陷有 evidence trail；不改变当前 can_export 判定。
 
 ### A-8：Standardize Fallback Metadata（修订原 Task 8，R1 整改）
 
@@ -239,9 +244,10 @@ Track D (回归 e2e)                ← 最终验收
 - Test: `backend/tests/unit/test_longform_quality.py`
 
 **Steps:**
-- [ ] `_request_ai_gateway_subsection_completion` rewrite_parts 增加："chart_key 必须从 [list of recommended_charts] 中选；写不在列表中的 chart_key 占位符将被视为错误"
+- [ ] 新增 `normalize_allowed_chart_keys(recommended_charts, chart_assets)`：同时收集 `placeholder_key` 和 `chart_type`，兼容 dict/object/string 三种输入
+- [ ] `_request_ai_gateway_subsection_completion` rewrite_parts 增加："chart_key 必须从 [allowed_chart_keys] 中选；写不在列表中的 chart_key 占位符将被视为错误"
 - [ ] `build_chart_closure_report`：referenced chart_key 不在传入的 `allowed_chart_keys`（新增参数）时，降级 issue severity 为 P1（不阻塞 export，但前端展示警告）
-- [ ] `_save_chapter_draft` 调用 build_chart_closure_report 时传 `allowed_chart_keys=context['recommended_charts']`
+- [ ] `_save_chapter_draft` 调用 build_chart_closure_report 时传 `allowed_chart_keys=normalize_allowed_chart_keys(context.get('recommended_charts'), context.get('chart_assets'))`
 - [ ] 单测：LLM 自创 chart_key → severity=P1 不阻塞
 
 **Acceptance:** 73685f0 修复后类似 `framework_risk_matrix` 这种 LLM 幻想占位符不再阻塞 export。
@@ -300,9 +306,11 @@ Track D (回归 e2e)                ← 最终验收
 - Test: `backend/tests/unit/test_longform_quality.py`
 
 **Steps:**
-- [ ] 校准公式系数：text_units/340 → text_units/420 (基于 5/17 实测：80745 units → 78 实际页 ≈ 1035 units/page；保守 420 留余量)
-- [ ] heading 系数 0.08 → 0.05；chart 0.55 → 0.3；table_row 0.06 → 0.04
-- [ ] 单测：weighted=42000 + 90 heading + 9 chart + 100 table_row → estimated ≈ 105 页
+- [ ] 明确目标：`estimated_pages` 用于 export gate 的保守门禁，不等同于 DOCX 实际页数；实际页数以 C-1 写回的 `actual_pages` 为准
+- [ ] 校准公式拆为两套字段：`estimated_pages_gate`（保守）与 `estimated_pages_actual_like`（贴近实际）
+- [ ] `estimated_pages_actual_like` 以 5/17 实测为基线：80745 weighted units / 78 actual pages ≈ 1035 units/page，初始使用 `text_units / 1000 + structure_adjustment`
+- [ ] `estimated_pages_gate` 可继续偏保守，但必须在 method/evidence 中明确 `gate_estimate_not_actual`
+- [ ] 单测：weighted=80745 且结构项接近 5/17 样本时，`estimated_pages_actual_like` 在 70~90 区间
 
 **Acceptance:** estimated_pages 与 actual_pages 偏差 ≤ 15%。
 
@@ -331,7 +339,8 @@ Track D (回归 e2e)                ← 最终验收
 
 **Steps:**
 - [ ] `check_docx_format(docx_path)` 检查：(a) 字体（默认仿宋/黑体）、(b) 段落对齐、(c) 章节标题样式一致性、(d) 表格边框/字号
-- [ ] `_format_gate_state` 不再硬编码 false：从最新 export_record.metadata_json.render_evidence.format_check 读
+- [ ] `_format_gate_state()` 改为 `_format_gate_state(conn, *, project_id)`：从最新 export_record.metadata_json.render_evidence.format_check 读
+- [ ] `build_export_gate_state` 调用点同步传入 `conn/project_id`
 - [ ] export_record 创建时跑 format_checker 并写入 metadata
 - [ ] 单测：构造一个不合格 docx → format_passed=False
 
@@ -390,7 +399,115 @@ Track D (回归 e2e)                ← 最终验收
 
 ---
 
-## 七、依赖图
+## 七、Track E — Longform 路径泛化到第 9/10 章
+
+**Goal:** 消除第 8 章与第 9/10 章生成路径不一致的问题，把 `LongformSectionGenerator` 子节循环、min_chars 续写、coverage/chart_closure gate 泛化到第 9 章和 10.1/10.2/10.3。
+
+**代码事实：**
+- 第 8 章当前路径：`LongformSectionGenerator` 子节循环 + min_chars 续写 + coverage/chart_closure gate；实测 v4-flash x 4 轮约 78 页。
+- 第 9 章当前路径：单次 `_request_ai_gateway_completion(generate_section)`，`max_tokens=16384`，通常约 20~30 页。
+- 第 10.1/10.2/10.3 当前路径：同第 9 章，通常约 20~30 页。
+- 入口条件硬编码：`_should_use_longform_generation(chapter, target_pages)` 仅允许 `chapter_code == "8"` 且 `target_pages >= 80`。
+- `plan_chapter_8_sections` 内部 `_CHAPTER_8_TITLES / _SECTION_WEIGHTS / _DEFAULT_CHARTS / _DEFAULT_TABLES` 都是 8.x 硬编码；registry 虽有第 9/10 章 sections 定义，但没有通用 `plan_chapter_sections`。
+
+### E-1：Longform 入口从硬编码改为 registry 配置
+
+**Files:**
+- Modify: `backend/tender_backend/services/technical_bid_writer.py::_should_use_longform_generation`
+- Modify: 章节 registry 所在文件（以现有 `CHAPTER_8_SECTIONS` 定义位置为准）
+- Test: `backend/tests/unit/test_technical_bid_writer.py`
+
+**Steps:**
+- [ ] 在 registry 增加 longform 配置表：`LONGFORM_CHAPTER_CONFIG[chapter_code] = {enabled, min_target_pages, section_set_key}`
+- [ ] 覆盖 `"8" / "9" / "10.1" / "10.2" / "10.3"`
+- [ ] `_should_use_longform_generation` 改为按 chapter_code 查询配置，不再硬编码 `"8"`
+- [ ] 单测：8 target_pages=80 返回 true；9 target_pages=30 返回 true；10.1 target_pages=35 返回 true；未配置章节返回 false
+
+**Acceptance:** 第 9/10 章在达到配置 target_pages 时进入 longform 路径。
+
+**Effort:** 0.3 人日
+
+### E-2：`plan_chapter_8_sections` 泛化为 `plan_chapter_sections`
+
+**Files:**
+- Modify: `backend/tender_backend/services/longform_section_generation.py`
+- Test: `backend/tests/unit/test_longform_section_generation.py`
+
+**Steps:**
+- [ ] 新增 `plan_chapter_sections(chapter_code, target_pages)`，从 registry 动态读取对应 sections 元组
+- [ ] 保留 `plan_chapter_8_sections(target_pages)` 作为兼容 wrapper，内部调用 `plan_chapter_sections("8", target_pages)`
+- [ ] 将 `_CHAPTER_8_TITLES` 等 8.x 私有常量迁移到 registry 配置，或改为从 registry 派生
+- [ ] 单测：第 8 章输出与旧函数保持一致；第 9 章输出 8 个 section；10.1/10.2/10.3 输出对应三级编号 section
+
+**Acceptance:** section 规划函数不再绑定第 8 章，且不破坏现有第 8 章行为。
+
+**Effort:** 1.5 人日
+
+### E-3：按章配置权重、默认图表、默认表格
+
+**Files:**
+- Modify: registry 所在文件
+- Modify: `backend/tender_backend/services/longform_section_generation.py`
+- Test: `backend/tests/unit/test_longform_section_generation.py`
+
+**Steps:**
+- [ ] 新增 `SECTION_WEIGHTS[chapter_code]`
+- [ ] 新增 `DEFAULT_CHARTS[chapter_code]`
+- [ ] 新增 `DEFAULT_TABLES[chapter_code]`
+- [ ] 覆盖五套：`8 / 9 / 10.1 / 10.2 / 10.3`
+- [ ] 第 9 章推荐 target_pages: 30~40；10.1/10.2/10.3 推荐 target_pages: 35~50
+- [ ] 单测：每章 section weights 总和可归一化；default charts 都命中 SUPPORTED_CHART_TYPES；default tables 不为空
+
+**Acceptance:** 各章可按自己的权重、图表、表格要求生成 longform subsection payload。
+
+**Effort:** 1.5 人日
+
+### E-4：三级编号体系回归
+
+**Files:**
+- Modify/Test: `backend/tests/unit/test_longform_section_generation.py`
+- Modify: 如存在 `_present_section_codes` 正则定义的文件
+
+**Steps:**
+- [ ] 扩展 `_present_section_codes` 正则，确认支持 `10.1.1`、`10.2.16`、`10.3.15` 这类三级编号
+- [ ] 新增编号对齐测试：`8 / 9 / 10.1 / 10.2 / 10.3` 五套 planned sections 必须严格等于 registry 定义
+- [ ] 新增 markdown 提取测试：正文含三级标题时能正确识别 present section codes
+
+**Acceptance:** 第 10.x 节不会因为三级编号识别失败而误判 coverage 缺失。
+
+**Effort:** 1.0 人日
+
+### E-5：四章 longform e2e 与 evidence 归档
+
+**Files:**
+- Modify/Create: `scripts/run_longform_multi_chapter_acceptance.py`
+- Create: `docs/acceptance/2026-MM-DD-longform-8-9-10-evidence.json`
+
+**Steps:**
+- [ ] 对同一项目依次生成第 8、9、10.1、10.2、10.3 章
+- [ ] 验证各章 target_pages、actual_pages、coverage_passed、chart_closure_passed
+- [ ] 验证第 9 章实际页数 30~40，第 10.1/10.2/10.3 实际页数 35~50，第 8 章实际页数 ≥ 90
+- [ ] evidence 归档每章：section_count、generation_rounds、actual_pages、coverage issues、chart closure issues、model usage
+
+**Acceptance:** 四章统一进入 longform 质量路径，合计约 200~250 页技术标正文。
+
+**Effort:** 1.0 人日
+
+**Track E Effort:** 约 5.3 人日
+
+**质量预期：**
+
+| 章 | 节数 | 推荐 target_pages | 预期单节字数 | 质量预期 |
+| --- | ---: | ---: | ---: | --- |
+| 第 8 章 | 15 | 100 | 1500~2300 | 基准，目标 ≥90 实际页 |
+| 第 9 章 | 8 | 30~40 | 1800~2500 | 大概率优于第 8 章，节数少、业务边界清晰 |
+| 10.1 | 15 | 35~50 | 1500~2300 | 大概率持平，需控制三级编号 |
+| 10.2 | 16 | 35~50 | 1500~2300 | 持平或略低，暗标脱敏和安全体系复杂度更高 |
+| 10.3 | 15 | 35~50 | 1500~2300 | 持平，甘特图质量依赖 Track A |
+
+---
+
+## 八、依赖图
 
 ```
 A-1A (15 chart types) ─→ A-1B (templates)
@@ -412,32 +529,41 @@ B-1 → B-2 → B-3 → B-4
 
 C-1 → C-2 → C-3 → C-4
 
+E-1 → E-2 → E-3 → E-4 → E-5
+E-3 ──→ A-10/A-11（各章 recommended charts 与 chart_key 白名单一致）
+Track A ──→ E-5（多章 e2e 依赖图表稳定）
+Track C ──→ E-5（多章 e2e 依赖真实页数与格式口径）
+
 D-1 ←─ Track A 完成 + Track B 完成 + Track C 完成
-D-2 ←─ D-1
+D-1 可与 E-5 合并为最终多章 acceptance
+D-2 ←─ D-1/E-5
 D-3 ←─ D-2
 ```
 
 ---
 
-## 八、Success Criteria（hard stop）
+## 九、Success Criteria（hard stop）
 
 - [ ] Track A：15 种 chart_type 全部可渲染（mermaid_sidecar 或 native）；fallback metadata 完整；quality_gate 不产生新阻塞但报 issue
 - [ ] Track B：第 8 章实际 DOCX 页数 ≥ 90；高权重节字数 ≥ 2500
 - [ ] Track C：format_passed 反映真实排版；编号体系 regression test 全绿；视觉抽检脚本可用
 - [ ] Track D：3 个项目盲评全过；acceptance evidence 归档
+- [ ] Track E：第 9 章、10.1、10.2、10.3 统一进入 longform 路径；四章合计约 200~250 页；各章 coverage/chart_closure gate 通过
 
 ---
 
-## 九、Risk Controls
+## 十、Risk Controls
 
 - [ ] 任一 Task 引入 e2e regression（已有第 8 章 can_export 由 true 变 false）→ 立即回滚该 PR
 - [ ] B-2 / B-3 启用 v4-pro 前确认 API quota；超限切回 flash + flag warning
-- [ ] A-1A 扩展 chart_type 时，向下兼容：所有现有 9 种 chart 行为不变
+- [ ] A-1A 审计 15 种 chart_type 时，向下兼容：所有现有 chart 行为不变
 - [ ] A-7 quality_gate 设计为"报告不阻塞"，避免误杀
+- [ ] Track E 泛化入口时默认只对已配置章节启用，避免普通章节误入 longform 导致成本失控
+- [ ] 第 10.x 三级编号必须先通过 E-4 regression，再进入 E-5 e2e
 
 ---
 
-## 十、Reporting Cadence
+## 十一、Reporting Cadence
 
 - [ ] 每完成 1 个 Track 内 task：勾选 + commit message 带 `[FOLLOWUP-X-N]`
 - [ ] 每完成 1 个 Track：在本文件 `## 修订记录` 段追加完成日期与 commit hash
@@ -450,3 +576,4 @@ D-3 ←─ D-2
 | 版本 | 日期 | 内容 |
 | --- | --- | --- |
 | v1.0 | 2026-05-17 | 初版落盘。合并 chart-generation-quality-upgrade.md（含修订意见 R1~R5）+ longform-launch-closure.md 遗留项 L1~L4。|
+| v1.1 | 2026-05-17 | 修订 R2/A-1A、A-7、A-11、B-4、C-2；追加 Track E，将 longform 路径泛化到第 9 章和 10.1/10.2/10.3；标题与目标升级为第 8/9/10 章统一质量路线图。 |
