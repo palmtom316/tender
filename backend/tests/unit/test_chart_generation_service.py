@@ -470,6 +470,54 @@ def test_create_or_update_blocks_dated_schedule_without_source_trace() -> None:
     assert rows[0]["metadata_json"]["source_context"]["chapter_code"] == "10.3"
 
 
+def test_create_or_update_records_fallback_stage_and_chain(monkeypatch) -> None:
+    rows = []
+
+    class _Repo:
+        def create(self, _conn, **kwargs):
+            rows.append(kwargs)
+
+            class _Row:
+                id = uuid4()
+                project_id = kwargs["project_id"]
+                outline_node_id = kwargs.get("outline_node_id")
+                chart_type = kwargs["chart_type"]
+                title = kwargs["title"]
+                spec_json = kwargs["spec_json"]
+                rendered_svg = kwargs["rendered_svg"]
+                rendered_path = None
+                placeholder_key = kwargs["placeholder_key"]
+                mermaid_source = kwargs["mermaid_source"]
+                rendered_png_path = kwargs["rendered_png_path"]
+                status = kwargs["status"]
+                version = 1
+                metadata_json = kwargs["metadata_json"]
+
+                class _Time:
+                    def isoformat(self):
+                        return "2026-05-11T00:00:00"
+
+                created_at = _Time()
+                updated_at = _Time()
+
+            return _Row()
+
+    monkeypatch.setattr("tender_backend.services.chart_generation_service.svg_to_png", lambda _svg, path: path)
+    service = ChartGenerationService(repo=_Repo())
+    result = service.create_or_update(
+        object(),
+        project_id=uuid4(),
+        chart_type="indicator_table",
+        title="绿色施工指标表",
+        spec_json={"placeholder_key": "indicator_table", "columns": ["指标"], "rows": [{"cells": ["质量", "安全"]}]},
+    )
+
+    assert result["status"] == "needs_review"
+    fallback = rows[0]["metadata_json"]["fallback_render"]
+    assert fallback["stage"] == "validation_failed"
+    assert fallback["degradation_chain"]
+
+
 def test_create_or_update_allows_dated_schedule_with_source_trace(monkeypatch) -> None:
     rows = []
 

@@ -19,6 +19,7 @@ from tender_backend.db.repositories.chart_asset_repo import (
     chart_asset_to_dict,
 )
 from tender_backend.services.chart_service.png_converter import svg_to_png
+from tender_backend.services.chart_service.quality_gate import evaluate_svg_quality
 from tender_backend.services.chart_service.renderers import render_chart_spec
 from tender_backend.services.chart_service.redactor import redact_context_for_chart, scan_blind_bid_keywords
 from tender_backend.services.chart_service.specs import (
@@ -27,6 +28,7 @@ from tender_backend.services.chart_service.specs import (
     parse_chart_spec,
     validate_chart_spec,
 )
+from tender_backend.services.chart_service.templates import get_chart_template
 from tender_backend.services.ai_gateway_client import ai_gateway_headers
 
 
@@ -104,7 +106,7 @@ class ChartGenerationService:
                     "validation": validation,
                     "source_kind": "default_spec" if is_default_spec else "json_spec",
                     "source_context": _source_context(payload),
-                    "fallback_render": {"reason": "validation_failed", "rendered": bool(fallback)},
+                    "fallback_render": _fallback_metadata("validation_failed", rendered=bool(fallback)),
                 },
             )
             return chart_asset_to_dict(row)
@@ -132,7 +134,7 @@ class ChartGenerationService:
                     "validation": validation,
                     "blind_bid_scan": {"issues": blind_bid_issues},
                     "source_kind": "json_spec",
-                    "fallback_render": {"reason": "blind_bid", "rendered": False},
+                    "fallback_render": _fallback_metadata("blind_bid", rendered=False),
                 },
             )
             return chart_asset_to_dict(row)
@@ -168,7 +170,7 @@ class ChartGenerationService:
                     "provenance": {"issues": provenance_issues},
                     "source_kind": "json_spec",
                     "source_context": _source_context(payload),
-                    "fallback_render": {"reason": "provenance", "rendered": bool(fallback)},
+                    "fallback_render": _fallback_metadata("provenance", rendered=bool(fallback)),
                 },
             )
             return chart_asset_to_dict(row)
@@ -176,6 +178,7 @@ class ChartGenerationService:
         spec = parse_chart_spec(payload)
         normalized = spec.model_dump(by_alias=True, mode="json")
         rendered = render_chart_spec(spec)
+        quality_gate = evaluate_svg_quality(rendered.svg, get_chart_template(chart_type))
         png_path = self._write_png(
             project_id=project_id,
             placeholder_key=_placeholder_from_spec(normalized) or chart_type,
@@ -203,6 +206,7 @@ class ChartGenerationService:
                 "render_engine": rendered.engine,
                 "source_kind": "default_spec" if is_default_spec else "json_spec",
                 "source_context": source_context,
+                "quality_gate": quality_gate,
             },
         )
         return chart_asset_to_dict(row)
@@ -409,6 +413,19 @@ def _flow_parent_edges(nodes: list[dict[str, str]]) -> list[dict[str, str]]:
 
 def _safe_filename(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in value).strip("_") or "chart"
+
+
+def _fallback_metadata(reason: str, *, rendered: bool) -> dict[str, Any]:
+    return {
+        "reason": reason,
+        "stage": reason,
+        "degradation_chain": [
+            "default_chart_spec",
+            "parse_chart_spec",
+            "render_chart_spec",
+        ],
+        "rendered": rendered,
+    }
 
 
 def default_chart_spec(*, chart_type: str, title: str, placeholder_key: str | None = None) -> dict[str, Any]:
