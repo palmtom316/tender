@@ -25,20 +25,22 @@ def test_estimate_markdown_pages_counts_chinese_text_tables_charts_and_breaks():
     assert estimate["evidence"]["explicit_page_break_count"] == 1
 
 
-def test_page_gate_blocks_below_ninety_percent_target():
-    gate = build_page_gate(target_pages=100, estimated_pages=88, actual_pages=None, actual_status="unchecked")
+def test_page_gate_blocks_below_seventy_percent_target():
+    gate = build_page_gate(target_pages=100, estimated_pages=65, actual_pages=None, actual_status="unchecked")
 
     assert gate["page_count_passed"] is False
     assert gate["page_count_status"] == "failed_estimate_below_minimum"
-    assert gate["minimum_required_pages"] == 90
+    assert gate["minimum_required_pages"] == 70
 
 
-def test_page_gate_blocks_unchecked_when_estimate_is_not_enough():
-    gate = build_page_gate(target_pages=100, estimated_pages=95, actual_pages=None, actual_status="unchecked")
+def test_page_gate_passes_with_warning_when_estimate_meets_minimum_but_unchecked():
+    """When estimated_pages meets the 70% floor we pass with a warning so the
+    chicken-and-egg between export and actual page counting can be broken."""
+    gate = build_page_gate(target_pages=100, estimated_pages=80, actual_pages=None, actual_status="unchecked")
 
-    assert gate["page_count_passed"] is False
-    assert gate["page_count_status"] == "warning_actual_unchecked"
-    assert "未校验" in gate["page_count_message"]
+    assert gate["page_count_passed"] is True
+    assert gate["page_count_status"] == "passed_by_estimate"
+    assert "导出后" in gate["page_count_message"]
 
 
 def test_page_gate_passes_when_actual_pages_meet_minimum():

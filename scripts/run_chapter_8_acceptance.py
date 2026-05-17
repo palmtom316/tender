@@ -35,7 +35,7 @@ def _load_chapter_8_evidence(conn: psycopg.Connection, *, project_id: UUID) -> d
         ).fetchone()
         export_row = cur.execute(
             """
-            SELECT id, mode, status, metadata_json, created_at, updated_at
+            SELECT id, template_name, status, metadata_json, created_at
             FROM export_record
             WHERE project_id = %s
             ORDER BY created_at DESC

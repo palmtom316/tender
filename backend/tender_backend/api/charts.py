@@ -33,6 +33,11 @@ class ChartApprovalBody(BaseModel):
     approved_by: str | None = None
 
 
+class ChartBulkApprovalBody(BaseModel):
+    mode: str = "auto"
+    approved_by: str | None = None
+
+
 class ChartGenerateBody(BaseModel):
     chart_type: str
     title: str
@@ -146,3 +151,31 @@ async def approve_chart_asset(
 @router.get("/chart-assets/supported-types")
 async def list_supported_chart_types() -> dict:
     return {"types": sorted(SUPPORTED_CHART_TYPES)}
+
+
+@router.post("/projects/{project_id}/chart-assets/bulk-approve")
+async def bulk_approve_chart_assets(
+    project_id: UUID,
+    payload: ChartBulkApprovalBody | None = None,
+    conn: Connection = Depends(get_db_conn),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    require_project_access(conn, project_id=project_id, user=user)
+    body = payload or ChartBulkApprovalBody()
+    with conn.cursor() as cur:
+        row = cur.execute(
+            "SELECT metadata_json FROM project WHERE id = %s",
+            (project_id,),
+        ).fetchone()
+    metadata = (row[0] if row else None) or {}
+    is_blind_bid = bool(metadata.get("is_blind_bid"))
+    try:
+        return _service.bulk_approve(
+            conn,
+            project_id=project_id,
+            mode=body.mode,
+            approved_by=(body.approved_by or user.display_name or "system"),
+            is_blind_bid=is_blind_bid,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

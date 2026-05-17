@@ -391,13 +391,14 @@ def _request_ai_gateway_completion(
     context: dict[str, Any],
     *,
     rewrite_note: str | None = None,
+    task_type: str = "generate_section",
 ) -> dict[str, Any] | None:
     settings = get_settings()
     if not settings.ai_gateway_url:
         return None
     primary_override, fallback_override = _generate_section_overrides(conn)
     payload = {
-        "task_type": "generate_section",
+        "task_type": task_type,
         "messages": _ai_gateway_messages(context, rewrite_note=rewrite_note),
         "temperature": 0.2,
         "max_tokens": _ai_gateway_max_tokens(context),
@@ -413,8 +414,15 @@ def _request_ai_gateway_completion(
         headers={"Content-Type": "application/json", **ai_gateway_headers()},
         method="POST",
     )
+    # Longform subsections may require deepseek-v4-pro max_thinking which can run >5 min;
+    # ordinary generate_section sticks to the 300s baseline.
+    completion_timeout = (
+        max(settings.standard_ai_gateway_timeout_seconds, 1320.0)
+        if task_type == "generate_longform_subsection"
+        else max(settings.standard_ai_gateway_timeout_seconds, 300.0)
+    )
     try:
-        with urllib.request.urlopen(request, timeout=max(settings.standard_ai_gateway_timeout_seconds, 300.0)) as response:
+        with urllib.request.urlopen(request, timeout=completion_timeout) as response:
             body = response.read().decode("utf-8")
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
@@ -520,7 +528,12 @@ def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: 
         "required_tables": payload.get("required_tables") or [],
         "round_index": payload.get("round_index"),
         "existing_content_tail": payload.get("existing_content_tail") or "",
+        "current_char_count": payload.get("current_char_count") or 0,
+        "previous_section_outlines": payload.get("previous_section_outlines") or [],
     }
+    round_index = int(payload.get("round_index") or 1)
+    min_chars = int(payload.get("min_chars") or 0)
+    current_chars = int(payload.get("current_char_count") or 0)
     rewrite_parts = [
         str(payload.get("rewrite_note") or "").strip(),
         (
@@ -534,10 +547,28 @@ def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: 
         rewrite_parts.append("必须保留图表占位符：" + "、".join(f"{{{{chart:{key}}}}}" for key in required_charts))
     required_tables = [str(label) for label in payload.get("required_tables") or [] if label]
     if required_tables:
-        rewrite_parts.append("必须包含表格/清单：" + "、".join(required_tables))
-    if payload.get("round_index") and int(payload.get("round_index") or 0) > 1:
-        rewrite_parts.append("这是续写轮次，只补充不足内容，不重复已生成段落。")
-    ai_result = _request_ai_gateway_completion(conn, subsection_context, rewrite_note="\n".join(part for part in rewrite_parts if part))
+        rewrite_parts.append("必须包含表格/清单（标题任选一）：" + "、".join(required_tables))
+    if round_index > 1:
+        shortfall = max(0, min_chars - current_chars)
+        rewrite_parts.append(
+            f"这是第 {round_index} 轮续写。本节已生成 {current_chars} 字符，还差约 {shortfall} 字符达标。"
+            "只补充缺失子专题、技术细节、案例与数据，禁止重复已生成段落的主旨与例句；"
+            "允许新增子标题（h3/h4），但保持本节顶层编号 8.x 不变。"
+            "禁止输出任何元描述（例如『以上内容』『补充内容』之类的开场白）。"
+        )
+    previous_outlines = payload.get("previous_section_outlines") or []
+    if previous_outlines and round_index == 1:
+        outline_summary = "、".join(
+            f"{o['section_code']} {o['title']}（{o['actual_chars']}字）"
+            for o in previous_outlines[-5:]
+        )
+        rewrite_parts.append(f"前文已完成节摘要：{outline_summary}。本节不重复前文。")
+    ai_result = _request_ai_gateway_completion(
+        conn,
+        subsection_context,
+        rewrite_note="\n".join(part for part in rewrite_parts if part),
+        task_type="generate_longform_subsection",
+    )
     if ai_result is None:
         return None
     usage = ai_result.get("usage") or {}
@@ -619,6 +650,7 @@ def _save_chapter_draft(
         constraints=context.get("constraints") if isinstance(context.get("constraints"), list) else [],
         equipment_data=equipment_data,
         personnel_data=personnel_selections,
+        chapter_code=str(chapter.get("chapter_code") or "") or None,
     )
     chart_closure_report = build_chart_closure_report(
         content_md,

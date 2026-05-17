@@ -4,6 +4,13 @@ TASK_PROFILES = {
         "fallback_model": "qwen-max",
         "max_tokens": 8192,
     },
+    "generate_longform_subsection": {
+        "primary_model": "deepseek-v4-flash",
+        "fallback_model": "deepseek-v4-pro",
+        "timeout": 900,
+        "max_tokens": 32768,
+        "max_retries": 0,
+    },
     "review_section": {
         "primary_model": "deepseek-v4-flash",
         "fallback_model": "qwen-max",

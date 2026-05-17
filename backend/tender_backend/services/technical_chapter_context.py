@@ -237,7 +237,8 @@ class TechnicalChapterContextBuilder:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(
                 """
-                SELECT id, chart_type, placeholder_key, title, status, metadata_json
+                SELECT id, chart_type, placeholder_key, title, status, metadata_json,
+                       rendered_svg, rendered_path, rendered_png_path
                 FROM chart_asset
                 WHERE project_id = %s
                   AND (outline_node_id = %s OR outline_node_id IS NULL)

@@ -184,13 +184,15 @@ def _get_providers(
 
 
 # Tasks that may use deepseek-v4-pro despite the global cost-control guard.
-# Tender extraction needs v4-pro's reasoning quality for recall and structural
-# fidelity; everything else stays on flash.
+# Tender extraction and long-form technical bid subsections need v4-pro's
+# reasoning quality for recall, structural fidelity, and continuation coherence;
+# other tasks stay on flash.
 _V4_PRO_ALLOWED_TASKS = frozenset(
     {
         "extract_tender_requirements",
         "extract_tender_facts",
         "extract_scoring_criteria",
+        "generate_longform_subsection",
     }
 )
 
@@ -228,6 +230,7 @@ def call_with_fallback(
     timeout = profile.get("timeout", settings.default_timeout)
     max_retries = profile.get("max_retries", settings.default_retry_count)
     effective_max_tokens = max_tokens if max_tokens is not None else profile.get("max_tokens", 4096)
+    primary_thinking_mode = profile.get("primary_thinking_mode")
 
     for attempt, provider in enumerate([primary, fallback]):
         if not provider.api_key:
@@ -247,6 +250,10 @@ def call_with_fallback(
             merged_extra.update(extra_body)
         if provider.extra_body:
             merged_extra.update(provider.extra_body)
+        # Profile-declared thinking mode applies only to the primary attempt;
+        # fallback runs use the cheaper model without reasoning.
+        if attempt == 0 and primary_thinking_mode == "max" and "thinking" not in merged_extra:
+            merged_extra["thinking"] = {"type": "enabled"}
         sanitized_extra = _sanitize_extra_body_for_thinking(merged_extra)
         thinking_enabled = _thinking_enabled(sanitized_extra)
 

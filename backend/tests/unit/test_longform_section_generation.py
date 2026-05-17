@@ -20,7 +20,26 @@ def test_plan_chapter_8_sections_creates_8_1_to_8_15_with_page_budget():
 
     assert [section["section_code"] for section in sections] == [f"8.{index}" for index in range(1, 16)]
     assert sum(section["target_pages"] for section in sections) == 100
-    assert all(section["min_chars"] >= 2800 for section in sections)
+    assert all(section["min_chars"] >= 1500 for section in sections)
+    assert all(section["min_chars"] <= 2300 for section in sections)
+
+
+def test_plan_chapter_8_sections_weights_high_priority_sections_higher():
+    sections = plan_chapter_8_sections(target_pages=100)
+    by_code = {section["section_code"]: section for section in sections}
+    # 8.4 main construction methods should be the heaviest section under the new
+    # numbering aligned with CHAPTER_8_SECTIONS (registry).
+    assert by_code["8.4"]["min_chars"] > by_code["8.14"]["min_chars"]
+    assert by_code["8.5"]["min_chars"] > by_code["8.1"]["min_chars"]
+
+
+def test_plan_chapter_8_sections_required_tables_are_synonym_lists():
+    sections = plan_chapter_8_sections(target_pages=100)
+    by_code = {section["section_code"]: section for section in sections}
+    tables = by_code["8.5"]["required_tables"]
+    assert tables and isinstance(tables[0], list)
+    assert "质量控制点表" in tables[0]
+    assert "WHS控制点表" in tables[0]
 
 
 @pytest.mark.parametrize("target_pages", [0, 14])

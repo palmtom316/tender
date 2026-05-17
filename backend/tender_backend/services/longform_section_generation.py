@@ -12,41 +12,73 @@ from typing import Any
 from tender_backend.services.longform_quality import estimate_markdown_pages
 
 _CHAPTER_8_TITLES = [
-    "编制依据",
-    "工程概况",
-    "施工总体部署",
-    "施工进度计划",
-    "施工准备与资源配置",
-    "主要施工方法与技术措施",
-    "施工现场平面布置",
-    "质量管理体系与保证措施",
-    "安全生产管理体系与保证措施",
-    "文明施工与环境保护措施",
-    "工期保证措施",
-    "重点难点分析及应对措施",
-    "季节性施工措施",
-    "成品保护与交付配合",
-    "应急预案与风险控制",
+    "编制依据与标准",
+    "工程概况与施工重难点分析",
+    "施工组织与部署",
+    "主要施工方法及技术要求",
+    "质量管理体系与措施",
+    "安全管理体系与措施",
+    "施工进度计划与保障",
+    "环境保护、绿色低碳与碳足迹管理",
+    "科技创新与智能化应用",
+    "地域特性专题方案",
+    "竣工验收与数字化移交",
+    "售后服务、培训及增值服务",
+    "拟投入施工车辆、机具、工器具、检测设备、安全工器具及设施",
+    "施工项目部组织架构创新设计",
+    "国网年度框架施工工程投标其他创新内容",
 ]
 
 _DEFAULT_CHARTS: dict[str, list[str]] = {
+    "8.1": ["response_matrix"],
+    "8.2": ["risk_matrix"],
     "8.3": ["construction_flow"],
-    "8.4": ["schedule_gantt"],
+    "8.4": ["construction_flow"],
+    "8.5": ["quality_system"],
+    "8.6": ["safety_system", "risk_matrix"],
     "8.7": ["schedule_gantt"],
-    "8.8": ["quality_system"],
-    "8.9": ["safety_system"],
-    "8.12": ["risk_matrix"],
+    "8.11": ["closure_flow"],
+    "8.13": ["equipment_table"],
 }
 
-_DEFAULT_TABLES: dict[str, list[str]] = {
-    "8.2": ["工程概况表"],
-    "8.5": ["资源配置计划表"],
-    "8.6": ["主要施工方法表"],
-    "8.8": ["质量控制点表"],
-    "8.9": ["安全风险管控表"],
-    "8.11": ["工期保证措施表"],
-    "8.12": ["重点难点应对表"],
+_DEFAULT_TABLES: dict[str, tuple[tuple[str, ...], ...]] = {
+    "8.1": (("响应矩阵", "标准响应矩阵", "条款响应矩阵"),),
+    "8.2": (("工程概况表", "工程概况一览表", "项目概况表", "重难点分析表", "重点难点分析表"),),
+    "8.4": (("主要施工方法表", "主要施工方法清单", "主要施工工序表", "施工方法表"),),
+    "8.5": (("质量控制点表", "WHS控制点表", "质量控制点清单", "WHSR控制点表", "质量控制清单"),),
+    "8.6": (("安全风险管控表", "危险源辨识与分级管控表", "风险分级管控清单", "危险源辨识与管控表"),),
+    "8.7": (("工期保证措施表", "进度保证措施表", "关键工期保证表"),),
+    "8.13": (("设备清单", "设备配置表", "施工设备表", "拟投入设备表"),),
 }
+
+# Section weight allocation for min_chars per section title (sum=15.5).
+# High weight: 8.4 main methods, 8.5 quality system, 8.6 safety, 8.7 schedule.
+# Low weight: 8.1 basis, 8.13 equipment list, 8.14 org chart, 8.15 innovation.
+_SECTION_WEIGHTS: dict[str, float] = {
+    "8.1": 0.6,
+    "8.2": 1.3,
+    "8.3": 1.2,
+    "8.4": 1.8,
+    "8.5": 1.5,
+    "8.6": 1.5,
+    "8.7": 1.4,
+    "8.8": 1.0,
+    "8.9": 0.9,
+    "8.10": 1.0,
+    "8.11": 1.0,
+    "8.12": 0.7,
+    "8.13": 0.6,
+    "8.14": 0.6,
+    "8.15": 0.5,
+}
+
+# 380 chars/page reflects actual docx Chinese density (was 620, too high)
+# Cap=2300 ≈ 6 pages: empirically aligns with single-chapter LLM output ceiling
+# (deepseek-v4-flash 32k max_tokens but ~2000~2800 chars per round for Chinese
+# after subtracting markdown structure).
+_CHARS_PER_PAGE = 380
+_MIN_CHARS_FLOOR = 1500
+_MIN_CHARS_CAP = 2300
 
 _CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")
@@ -59,27 +91,52 @@ def _weighted_text_units(content_md: str) -> int:
 
 
 def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
-    """Create the 15-section chapter 8 plan with an exact page budget."""
+    """Create the 15-section chapter 8 plan with weighted page budget."""
 
     section_count = len(_CHAPTER_8_TITLES)
     if target_pages < section_count:
         raise ValueError(f"target_pages must be at least {section_count}")
 
-    base_pages, extra_pages = divmod(target_pages, section_count)
-    sections: list[dict[str, Any]] = []
+    weight_sum = sum(_SECTION_WEIGHTS.values())
+    pages_per_weight = target_pages / weight_sum
 
+    # First pass: raw float pages per section
+    raw_pages = []
+    for index in range(1, section_count + 1):
+        section_code = f"8.{index}"
+        weight = _SECTION_WEIGHTS.get(section_code, 1.0)
+        raw_pages.append(weight * pages_per_weight)
+
+    # Second pass: floor each to int (min 1), then distribute remainder to
+    # sections with the largest fractional remainder so that the total exactly
+    # matches target_pages.
+    floor_pages = [max(1, int(value)) for value in raw_pages]
+    remainder = target_pages - sum(floor_pages)
+    fractional_order = sorted(
+        range(len(raw_pages)),
+        key=lambda i: -(raw_pages[i] - int(raw_pages[i])),
+    )
+    for i in fractional_order[: max(0, remainder)]:
+        floor_pages[i] += 1
+
+    sections: list[dict[str, Any]] = []
     for index, title in enumerate(_CHAPTER_8_TITLES, start=1):
         section_code = f"8.{index}"
-        pages = base_pages + (1 if index <= extra_pages else 0)
+        weight = _SECTION_WEIGHTS.get(section_code, 1.0)
+        pages = floor_pages[index - 1]
+        min_chars = max(
+            _MIN_CHARS_FLOOR,
+            min(_MIN_CHARS_CAP, int(weight * pages_per_weight * _CHARS_PER_PAGE)),
+        )
         sections.append(
             {
                 "chapter": "8",
                 "section_code": section_code,
                 "title": title,
                 "target_pages": pages,
-                "min_chars": max(2800, pages * 620),
+                "min_chars": min_chars,
                 "required_charts": list(_DEFAULT_CHARTS.get(section_code, [])),
-                "required_tables": list(_DEFAULT_TABLES.get(section_code, [])),
+                "required_tables": [list(synonyms) for synonyms in _DEFAULT_TABLES.get(section_code, ())],
             }
         )
 
@@ -155,6 +212,16 @@ class LongformSectionGenerator:
             prompt_hash = ""
             rounds = 0
 
+            previous_outlines = [
+                {
+                    "section_code": r["section_code"],
+                    "title": r["title"],
+                    "actual_chars": r["actual_chars"],
+                    "status": r["status"],
+                }
+                for r in section_results
+            ]
+
             for round_index in range(1, self.max_rounds + 1):
                 if progress_callback is not None:
                     progress_callback(
@@ -180,7 +247,9 @@ class LongformSectionGenerator:
                     "required_charts": required_charts,
                     "required_tables": required_tables,
                     "round_index": round_index,
-                    "existing_content_tail": generated[-1000:],
+                    "existing_content_tail": generated[-3000:],
+                    "current_char_count": _weighted_text_units(generated),
+                    "previous_section_outlines": previous_outlines,
                     "context": context,
                 }
                 if round_index == 1:

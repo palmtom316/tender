@@ -72,17 +72,28 @@ class ChartGenerationService:
             payload["caption_title"] = title
         persisted_payload = _strip_blind_bid_blacklist(payload)
         is_default_spec = bool(payload.pop("_default_spec", False))
+        is_blind_bid = bool(
+            (payload.get("metadata_json") or {}).get("is_blind_bid")
+            or payload.get("is_blind_bid")
+        )
         validation = self.validate(chart_type=chart_type, spec_json=payload)
         if not validation["valid"]:
+            fallback = self._render_fallback(
+                project_id=project_id,
+                chart_type=chart_type,
+                title=title,
+                placeholder_key=_placeholder_from_spec(payload),
+                allow_render=True,
+            )
             row = self._repo.create(
                 conn,
                 project_id=project_id,
                 outline_node_id=outline_node_id,
                 chart_type=chart_type,
                 title=title,
-                spec_json=persisted_payload,
-                rendered_svg=None,
-                rendered_png_path=None,
+                spec_json=fallback["spec"] if fallback else persisted_payload,
+                rendered_svg=fallback["svg"] if fallback else None,
+                rendered_png_path=fallback["png_path"] if fallback else None,
                 placeholder_key=_placeholder_from_spec(payload),
                 mermaid_source=None,
                 status="needs_review",
@@ -93,6 +104,7 @@ class ChartGenerationService:
                     "validation": validation,
                     "source_kind": "default_spec" if is_default_spec else "json_spec",
                     "source_context": _source_context(payload),
+                    "fallback_render": {"reason": "validation_failed", "rendered": bool(fallback)},
                 },
             )
             return chart_asset_to_dict(row)
@@ -100,6 +112,7 @@ class ChartGenerationService:
         blind_bid_issues = _blind_bid_issues(payload)
         if blind_bid_issues:
             persisted_payload = _strip_blind_bid_blacklist(payload)
+            # Blind-bid hits: never auto-render — must be manually corrected and approved.
             row = self._repo.create(
                 conn,
                 project_id=project_id,
@@ -119,21 +132,31 @@ class ChartGenerationService:
                     "validation": validation,
                     "blind_bid_scan": {"issues": blind_bid_issues},
                     "source_kind": "json_spec",
+                    "fallback_render": {"reason": "blind_bid", "rendered": False},
                 },
             )
             return chart_asset_to_dict(row)
 
         provenance_issues = _provenance_issues(payload)
         if provenance_issues:
+            # Provenance failure: render a default-spec fallback (non-blind only) so export
+            # gate can proceed, but mark needs_review to require human verification.
+            fallback = self._render_fallback(
+                project_id=project_id,
+                chart_type=chart_type,
+                title=title,
+                placeholder_key=_placeholder_from_spec(payload),
+                allow_render=not is_blind_bid,
+            )
             row = self._repo.create(
                 conn,
                 project_id=project_id,
                 outline_node_id=outline_node_id,
                 chart_type=chart_type,
                 title=title,
-                spec_json=persisted_payload,
-                rendered_svg=None,
-                rendered_png_path=None,
+                spec_json=fallback["spec"] if fallback else persisted_payload,
+                rendered_svg=fallback["svg"] if fallback else None,
+                rendered_png_path=fallback["png_path"] if fallback else None,
                 placeholder_key=_placeholder_from_spec(payload),
                 mermaid_source=None,
                 status="needs_review",
@@ -145,6 +168,7 @@ class ChartGenerationService:
                     "provenance": {"issues": provenance_issues},
                     "source_kind": "json_spec",
                     "source_context": _source_context(payload),
+                    "fallback_render": {"reason": "provenance", "rendered": bool(fallback)},
                 },
             )
             return chart_asset_to_dict(row)
@@ -192,6 +216,57 @@ class ChartGenerationService:
             raise LookupError("chart asset not found")
         return chart_asset_to_dict(row)
 
+    def bulk_approve(
+        self,
+        conn: Connection,
+        *,
+        project_id: UUID,
+        mode: str = "auto",
+        approved_by: str = "system",
+        is_blind_bid: bool = False,
+    ) -> dict[str, Any]:
+        """Approve all eligible chart assets for a project in one call.
+
+        - mode='auto': only approve assets whose metadata.validation.valid is True
+          AND fallback_render.reason is not in {'blind_bid'}. Skips assets that
+          require human review for safety reasons.
+        - mode='manual': approve all non-approved assets. Required for blind-bid
+          projects (blind-bid projects MUST use mode='manual' with a real user).
+        - is_blind_bid=True + mode='auto' raises ValueError; caller must catch.
+        """
+        if mode not in {"auto", "manual"}:
+            raise ValueError(f"unsupported bulk_approve mode: {mode}")
+        if is_blind_bid and mode == "auto":
+            raise ValueError("blind-bid projects must use mode='manual' with explicit approver")
+
+        approved: list[str] = []
+        skipped: list[dict[str, Any]] = []
+        rows = self._repo.list_by_project(conn, project_id=project_id)
+        for row in rows:
+            if row.status == "approved":
+                continue
+            metadata = dict(row.metadata_json or {})
+            validation = metadata.get("validation") or {}
+            fallback = metadata.get("fallback_render") or {}
+            if mode == "auto":
+                if not validation.get("valid"):
+                    skipped.append({"asset_id": str(row.id), "reason": "validation_invalid"})
+                    continue
+                if str(fallback.get("reason") or "") == "blind_bid":
+                    skipped.append({"asset_id": str(row.id), "reason": "blind_bid_blocked"})
+                    continue
+            updated = self._repo.approve(conn, asset_id=row.id, approved_by=approved_by)
+            if updated is not None:
+                approved.append(str(updated.id))
+        return {
+            "project_id": str(project_id),
+            "mode": mode,
+            "approved_by": approved_by,
+            "approved_count": len(approved),
+            "approved_ids": approved,
+            "skipped": skipped,
+        }
+
     def generate_spec(
         self,
         *,
@@ -238,6 +313,50 @@ class ChartGenerationService:
         root = get_settings().template_render_root / "chart_assets" / str(project_id)
         filename = f"{_safe_filename(placeholder_key)}.png"
         return svg_to_png(svg, root / filename)
+
+    def _render_fallback(
+        self,
+        *,
+        project_id: UUID,
+        chart_type: str,
+        title: str,
+        placeholder_key: str | None,
+        allow_render: bool = True,
+    ) -> dict[str, Any] | None:
+        """Render a default-spec fallback chart for failure branches.
+
+        Returns dict with svg/png_path/spec, or None if blocked (e.g., blind-bid)
+        or rendering itself fails.
+        """
+        if not allow_render:
+            return None
+        try:
+            fallback_spec_json = default_chart_spec(
+                chart_type=chart_type,
+                title=title,
+                placeholder_key=placeholder_key,
+            )
+            payload = _prepare_payload(
+                chart_type=chart_type,
+                title=title,
+                spec_json=fallback_spec_json,
+            )
+            payload.pop("_default_spec", None)
+            spec = parse_chart_spec(payload)
+            rendered = render_chart_spec(spec)
+            normalized = spec.model_dump(by_alias=True, mode="json")
+            png_path = self._write_png(
+                project_id=project_id,
+                placeholder_key=_placeholder_from_spec(normalized) or chart_type,
+                svg=rendered.svg,
+            )
+            return {
+                "spec": normalized,
+                "svg": rendered.svg,
+                "png_path": str(png_path),
+            }
+        except Exception:
+            return None
 
 
 def _placeholder_from_spec(spec_json: dict[str, Any]) -> str | None:
