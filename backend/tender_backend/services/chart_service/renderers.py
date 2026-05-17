@@ -11,9 +11,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from tender_backend.core.config import get_settings
+from tender_backend.services.chart_service.render_strategy import resolve_render_strategy
 from tender_backend.services.chart_service.specs import (
-    FLOW_CHART_TYPES,
-    TABLE_CHART_TYPES,
     ChartSpec,
     FlowChartSpec,
     GanttChartSpec,
@@ -31,23 +30,21 @@ class ChartRenderResult:
 
 
 def render_chart_spec(spec: ChartSpec) -> ChartRenderResult:
-    if spec.chart_type in FLOW_CHART_TYPES:
+    strategy = resolve_render_strategy(spec.chart_type)
+    if strategy.primary == "mermaid_sidecar":
         mermaid = build_mermaid_source(spec)
         sidecar_svg = _render_mermaid_sidecar(mermaid)
         if sidecar_svg:
             return ChartRenderResult(svg=sidecar_svg, mermaid_source=mermaid, engine="mermaid_sidecar")
-        return ChartRenderResult(svg=_render_flow_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
-    if spec.chart_type in {"schedule_gantt", "critical_path"}:
-        mermaid = build_mermaid_source(spec)
-        sidecar_svg = _render_mermaid_sidecar(mermaid)
-        if sidecar_svg:
-            return ChartRenderResult(svg=sidecar_svg, mermaid_source=mermaid, engine="mermaid_sidecar")
-        return ChartRenderResult(svg=_render_gantt_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
+        if strategy.fallback == "native_flow" and isinstance(spec, FlowChartSpec):
+            return ChartRenderResult(svg=_render_flow_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
+        if strategy.fallback == "native_gantt" and isinstance(spec, GanttChartSpec):
+            return ChartRenderResult(svg=_render_gantt_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
     if spec.chart_type == "risk_matrix":
         return ChartRenderResult(svg=_render_risk_matrix_svg(spec), mermaid_source=None, engine="native_svg")
     if spec.chart_type == "responsibility_matrix":
         return ChartRenderResult(svg=_render_responsibility_matrix_svg(spec), mermaid_source=None, engine="native_svg")
-    if spec.chart_type in TABLE_CHART_TYPES:
+    if strategy.primary == "native_svg" and isinstance(spec, TableChartSpec):
         return ChartRenderResult(svg=_render_table_svg(spec), mermaid_source=None, engine="native_svg")
     raise ValueError(f"unsupported chart type: {spec.chart_type}")
 
