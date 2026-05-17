@@ -1,0 +1,925 @@
+{
+  "generated_at": "2026-05-16",
+  "draft_id": "0e5514d1-eab6-44ad-ba9b-e23d96761179",
+  "project_id": "d3ed99c0-1d79-4fad-bd4b-6a77a08cc530",
+  "chapter_id": "bb832f27-5c8c-4951-9f66-84faf4ac3b77",
+  "run_id": "113ece1d-f548-4a74-bfd4-80c5e44f9909",
+  "draft": {
+    "chapter_code": "8",
+    "target_pages": 100,
+    "estimated_pages": "329.68",
+    "md_bytes": 115413,
+    "referenced_chart_keys": [
+      "closure_flow",
+      "construction_flow",
+      "construction_flow_main",
+      "equipment_table",
+      "quality_system",
+      "response_matrix",
+      "risk_matrix",
+      "safety_system",
+      "schedule_gantt"
+    ],
+    "generation_rounds": 3,
+    "page_estimate": {
+      "method": "weighted_cn_chars_340_per_page_plus_structure_v1",
+      "evidence": {
+        "chart_count": 59,
+        "heading_count": 344,
+        "table_row_count": 537,
+        "weighted_text_units": 80745,
+        "explicit_page_break_count": 0
+      },
+      "target_pages": 100,
+      "estimated_pages": 329.68
+    },
+    "updated_at": "2026-05-16 12:21:55.938506+00:00"
+  },
+  "coverage": {
+    "by_code": {
+      "section_too_short": 15,
+      "missing_required_table": 3,
+      "missing_required_chart": 1
+    },
+    "issues": [
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 3569,
+        "section_code": "8.1"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 2832,
+        "section_code": "8.2"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 2637,
+        "section_code": "8.3"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 1553,
+        "section_code": "8.4"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 3563,
+        "section_code": "8.5"
+      },
+      {
+        "code": "missing_required_table",
+        "severity": "P0",
+        "table_label": "资源配置计划表",
+        "section_code": "8.5"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 4009,
+        "section_code": "8.6"
+      },
+      {
+        "code": "missing_required_table",
+        "severity": "P0",
+        "table_label": "主要施工方法表",
+        "section_code": "8.6"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 2685,
+        "section_code": "8.7"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 2731,
+        "section_code": "8.8"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 1938,
+        "section_code": "8.9"
+      },
+      {
+        "code": "missing_required_chart",
+        "severity": "P0",
+        "chart_key": "safety_system",
+        "section_code": "8.9"
+      },
+      {
+        "code": "missing_required_table",
+        "severity": "P0",
+        "table_label": "安全风险管控表",
+        "section_code": "8.9"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 4340,
+        "actual_chars": 3375,
+        "section_code": "8.10"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 3720,
+        "actual_chars": 3543,
+        "section_code": "8.11"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 3720,
+        "actual_chars": 2354,
+        "section_code": "8.12"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 3720,
+        "actual_chars": 2227,
+        "section_code": "8.13"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 3720,
+        "actual_chars": 2405,
+        "section_code": "8.14"
+      },
+      {
+        "code": "section_too_short",
+        "severity": "P0",
+        "min_chars": 3720,
+        "actual_chars": 2209,
+        "section_code": "8.15"
+      }
+    ],
+    "passed": false,
+    "issue_count": 19
+  },
+  "chart_closure": {
+    "by_code": {
+      "chart_not_rendered": 9
+    },
+    "issues": [
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "closure_flow"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "construction_flow"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "construction_flow_main"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "equipment_table"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "quality_system"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "response_matrix"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "risk_matrix"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "safety_system"
+      },
+      {
+        "code": "chart_not_rendered",
+        "severity": "P0",
+        "chart_key": "schedule_gantt"
+      }
+    ],
+    "passed": false,
+    "referenced_chart_count": 9,
+    "asset_chart_count": 9,
+    "approved_chart_count": 9,
+    "rendered_chart_count": 0,
+    "inserted_chart_count": 0,
+    "residual_placeholder_count": 0
+  },
+  "chart_assets": [
+    {
+      "id": "fbea1dda-80c2-4641-b12d-62000663b7c5",
+      "placeholder_key": "closure_flow",
+      "chart_type": "closure_flow",
+      "title": "闭环流程图",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/closure_flow.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "edges": [
+              {
+                "to": "execute",
+                "from": "start",
+                "label": null
+              },
+              {
+                "to": "review",
+                "from": "execute",
+                "label": null
+              }
+            ],
+            "nodes": [
+              {
+                "id": "start",
+                "label": "准备",
+                "parent": null
+              },
+              {
+                "id": "execute",
+                "label": "闭环流程图",
+                "parent": null
+              },
+              {
+                "id": "review",
+                "label": "检查确认",
+                "parent": null
+              }
+            ],
+            "title": "闭环流程图",
+            "direction": "TB",
+            "figure_no": null,
+            "chart_type": "closure_flow",
+            "caption_title": "闭环流程图",
+            "placeholder_key": "closure_flow"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "default_spec",
+        "render_engine": "mermaid_sidecar"
+      }
+    },
+    {
+      "id": "e4fd4f8d-cffa-4067-ad12-e731c2acf1a8",
+      "placeholder_key": "construction_flow",
+      "chart_type": "construction_flow",
+      "title": "施工流程图",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/construction_flow.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "edges": [
+              {
+                "to": "execute",
+                "from": "start",
+                "label": null
+              },
+              {
+                "to": "review",
+                "from": "execute",
+                "label": null
+              }
+            ],
+            "nodes": [
+              {
+                "id": "start",
+                "label": "准备",
+                "parent": null
+              },
+              {
+                "id": "execute",
+                "label": "施工流程图",
+                "parent": null
+              },
+              {
+                "id": "review",
+                "label": "检查确认",
+                "parent": null
+              }
+            ],
+            "title": "施工流程图",
+            "direction": "TB",
+            "figure_no": null,
+            "chart_type": "construction_flow",
+            "caption_title": "施工流程图",
+            "placeholder_key": "construction_flow"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "default_spec",
+        "render_engine": "mermaid_sidecar"
+      }
+    },
+    {
+      "id": "d34ada80-1654-4ab5-8490-570d877e1621",
+      "placeholder_key": "construction_flow_main",
+      "chart_type": "construction_flow",
+      "title": "施工流程图",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/construction_flow_main.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "edges": [
+              {
+                "to": "civil",
+                "from": "prepare",
+                "label": null
+              },
+              {
+                "to": "install",
+                "from": "civil",
+                "label": null
+              },
+              {
+                "to": "test",
+                "from": "install",
+                "label": null
+              },
+              {
+                "to": "accept",
+                "from": "test",
+                "label": null
+              }
+            ],
+            "nodes": [
+              {
+                "id": "prepare",
+                "label": "施工准备",
+                "parent": null
+              },
+              {
+                "id": "civil",
+                "label": "土建施工",
+                "parent": null
+              },
+              {
+                "id": "install",
+                "label": "安装施工",
+                "parent": null
+              },
+              {
+                "id": "test",
+                "label": "调试试验",
+                "parent": null
+              },
+              {
+                "id": "accept",
+                "label": "竣工验收",
+                "parent": null
+              }
+            ],
+            "title": "施工流程图",
+            "direction": "TB",
+            "figure_no": null,
+            "chart_type": "construction_flow",
+            "caption_title": "施工流程图",
+            "placeholder_key": "construction_flow_main"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "json_spec",
+        "render_engine": "mermaid_sidecar"
+      }
+    },
+    {
+      "id": "adecd977-302d-4538-833f-faa138b8dbda",
+      "placeholder_key": "equipment_table",
+      "chart_type": "equipment_table",
+      "title": "设备配置表",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/equipment_table.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "rows": [
+              {
+                "cells": [
+                  "设备配置表",
+                  "待补充来源",
+                  "按确认要求执行"
+                ]
+              }
+            ],
+            "title": "设备配置表",
+            "columns": [
+              "事项",
+              "来源",
+              "措施"
+            ],
+            "figure_no": null,
+            "chart_type": "equipment_table",
+            "chapter_code": "8",
+            "caption_title": "设备配置表",
+            "placeholder_key": "equipment_table"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "default_spec",
+        "render_engine": "native_svg"
+      }
+    },
+    {
+      "id": "d3139281-3f91-4e71-a9c1-24eeffc4bd13",
+      "placeholder_key": "quality_system",
+      "chart_type": "quality_system",
+      "title": "质量管理体系图",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/quality_system.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "edges": [
+              {
+                "to": "execute",
+                "from": "start",
+                "label": null
+              },
+              {
+                "to": "review",
+                "from": "execute",
+                "label": null
+              }
+            ],
+            "nodes": [
+              {
+                "id": "start",
+                "label": "准备",
+                "parent": null
+              },
+              {
+                "id": "execute",
+                "label": "质量管理体系图",
+                "parent": null
+              },
+              {
+                "id": "review",
+                "label": "检查确认",
+                "parent": null
+              }
+            ],
+            "title": "质量管理体系图",
+            "direction": "TB",
+            "figure_no": null,
+            "chart_type": "quality_system",
+            "caption_title": "质量管理体系图",
+            "placeholder_key": "quality_system"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "default_spec",
+        "render_engine": "mermaid_sidecar"
+      }
+    },
+    {
+      "id": "1d6b57e2-f40c-4949-8062-b40cd3a6453c",
+      "placeholder_key": "response_matrix",
+      "chart_type": "response_matrix",
+      "title": "条款响应矩阵",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/response_matrix.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "rows": [
+              {
+                "cells": [
+                  "条款响应矩阵",
+                  "待补充来源",
+                  "按确认要求执行"
+                ]
+              }
+            ],
+            "title": "条款响应矩阵",
+            "columns": [
+              "事项",
+              "来源",
+              "措施"
+            ],
+            "figure_no": null,
+            "chart_type": "response_matrix",
+            "chapter_code": "8",
+            "caption_title": "条款响应矩阵",
+            "placeholder_key": "response_matrix"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "default_spec",
+        "render_engine": "native_svg"
+      }
+    },
+    {
+      "id": "62be4c89-9808-4190-94c6-ebc1229550a7",
+      "placeholder_key": "risk_matrix",
+      "chart_type": "risk_matrix",
+      "title": "风险分级管控矩阵",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/risk_matrix.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "rows": [
+              "高影响",
+              "中影响",
+              "低影响"
+            ],
+            "cells": [
+              {
+                "row": "高影响",
+                "color": null,
+                "items": [
+                  "雨季基坑坍塌",
+                  "高温中暑事故"
+                ],
+                "level": "critical",
+                "column": "高概率"
+              },
+              {
+                "row": "高影响",
+                "color": null,
+                "items": [
+                  "交通事故",
+                  "地下管线破坏"
+                ],
+                "level": "high",
+                "column": "中概率"
+              },
+              {
+                "row": "高影响",
+                "color": null,
+                "items": [
+                  "群体性事件"
+                ],
+                "level": "medium",
+                "column": "低概率"
+              },
+              {
+                "row": "中影响",
+                "color": null,
+                "items": [
+                  "停电范围扩大",
+                  "设备损坏"
+                ],
+                "level": "high",
+                "column": "高概率"
+              },
+              {
+                "row": "中影响",
+                "color": null,
+                "items": [
+                  "材料供应中断",
+                  "施工扰民投诉"
+                ],
+                "level": "medium",
+                "column": "中概率"
+              },
+              {
+                "row": "中影响",
+                "color": null,
+                "items": [
+                  "环保处罚"
+                ],
+                "level": "medium",
+                "column": "低概率"
+              },
+              {
+                "row": "低影响",
+                "color": null,
+                "items": [
+                  "临时停电",
+                  "施工噪音"
+                ],
+                "level": "low",
+                "column": "高概率"
+              },
+              {
+                "row": "低影响",
+                "color": null,
+                "items": [
+                  "轻微质量缺陷"
+                ],
+                "level": "low",
+                "column": "中概率"
+              },
+              {
+                "row": "低影响",
+                "color": null,
+                "items": [
+                  "档案丢失"
+                ],
+                "level": "low",
+                "column": "低概率"
+              }
+            ],
+            "title": "风险分级管控矩阵",
+            "columns": [
+              "高概率",
+              "中概率",
+              "低概率"
+            ],
+            "figure_no": null,
+            "chart_type": "risk_matrix",
+            "caption_title": "风险分级管控矩阵",
+            "placeholder_key": "risk_matrix"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "json_spec",
+        "render_engine": "native_svg"
+      }
+    },
+    {
+      "id": "34472ffc-fe24-4b1e-89ff-b9650b39afdd",
+      "placeholder_key": "safety_system",
+      "chart_type": "safety_system",
+      "title": "安全管理体系图",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/safety_system.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "edges": [
+              {
+                "to": "execute",
+                "from": "start",
+                "label": null
+              },
+              {
+                "to": "review",
+                "from": "execute",
+                "label": null
+              }
+            ],
+            "nodes": [
+              {
+                "id": "start",
+                "label": "准备",
+                "parent": null
+              },
+              {
+                "id": "execute",
+                "label": "安全管理体系图",
+                "parent": null
+              },
+              {
+                "id": "review",
+                "label": "检查确认",
+                "parent": null
+              }
+            ],
+            "title": "安全管理体系图",
+            "direction": "TB",
+            "figure_no": null,
+            "chart_type": "safety_system",
+            "caption_title": "安全管理体系图",
+            "placeholder_key": "safety_system"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "default_spec",
+        "render_engine": "mermaid_sidecar"
+      }
+    },
+    {
+      "id": "8508767f-bd13-4faa-88e4-445b04583f86",
+      "placeholder_key": "schedule_gantt",
+      "chart_type": "schedule_gantt",
+      "title": "施工进度计划图",
+      "status": "approved",
+      "has_svg": true,
+      "has_png": true,
+      "rendered_png_path": "/tmp/tender_template_renders/chart_assets/d3ed99c0-1d79-4fad-bd4b-6a77a08cc530/schedule_gantt.png",
+      "metadata": {
+        "validation": {
+          "valid": true,
+          "issues": [],
+          "normalized_spec": {
+            "tasks": [
+              {
+                "id": "prep",
+                "end": "2026-01-31",
+                "group": "施工准备",
+                "label": "年度框架施工准备与计划排布",
+                "start": "2026-01-01",
+                "is_critical": false
+              },
+              {
+                "id": "survey",
+                "end": "2026-02-28",
+                "group": "施工准备",
+                "label": "现场踏勘、图纸会审与专项方案审批",
+                "start": "2026-02-01",
+                "is_critical": false
+              },
+              {
+                "id": "civil",
+                "end": "2026-06-30",
+                "group": "主体施工",
+                "label": "土建基础、沟槽通道与杆塔基础施工",
+                "start": "2026-03-01",
+                "is_critical": false
+              },
+              {
+                "id": "install",
+                "end": "2026-10-31",
+                "group": "主体施工",
+                "label": "线路电缆、配电设备安装与接地施工",
+                "start": "2026-04-01",
+                "is_critical": false
+              },
+              {
+                "id": "test",
+                "end": "2026-11-30",
+                "group": "调试验收",
+                "label": "试验调试、缺陷整改与阶段验收",
+                "start": "2026-08-01",
+                "is_critical": false
+              },
+              {
+                "id": "handover",
+                "end": "2026-12-31",
+                "group": "调试验收",
+                "label": "竣工资料整理、数字化移交与年度收尾",
+                "start": "2026-11-01",
+                "is_critical": false
+              }
+            ],
+            "title": "施工进度计划图",
+            "figure_no": null,
+            "chart_type": "schedule_gantt",
+            "date_format": "YYYY-MM-DD",
+            "dependencies": [
+              {
+                "to": "survey",
+                "from": "prep"
+              },
+              {
+                "to": "civil",
+                "from": "survey"
+              },
+              {
+                "to": "install",
+                "from": "civil"
+              },
+              {
+                "to": "test",
+                "from": "install"
+              },
+              {
+                "to": "handover",
+                "from": "test"
+              }
+            ],
+            "caption_title": "施工进度计划图",
+            "placeholder_key": "schedule_gantt"
+          }
+        },
+        "provenance": null,
+        "blind_bid_scan": null,
+        "source_kind": "json_spec",
+        "render_engine": "mermaid_sidecar"
+      }
+    }
+  ],
+  "constraints_summary": {
+    "total": 7,
+    "critical_count": 7,
+    "conflict_count": 0,
+    "with_mapped_section": 0,
+    "mapped_to_ch8": 0
+  },
+  "critical_constraints_sample": [
+    {
+      "id": "6c02ead8-c6aa-4ca8-9815-8030f909f5f0",
+      "confirmation_level": "critical",
+      "status": "accepted",
+      "response_section_code": null,
+      "mapped_section_code": null,
+      "has_conflict": false,
+      "title": "第8章图表要求"
+    },
+    {
+      "id": "2efad20e-2151-4588-893b-26655d972639",
+      "confirmation_level": "critical",
+      "status": "accepted",
+      "response_section_code": null,
+      "mapped_section_code": null,
+      "has_conflict": false,
+      "title": "第8章目录要求"
+    },
+    {
+      "id": "1e74ad42-1bf8-4d3d-8029-315834b645c2",
+      "confirmation_level": "critical",
+      "status": "accepted",
+      "response_section_code": null,
+      "mapped_section_code": null,
+      "has_conflict": false,
+      "title": "工期要求"
+    },
+    {
+      "id": "54b07fa4-1db7-4be9-a333-529304e36126",
+      "confirmation_level": "critical",
+      "status": "accepted",
+      "response_section_code": null,
+      "mapped_section_code": null,
+      "has_conflict": false,
+      "title": "工程名称"
+    },
+    {
+      "id": "4c21ce76-58e7-44ba-af5b-2a1cff11faf4",
+      "confirmation_level": "critical",
+      "status": "accepted",
+      "response_section_code": null,
+      "mapped_section_code": null,
+      "has_conflict": false,
+      "title": "工程类型"
+    },
+    {
+      "id": "7ae0c032-584a-4a16-b8a6-71a3fc0e9d5f",
+      "confirmation_level": "critical",
+      "status": "accepted",
+      "response_section_code": null,
+      "mapped_section_code": null,
+      "has_conflict": false,
+      "title": "地域与框架项目特征"
+    },
+    {
+      "id": "2d10af8a-0198-41f9-8227-e955c365aae9",
+      "confirmation_level": "critical",
+      "status": "accepted",
+      "response_section_code": null,
+      "mapped_section_code": null,
+      "has_conflict": false,
+      "title": "招标人/项目单位"
+    }
+  ]
+}
