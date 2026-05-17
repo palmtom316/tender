@@ -54,3 +54,20 @@ This captures:
 - `chapter_draft` page/coverage/chart-closure evidence
 - latest `export_record` metadata snapshot
 - current `export_gate` state
+
+## Multi-Chapter Longform Acceptance Evidence
+
+Collect chapter 8/9/10.x evidence with:
+
+```bash
+python scripts/run_longform_multi_chapter_acceptance.py \
+  --project-id <project-uuid> \
+  --output docs/acceptance/2026-MM-DD-longform-8-9-10-evidence.json
+```
+
+This captures:
+
+- per-chapter `chapter_draft` page/coverage/chart-closure evidence
+- per-chapter longform `model_usage`
+- latest `export_record` metadata snapshot
+- current `export_gate` state

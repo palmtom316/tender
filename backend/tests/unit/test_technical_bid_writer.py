@@ -3,7 +3,7 @@ import re
 from uuid import uuid4
 
 import tender_backend.services.technical_bid_writer as technical_bid_writer_module
-from tender_backend.services.technical_bid_writer import TechnicalBidWriter, _json_safe
+from tender_backend.services.technical_bid_writer import TechnicalBidWriter, _json_safe, _should_use_longform_generation
 
 
 def test_technical_writer_uses_ai_gateway_content_when_available(monkeypatch) -> None:
@@ -276,6 +276,16 @@ def test_longform_subsection_rewrite_note_includes_density_hint(monkeypatch) -> 
     assert re.search(r"至少\s*13\s*个自然段", captured["rewrite_note"])
 
 
+def test_should_use_longform_generation_uses_registry_thresholds() -> None:
+    assert _should_use_longform_generation({"chapter_code": "8"}, 80) is True
+    assert _should_use_longform_generation({"chapter_code": "9"}, 30) is True
+    assert _should_use_longform_generation({"chapter_code": "10.1"}, 35) is True
+    assert _should_use_longform_generation({"chapter_code": "10.2"}, 35) is True
+    assert _should_use_longform_generation({"chapter_code": "10.3"}, 35) is True
+    assert _should_use_longform_generation({"chapter_code": "9"}, 29) is False
+    assert _should_use_longform_generation({"chapter_code": "7"}, 100) is False
+
+
 def test_technical_writer_routes_large_chapter_8_through_longform_subsection_loop(monkeypatch) -> None:
     project_id = uuid4()
     outline_id = uuid4()
@@ -383,8 +393,10 @@ def test_technical_writer_routes_large_chapter_8_through_longform_subsection_loo
     monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
     monkeypatch.setattr("tender_backend.services.technical_bid_writer.LongformSectionGenerator", _LongformSectionGenerator, raising=False)
     monkeypatch.setattr(
-        "tender_backend.services.technical_bid_writer.plan_chapter_8_sections",
-        lambda *, target_pages: [{"section_code": "8.1", "title": "编制依据", "target_pages": target_pages, "min_chars": 1}],
+        "tender_backend.services.technical_bid_writer.plan_chapter_sections",
+        lambda chapter_code, *, target_pages: [
+            {"chapter": chapter_code, "section_code": "8.1", "title": "编制依据", "target_pages": target_pages, "min_chars": 1}
+        ],
         raising=False,
     )
     monkeypatch.setattr(
@@ -402,6 +414,129 @@ def test_technical_writer_routes_large_chapter_8_through_longform_subsection_loo
     assert captured["metadata"]["generation_mode"] == "longform_subsection_loop"
     assert captured["metadata"]["ai_gateway"]["longform"]["metadata"]["total_output_tokens"] == 20
     assert captured["metadata"]["ai_gateway"]["longform"]["sections"][0]["section_code"] == "8.1"
+
+
+def test_technical_writer_routes_configured_10x_chapter_through_longform(monkeypatch) -> None:
+    project_id = uuid4()
+    outline_id = uuid4()
+    chapter_id = uuid4()
+    captured = {}
+
+    class _Writer(TechnicalBidWriter):
+        def _confirmed_outline(self, conn, *, project_id):
+            return {"id": outline_id, "project_id": project_id, "status": "confirmed"}
+
+        def _chapter(self, conn, *, project_id, chapter_id):
+            return {
+                "id": chapter_id,
+                "project_id": project_id,
+                "chapter_code": "10.1",
+                "chapter_title": "质量保证措施",
+                "volume_type": "technical",
+            }
+
+        def _create_run(self, conn, **kwargs):
+            captured.update(kwargs)
+            return {"id": uuid4(), "metadata_json": kwargs["metadata"]}
+
+    class _ContextBuilder:
+        def build(self, conn, *, project_id, chapter_id):
+            return {
+                "chapter": {"id": chapter_id, "chapter_code": "10.1", "chapter_title": "质量保证措施", "volume_type": "technical"},
+                "constraints": [],
+                "standard_clauses": [],
+                "personnel_selections": [],
+                "equipment_selections": [],
+                "company_assets": [],
+                "recommended_charts": [],
+                "chart_assets": [],
+                "generation_controls": {"target_pages": 35, "target_pages_source": "request"},
+                "strategy": {"key": "quality_assurance"},
+                "prompt_template": {"status": "loaded", "content_md": "10.1提示词"},
+            }
+
+    class _LongformSectionGenerator:
+        def __init__(self, completion_fn, max_rounds=6):
+            self.completion_fn = completion_fn
+            self.max_rounds = max_rounds
+
+        def generate_sections(self, context, section_plan, progress_callback=None):
+            assert self.max_rounds == 6
+            assert section_plan[0]["chapter"] == "10.1"
+            assert section_plan[0]["section_code"] == "10.1.1"
+            assert section_plan[-1]["section_code"] == "10.1.15"
+            return {
+                "status": "completed",
+                "content_md": "## 10.1.1 编制依据与质量目标\n\n长篇分节生成正文",
+                "sections": [
+                    {
+                        "section_code": "10.1.1",
+                        "title": "编制依据与质量目标",
+                        "target_pages": 2,
+                        "min_chars": 1,
+                        "actual_chars": 8,
+                        "status": "completed",
+                        "continuation_rounds": 1,
+                        "required_charts": [],
+                        "required_tables": [],
+                        "prompt_hash": "hash-10-1-1",
+                    }
+                ],
+                "metadata": {"total_input_tokens": 1, "total_output_tokens": 2, "latency_ms": 3},
+            }
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "INSERT INTO chapter_draft" in query:
+                self.result = [
+                    {
+                        "id": uuid4(),
+                        "project_id": params[1],
+                        "volume_type": params[2],
+                        "chapter_code": params[3],
+                        "content_md": params[4],
+                        "referenced_chart_keys": params[5],
+                        "target_pages": params[6],
+                        "estimated_pages": params[7],
+                        "page_estimate_json": params[8],
+                        "coverage_report_json": params[9],
+                        "chart_closure_report_json": params[10],
+                        "generation_rounds": params[11],
+                    }
+                ]
+            return self
+
+        def fetchone(self):
+            return self.result[0] if getattr(self, "result", []) else None
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
+    monkeypatch.setattr("tender_backend.services.technical_bid_writer.LongformSectionGenerator", _LongformSectionGenerator, raising=False)
+    monkeypatch.setattr(
+        "tender_backend.services.technical_bid_writer._request_ai_gateway_completion",
+        lambda context, rewrite_note=None: {"content": "THIS_SINGLE_PASS_CONTENT_MUST_NOT_BE_USED", "usage": {}},
+        raising=False,
+    )
+
+    result = _Writer().generate_chapter(_Conn(), project_id=project_id, chapter_id=chapter_id, target_pages=35)
+
+    assert result["draft"]["chapter_code"] == "10.1"
+    assert "## 10.1.1 编制依据与质量目标" in result["draft"]["content_md"]
+    assert "THIS_SINGLE_PASS_CONTENT_MUST_NOT_BE_USED" not in result["draft"]["content_md"]
+    assert captured["metadata"]["generation_mode"] == "longform_subsection_loop"
+    assert captured["metadata"]["ai_gateway"]["longform"]["sections"][0]["section_code"] == "10.1.1"
 
 
 def test_technical_writer_reports_longform_progress_for_partial_save(monkeypatch) -> None:
@@ -519,10 +654,10 @@ def test_technical_writer_reports_longform_progress_for_partial_save(monkeypatch
     monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
     monkeypatch.setattr("tender_backend.services.technical_bid_writer.LongformSectionGenerator", _LongformSectionGenerator, raising=False)
     monkeypatch.setattr(
-        "tender_backend.services.technical_bid_writer.plan_chapter_8_sections",
-        lambda *, target_pages: [
-            {"section_code": "8.1", "title": "编制依据", "target_pages": 50, "min_chars": 1},
-            {"section_code": "8.2", "title": "工程概况", "target_pages": 50, "min_chars": 1},
+        "tender_backend.services.technical_bid_writer.plan_chapter_sections",
+        lambda chapter_code, *, target_pages: [
+            {"chapter": chapter_code, "section_code": "8.1", "title": "编制依据", "target_pages": 50, "min_chars": 1},
+            {"chapter": chapter_code, "section_code": "8.2", "title": "工程概况", "target_pages": 50, "min_chars": 1},
         ],
         raising=False,
     )
@@ -661,10 +796,10 @@ def test_technical_writer_saves_partial_draft_on_round_progress(monkeypatch) -> 
     monkeypatch.setattr("tender_backend.services.technical_bid_writer.TechnicalChapterContextBuilder", _ContextBuilder)
     monkeypatch.setattr("tender_backend.services.technical_bid_writer.LongformSectionGenerator", _LongformSectionGenerator, raising=False)
     monkeypatch.setattr(
-        "tender_backend.services.technical_bid_writer.plan_chapter_8_sections",
-        lambda *, target_pages: [
-            {"section_code": "8.1", "title": "编制依据", "target_pages": 50, "min_chars": 1},
-            {"section_code": "8.2", "title": "工程概况", "target_pages": 50, "min_chars": 1},
+        "tender_backend.services.technical_bid_writer.plan_chapter_sections",
+        lambda chapter_code, *, target_pages: [
+            {"chapter": chapter_code, "section_code": "8.1", "title": "编制依据", "target_pages": 50, "min_chars": 1},
+            {"chapter": chapter_code, "section_code": "8.2", "title": "工程概况", "target_pages": 50, "min_chars": 1},
         ],
         raising=False,
     )
@@ -884,9 +1019,9 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
                 "recommended_charts": ["quality_system"],
                 "chart_assets": [],
                 "generation_controls": {
-                    "target_pages": 80,
+                    "target_pages": 34,
                     "target_pages_source": "default",
-                    "prompt_overlay_md": "本次生成目标篇幅为 80 页左右 A4。",
+                    "prompt_overlay_md": "本次生成目标篇幅为 34 页左右 A4。",
                 },
                 "strategy": {"key": "quality_assurance", "prompt_template_path": "docs/samples/配网质量保证措施提示词.md"},
                 "prompt_template": {
@@ -949,7 +1084,7 @@ def test_technical_writer_records_context_and_creates_recommended_charts(monkeyp
     assert captured["prompt_inputs"]["strategy"]["key"] == "quality_assurance"
     assert captured["metadata"]["context_hash"]
     assert captured["metadata"]["prompt_contract"]["input_policy"] == "normalized_context_and_strategy_only"
-    assert captured["metadata"]["prompt_contract"]["generation_controls"]["target_pages"] == 80
+    assert captured["metadata"]["prompt_contract"]["generation_controls"]["target_pages"] == 34
     assert "constraint_ids" in captured["metadata"]["prompt_contract"]["required_output"]["trace_metadata"]
     assert captured["metadata"]["source_trace"]["chart_placeholder_keys"] == ["quality_system"]
     assert captured["metadata"]["self_check"]["chart_placeholder_count"] == 1

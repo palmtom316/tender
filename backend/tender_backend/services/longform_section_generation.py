@@ -1,4 +1,4 @@
-"""Subsection planning and continuation loop for longform chapter 8."""
+"""Subsection planning and continuation loop for longform technical chapters."""
 
 from __future__ import annotations
 
@@ -10,67 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from tender_backend.services.longform_quality import estimate_markdown_pages
-
-_CHAPTER_8_TITLES = [
-    "编制依据与标准",
-    "工程概况与施工重难点分析",
-    "施工组织与部署",
-    "主要施工方法及技术要求",
-    "质量管理体系与措施",
-    "安全管理体系与措施",
-    "施工进度计划与保障",
-    "环境保护、绿色低碳与碳足迹管理",
-    "科技创新与智能化应用",
-    "地域特性专题方案",
-    "竣工验收与数字化移交",
-    "售后服务、培训及增值服务",
-    "拟投入施工车辆、机具、工器具、检测设备、安全工器具及设施",
-    "施工项目部组织架构创新设计",
-    "国网年度框架施工工程投标其他创新内容",
-]
-
-_DEFAULT_CHARTS: dict[str, list[str]] = {
-    "8.1": ["response_matrix"],
-    "8.2": ["risk_matrix"],
-    "8.3": ["construction_flow"],
-    "8.4": ["construction_flow"],
-    "8.5": ["quality_system"],
-    "8.6": ["safety_system", "risk_matrix"],
-    "8.7": ["schedule_gantt"],
-    "8.11": ["closure_flow"],
-    "8.13": ["equipment_table"],
-}
-
-_DEFAULT_TABLES: dict[str, tuple[tuple[str, ...], ...]] = {
-    "8.1": (("响应矩阵", "标准响应矩阵", "条款响应矩阵"),),
-    "8.2": (("工程概况表", "工程概况一览表", "项目概况表", "重难点分析表", "重点难点分析表"),),
-    "8.4": (("主要施工方法表", "主要施工方法清单", "主要施工工序表", "施工方法表"),),
-    "8.5": (("质量控制点表", "WHS控制点表", "质量控制点清单", "WHSR控制点表", "质量控制清单"),),
-    "8.6": (("安全风险管控表", "危险源辨识与分级管控表", "风险分级管控清单", "危险源辨识与管控表"),),
-    "8.7": (("工期保证措施表", "进度保证措施表", "关键工期保证表"),),
-    "8.13": (("设备清单", "设备配置表", "施工设备表", "拟投入设备表"),),
-}
-
-# Section weight allocation for min_chars per section title (sum=15.5).
-# High weight: 8.4 main methods, 8.5 quality system, 8.6 safety, 8.7 schedule.
-# Low weight: 8.1 basis, 8.13 equipment list, 8.14 org chart, 8.15 innovation.
-_SECTION_WEIGHTS: dict[str, float] = {
-    "8.1": 0.6,
-    "8.2": 1.3,
-    "8.3": 1.2,
-    "8.4": 1.8,
-    "8.5": 1.5,
-    "8.6": 1.5,
-    "8.7": 1.4,
-    "8.8": 1.0,
-    "8.9": 0.9,
-    "8.10": 1.0,
-    "8.11": 1.0,
-    "8.12": 0.7,
-    "8.13": 0.6,
-    "8.14": 0.6,
-    "8.15": 0.5,
-}
+from tender_backend.services.technical_chapter_strategies import DEFAULT_CHARTS, DEFAULT_TABLES, LONGFORM_SECTION_SETS, SECTION_WEIGHTS
 
 # 380 chars/page reflects actual docx Chinese density (was 620, too high)
 # Cap=2300 ≈ 6 pages: empirically aligns with single-chapter LLM output ceiling
@@ -90,21 +30,27 @@ def _weighted_text_units(content_md: str) -> int:
     return chinese_chars + math.ceil(western_words * 1.8)
 
 
-def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
-    """Create the 15-section chapter 8 plan with weighted page budget."""
+def plan_chapter_sections(chapter_code: str, *, target_pages: int) -> list[dict[str, Any]]:
+    """Create a longform subsection plan with weighted page budget."""
 
-    section_count = len(_CHAPTER_8_TITLES)
+    chapter_key = str(chapter_code or "").strip()
+    section_set = LONGFORM_SECTION_SETS.get(chapter_key)
+    if not section_set:
+        raise ValueError(f"longform section set is not configured for chapter {chapter_key!r}")
+
+    section_count = len(section_set)
     if target_pages < section_count:
         raise ValueError(f"target_pages must be at least {section_count}")
 
-    weight_sum = sum(_SECTION_WEIGHTS.values())
+    section_weights = SECTION_WEIGHTS.get(chapter_key, {})
+    weight_sum = sum(section_weights.values()) or float(section_count)
     pages_per_weight = target_pages / weight_sum
 
     # First pass: raw float pages per section
     raw_pages = []
-    for index in range(1, section_count + 1):
-        section_code = f"8.{index}"
-        weight = _SECTION_WEIGHTS.get(section_code, 1.0)
+    for heading, _body in section_set:
+        section_code, _title = heading.split(" ", 1)
+        weight = section_weights.get(section_code, 1.0)
         raw_pages.append(weight * pages_per_weight)
 
     # Second pass: floor each to int (min 1), then distribute remainder to
@@ -120,9 +66,11 @@ def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
         floor_pages[i] += 1
 
     sections: list[dict[str, Any]] = []
-    for index, title in enumerate(_CHAPTER_8_TITLES, start=1):
-        section_code = f"8.{index}"
-        weight = _SECTION_WEIGHTS.get(section_code, 1.0)
+    default_charts = DEFAULT_CHARTS.get(chapter_key, {})
+    default_tables = DEFAULT_TABLES.get(chapter_key, {})
+    for index, (heading, _body) in enumerate(section_set, start=1):
+        section_code, title = heading.split(" ", 1)
+        weight = section_weights.get(section_code, 1.0)
         pages = floor_pages[index - 1]
         min_chars = max(
             _MIN_CHARS_FLOOR,
@@ -131,18 +79,24 @@ def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
         density_hint = _subsection_density_hint(min_chars=min_chars, target_pages=pages, weight=weight)
         sections.append(
             {
-                "chapter": "8",
+                "chapter": chapter_key,
                 "section_code": section_code,
                 "title": title,
                 "target_pages": pages,
                 "min_chars": min_chars,
                 "subsection_density_hint": density_hint,
-                "required_charts": list(_DEFAULT_CHARTS.get(section_code, [])),
-                "required_tables": [list(synonyms) for synonyms in _DEFAULT_TABLES.get(section_code, ())],
+                "required_charts": list(default_charts.get(section_code, [])),
+                "required_tables": [list(synonyms) for synonyms in default_tables.get(section_code, ())],
             }
         )
 
     return sections
+
+
+def plan_chapter_8_sections(*, target_pages: int) -> list[dict[str, Any]]:
+    """Backward-compatible wrapper for the chapter 8 longform plan."""
+
+    return plan_chapter_sections("8", target_pages=target_pages)
 
 
 def _subsection_density_hint(*, min_chars: int, target_pages: int, weight: float | None = None) -> dict[str, int | float]:
@@ -217,6 +171,7 @@ class LongformSectionGenerator:
         total_latency_ms = 0
 
         for planned in section_plan:
+            chapter = str(planned.get("chapter") or context.get("chapter", {}).get("chapter_code") or "8")
             section_code = str(planned["section_code"])
             title = str(planned.get("title") or planned.get("section_title") or "")
             target_pages = int(planned.get("target_pages") or 0)
@@ -263,7 +218,7 @@ class LongformSectionGenerator:
                     used_premium_rounds += 1
                 payload = {
                     "task": "generate_longform_subsection_premium" if use_premium else "generate_longform_subsection",
-                    "chapter": "8",
+                    "chapter": chapter,
                     "section_code": section_code,
                     "section_title": title,
                     "target_pages": target_pages,

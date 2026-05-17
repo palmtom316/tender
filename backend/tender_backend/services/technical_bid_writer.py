@@ -25,9 +25,10 @@ from tender_backend.services.longform_quality import (
     estimate_markdown_pages,
     normalize_allowed_chart_keys,
 )
-from tender_backend.services.longform_section_generation import LongformSectionGenerator, plan_chapter_8_sections
+from tender_backend.services.longform_section_generation import LongformSectionGenerator, plan_chapter_sections
 from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
 from tender_backend.services.technical_chapter_context import TechnicalChapterContextBuilder, with_target_pages_override
+from tender_backend.services.technical_chapter_strategies import LONGFORM_CHAPTER_CONFIG
 
 
 class TechnicalBidWriter:
@@ -79,11 +80,11 @@ class TechnicalBidWriter:
         context = _with_effective_prompt_template(context)
         effective_target_pages = _effective_target_pages(context, target_pages)
         if _should_use_longform_generation(chapter, effective_target_pages):
-            section_plan = plan_chapter_8_sections(target_pages=effective_target_pages)
+            chapter_code = str(chapter.get("chapter_code") or "").strip()
+            section_plan = plan_chapter_sections(chapter_code, target_pages=effective_target_pages)
             generator = LongformSectionGenerator(
                 completion_fn=lambda payload: _request_ai_gateway_subsection_completion(conn, {**payload, "rewrite_note": rewrite_note})
                 or _deterministic_subsection_completion({**payload, "rewrite_note": rewrite_note}),
-                max_rounds=4,
             )
 
             def _handle_longform_progress(payload: dict[str, Any]) -> None:
@@ -516,7 +517,11 @@ def _effective_target_pages(context: dict[str, Any], target_pages: int | None) -
 
 
 def _should_use_longform_generation(chapter: dict[str, Any], target_pages: int | None) -> bool:
-    return str(chapter.get("chapter_code") or "").strip() == "8" and isinstance(target_pages, int) and target_pages >= 80
+    chapter_code = str(chapter.get("chapter_code") or "").strip()
+    config = LONGFORM_CHAPTER_CONFIG.get(chapter_code)
+    if not config or not config.get("enabled") or not isinstance(target_pages, int):
+        return False
+    return target_pages >= int(config.get("min_target_pages") or 0)
 
 
 def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: dict[str, Any]) -> dict[str, Any] | None:

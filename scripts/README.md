@@ -8,6 +8,9 @@
 - `run_chapter_8_acceptance.py`
   - 采集 chapter 8 acceptance 证据
   - 输出 `chapter_draft` / `export_gate` / latest `export_record` 快照
+- `run_longform_multi_chapter_acceptance.py`
+  - 采集第 8 / 9 / 10.1 / 10.2 / 10.3 章 longform acceptance 证据
+  - 输出多章节 `chapter_draft` / `model_usage` / `export_gate` / `latest_export_record` 快照
 
 ## Development / Debug Scripts
 

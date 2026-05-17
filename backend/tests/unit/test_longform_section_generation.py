@@ -8,7 +8,10 @@ import pytest
 from tender_backend.services.longform_section_generation import (
     LongformSectionGenerator,
     plan_chapter_8_sections,
+    plan_chapter_sections,
 )
+from tender_backend.services.longform_quality import _present_section_codes
+from tender_backend.services.technical_chapter_strategies import LONGFORM_SECTION_SETS
 
 
 class ReviewPriority(Enum):
@@ -42,6 +45,33 @@ def test_plan_chapter_8_sections_required_tables_are_synonym_lists():
     assert tables and isinstance(tables[0], list)
     assert "质量控制点表" in tables[0]
     assert "WHS控制点表" in tables[0]
+
+
+def test_plan_chapter_sections_supports_work_plan_and_10x_chapters():
+    chapter_9 = plan_chapter_sections("9", target_pages=40)
+    chapter_10_1 = plan_chapter_sections("10.1", target_pages=45)
+    chapter_10_2 = plan_chapter_sections("10.2", target_pages=45)
+    chapter_10_3 = plan_chapter_sections("10.3", target_pages=45)
+
+    assert [section["section_code"] for section in chapter_9] == [f"9.{index}" for index in range(1, 9)]
+    assert chapter_10_1[0]["section_code"] == "10.1.1"
+    assert chapter_10_1[-1]["section_code"] == "10.1.15"
+    assert chapter_10_2[-1]["section_code"] == "10.2.16"
+    assert chapter_10_3[-1]["section_code"] == "10.3.15"
+    assert any("quality_system" in section["required_charts"] for section in chapter_10_1)
+    assert any("safety_system" in section["required_charts"] for section in chapter_10_2)
+    assert any("schedule_gantt" in section["required_charts"] for section in chapter_10_3)
+
+
+def test_plan_chapter_sections_match_registry_numbering_and_heading_regex():
+    for chapter_code, section_set in LONGFORM_SECTION_SETS.items():
+        target_pages = max(80 if chapter_code == "8" else 40, len(section_set))
+        planned = plan_chapter_sections(chapter_code, target_pages=target_pages)
+        expected_codes = [heading.split(" ", 1)[0] for heading, _body in section_set]
+
+        assert [section["section_code"] for section in planned] == expected_codes
+        content_md = "\n\n".join(f"### {section['section_code']} {section['title']}\n\n正文" for section in planned)
+        assert _present_section_codes(content_md) == set(expected_codes)
 
 
 @pytest.mark.parametrize("target_pages", [0, 14])
@@ -80,6 +110,34 @@ def test_generator_continues_until_section_meets_min_chars():
     assert result["status"] == "completed"
     assert result["sections"][0]["continuation_rounds"] == 2
     assert "## 8.1 编制依据" in result["content_md"]
+
+
+def test_generator_passes_planned_chapter_code_to_completion_payload():
+    calls = []
+
+    def fake_completion(payload):
+        calls.append(payload)
+        return {"content": "足够内容" * 10, "metadata": {}}
+
+    generator = LongformSectionGenerator(completion_fn=fake_completion, max_rounds=1)
+    result = generator.generate_sections(
+        context={"chapter": {"chapter_code": "10.1"}},
+        section_plan=[
+            {
+                "chapter": "10.1",
+                "section_code": "10.1.3",
+                "title": "质量保证体系与组织职责",
+                "target_pages": 2,
+                "min_chars": 10,
+                "required_charts": ["quality_system"],
+                "required_tables": [],
+            }
+        ],
+    )
+
+    assert result["status"] == "completed"
+    assert calls[0]["chapter"] == "10.1"
+    assert calls[0]["section_code"] == "10.1.3"
 
 
 def test_generate_sections_succeeds_and_hashes_prompt_with_common_non_json_context_values():
