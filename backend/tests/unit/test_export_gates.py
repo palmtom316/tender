@@ -459,7 +459,7 @@ def test_export_gate_blocks_when_page_estimate_below_target(monkeypatch):
                         "referenced_chart_keys": [],
                         "chapter_code": "8",
                         "target_pages": 100,
-                        "estimated_pages": 88,
+                        "estimated_pages": 65,
                         "page_estimate_json": {},
                         "coverage_report_json": {"coverage_passed": True, "issues": []},
                         "chart_closure_report_json": {"chart_closure_passed": True, "issues": []},

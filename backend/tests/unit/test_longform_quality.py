@@ -21,9 +21,21 @@ def test_estimate_markdown_pages_counts_chinese_text_tables_charts_and_breaks():
 
     assert estimate["target_pages"] == 100
     assert estimate["estimated_pages"] >= 12
+    assert estimate["estimated_pages_gate"] == estimate["estimated_pages"]
+    assert estimate["method"]["gate_estimate_not_actual"] is True
     assert estimate["evidence"]["chart_count"] == 1
     assert estimate["evidence"]["table_row_count"] == 2
     assert estimate["evidence"]["explicit_page_break_count"] == 1
+
+
+def test_estimate_markdown_pages_reports_actual_like_pages_near_measured_baseline():
+    content = "施工组织" * 20187
+
+    estimate = estimate_markdown_pages(content, target_pages=100)
+
+    assert estimate["evidence"]["weighted_text_units"] >= 80745
+    assert 70 <= estimate["estimated_pages_actual_like"] <= 90
+    assert estimate["estimated_pages_gate"] > estimate["estimated_pages_actual_like"]
 
 
 def test_page_gate_blocks_below_seventy_percent_target():

@@ -40,7 +40,7 @@ def estimate_markdown_pages(content_md: str, *, target_pages: int | None = None)
     table_row_count = _table_row_count(content_md)
     explicit_page_break_count = len(_PAGE_BREAK_RE.findall(content_md or ""))
 
-    estimated_pages = round(
+    estimated_pages_gate = round(
         max(
             1.0,
             text_units / 340
@@ -51,11 +51,19 @@ def estimate_markdown_pages(content_md: str, *, target_pages: int | None = None)
         ),
         2,
     )
+    structure_adjustment = heading_count * 0.08 + chart_count * 0.55 + table_row_count * 0.06 + explicit_page_break_count
+    estimated_pages_actual_like = round(max(1.0, text_units / 1000 + structure_adjustment), 2)
 
     return {
         "target_pages": target_pages,
-        "estimated_pages": estimated_pages,
-        "method": "weighted_cn_chars_340_per_page_plus_structure_v1",
+        "estimated_pages": estimated_pages_gate,
+        "estimated_pages_gate": estimated_pages_gate,
+        "estimated_pages_actual_like": estimated_pages_actual_like,
+        "method": {
+            "gate": "weighted_cn_chars_340_per_page_plus_structure_v1",
+            "actual_like": "weighted_cn_chars_1000_per_page_plus_structure_v1",
+            "gate_estimate_not_actual": True,
+        },
         "evidence": {
             "weighted_text_units": text_units,
             "heading_count": heading_count,
