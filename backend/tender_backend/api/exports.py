@@ -27,6 +27,7 @@ from tender_backend.services.export_service.docx_exporter import (
     inspect_rendered_docx_evidence,
     render_export,
 )
+from tender_backend.services.export_service.format_checker import check_docx_format
 
 router = APIRouter(tags=["exports"])
 _attachment_repo = ExternalAttachmentRepository()
@@ -103,6 +104,9 @@ async def create_export(
             if output_path.suffix == ".docx"
             else {"path": str(output_path), "page_count": {"status": "unchecked", "actual_pages": None}}
         )
+        if output_path.suffix == ".docx":
+            render_evidence["format_check"] = check_docx_format(output_path)
+        _write_actual_pages_to_drafts(conn, project_id=project_id, render_evidence=render_evidence)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -166,6 +170,27 @@ def _template_name_to_mode(template_name: str | None) -> str:
         if alias == template_name:
             return mode
     return EXPORT_MODE_SINGLE_DOCX
+
+
+def _write_actual_pages_to_drafts(conn: Connection, *, project_id: UUID, render_evidence: dict) -> None:
+    page_count = render_evidence.get("page_count") if isinstance(render_evidence, dict) else {}
+    actual_pages = page_count.get("actual_pages") if isinstance(page_count, dict) else None
+    actual_status = str(page_count.get("status") or "unchecked") if isinstance(page_count, dict) else "unchecked"
+    if not isinstance(actual_pages, int) or actual_pages <= 0:
+        return
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            UPDATE chapter_draft
+            SET page_estimate_json = jsonb_set(
+                  jsonb_set(COALESCE(page_estimate_json, '{}'::jsonb), '{actual_pages}', to_jsonb(%s::int), true),
+                  '{actual_status}', to_jsonb(%s::text), true
+                ),
+                updated_at = now()
+            WHERE project_id = %s
+            """,
+            (actual_pages, actual_status, project_id),
+        )
 
 
 @router.get("/projects/{project_id}/export-gates")

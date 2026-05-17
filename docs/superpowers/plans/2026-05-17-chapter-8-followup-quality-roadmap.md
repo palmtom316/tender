@@ -325,8 +325,8 @@ Track E (Longform 泛化到 9/10 章) ← 统一生成路径
 - Test: `backend/tests/unit/test_export_api.py`
 
 **Steps:**
-- [ ] export 成功后从 `render_evidence.page_count` 取 actual_pages，update `chapter_draft.page_estimate_json` 加 `actual_pages / actual_status='counted'`
-- [ ] 单测：mock count_docx_pages 返回 95 → DB 中 page_estimate_json.actual_pages == 95
+- [x] export 成功后从 `render_evidence.page_count` 取 actual_pages，update `chapter_draft.page_estimate_json` 加 `actual_pages / actual_status='counted'`
+- [x] 单测：mock count_docx_pages 返回 95 → DB 中 page_estimate_json.actual_pages == 95
 
 **Acceptance:** 第一次 export 后下次 export gate 用真实页数评估。
 
@@ -338,11 +338,11 @@ Track E (Longform 泛化到 9/10 章) ← 统一生成路径
 - Test: `backend/tests/unit/test_format_checker.py`
 
 **Steps:**
-- [ ] `check_docx_format(docx_path)` 检查：(a) 字体（默认仿宋/黑体）、(b) 段落对齐、(c) 章节标题样式一致性、(d) 表格边框/字号
-- [ ] `_format_gate_state()` 改为 `_format_gate_state(conn, *, project_id)`：从最新 export_record.metadata_json.render_evidence.format_check 读
-- [ ] `build_export_gate_state` 调用点同步传入 `conn/project_id`
-- [ ] export_record 创建时跑 format_checker 并写入 metadata
-- [ ] 单测：构造一个不合格 docx → format_passed=False
+- [x] `check_docx_format(docx_path)` 检查：(a) 字体（默认仿宋/黑体）、(b) 段落对齐、(c) 章节标题样式一致性、(d) 表格边框/字号
+- [x] `_format_gate_state()` 改为 `_format_gate_state(conn, *, project_id)`：从最新 export_record.metadata_json.render_evidence.format_check 读
+- [x] `build_export_gate_state` 调用点同步传入 `conn/project_id`
+- [x] export_record 创建时跑 format_checker 并写入 metadata
+- [x] 单测：构造一个不合格 docx → format_passed=False
 
 **Acceptance:** format_passed 反映真实排版状态。
 
@@ -352,8 +352,8 @@ Track E (Longform 泛化到 9/10 章) ← 统一生成路径
 - Test: `backend/tests/unit/test_longform_section_generation.py`
 
 **Steps:**
-- [ ] 新增 test：`plan_chapter_8_sections(target_pages=100)` 返回的 `(section_code, title)` 必须严格等于 `registry.CHAPTER_8_SECTIONS` 解析后的 `(code, title)`
-- [ ] 如出现编号 drift 立刻 fail
+- [x] 新增 test：`plan_chapter_8_sections(target_pages=100)` 返回的 `(section_code, title)` 必须严格等于 `registry.CHAPTER_8_SECTIONS` 解析后的 `(code, title)`
+- [x] 如出现编号 drift 立刻 fail
 
 **Acceptance:** 73685f0 修复的编号对齐被持久化保护。
 
@@ -363,12 +363,12 @@ Track E (Longform 泛化到 9/10 章) ← 统一生成路径
 - Create: `scripts/visual_inspect_chapter_8.py`
 
 **Steps:**
-- [ ] 输入 chapter_draft.id，输出：
+- [x] 输入 chapter_draft.id，输出：
   - 每节字数 + min_chars 表
   - 每个 chart_asset 的 png 路径
   - residual chart placeholder list
-  - DOCX 实际页数 + 章节级页数分布（用 LibreOffice 生成的 PDF 截各节首页 thumbnail）
-- [ ] 落到 `outputs/visual-inspect/<draft_id>/`
+  - DOCX 实际页数 + 章节级页数分布（缩略图生成暂缓到最终 e2e 阶段）
+- [x] 落到 `outputs/visual-inspect/<draft_id>/`
 
 **Acceptance:** 评标专家盲评前可一键 dump 评审材料。
 
@@ -377,6 +377,8 @@ Track E (Longform 泛化到 9/10 章) ← 统一生成路径
 ## 六、Track D — 回归与最终验收
 
 ### D-1：综合 e2e（Track A/B/C 全部合入后）
+
+> **Status:** 暂缓。按 2026-05-17 执行决策，真实项目生成、导出、页数统计类 e2e 在全部改造完成后统一执行，避免反复消耗长耗时测试。
 
 **Files:**
 - Modify: `scripts/run_chapter_8_acceptance.py`
@@ -388,14 +390,16 @@ Track E (Longform 泛化到 9/10 章) ← 统一生成路径
 
 ### D-2：评标专家盲评
 
+> **Status:** 暂缓。待最终 e2e 样本统一产出后再组织人工盲评。
+
 - [ ] 3 个真实项目（含 1 个暗标）盲评
 - [ ] 评分维度：篇幅完整度、专业表现力、图表可读性、暗标合规性
 - [ ] 落 `docs/reviews/2026-MM-DD-followup-blind-review.md`
 
 ### D-3：5/11 整改方案 REM-* 状态回写
 
-- [ ] 在 `docs/reviews/2026-05-11-...整改方案.md` 中把 REM-C-1/-2/-5 标记 "已整改于 2026-MM-DD"
-- [ ] 移除已完成 task 的 P0/P1 编号
+- [x] 在 `docs/reviews/2026-05-11-...整改方案.md` 中把 REM-C-1/-2/-5 标记 "已整改于 2026-MM-DD"
+- [x] 移除已完成 task 的 P0/P1 编号
 
 ---
 
@@ -577,3 +581,4 @@ D-3 ←─ D-2
 | --- | --- | --- |
 | v1.0 | 2026-05-17 | 初版落盘。合并 chart-generation-quality-upgrade.md（含修订意见 R1~R5）+ longform-launch-closure.md 遗留项 L1~L4。|
 | v1.1 | 2026-05-17 | 修订 R2/A-1A、A-7、A-11、B-4、C-2；追加 Track E，将 longform 路径泛化到第 9 章和 10.1/10.2/10.3；标题与目标升级为第 8/9/10 章统一质量路线图。 |
+| v1.2 | 2026-05-17 | 完成 Track C 快速改造与 D-3 文档回写；D-1/D-2 按执行决策暂缓到全量改造完成后统一 e2e/盲评。 |

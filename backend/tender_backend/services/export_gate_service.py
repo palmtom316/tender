@@ -48,11 +48,44 @@ def _unapproved_referenced_chart_count(chart_assets: list, referenced_placeholde
     return count
 
 
-def _format_gate_state() -> dict[str, str | bool]:
+def _format_gate_state(conn: Connection | None = None, *, project_id: UUID | None = None) -> dict[str, str | bool | int | list]:
+    if conn is None or project_id is None:
+        return {
+            "format_passed": False,
+            "format_status": "warning_not_checked",
+            "format_message": "格式校验尚未接入自动检查，导出前需人工复核。",
+            "format_issue_count": 0,
+            "format_issues": [],
+        }
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            SELECT metadata_json
+            FROM export_record
+            WHERE project_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+    metadata = dict((row or {}).get("metadata_json") or {})
+    render_evidence = metadata.get("render_evidence") if isinstance(metadata.get("render_evidence"), dict) else {}
+    format_check = render_evidence.get("format_check") if isinstance(render_evidence.get("format_check"), dict) else {}
+    if not format_check:
+        return {
+            "format_passed": False,
+            "format_status": "warning_not_checked",
+            "format_message": "格式校验尚未接入自动检查，导出前需人工复核。",
+            "format_issue_count": 0,
+            "format_issues": [],
+        }
+    issues = list(format_check.get("issues") or [])
     return {
-        "format_passed": False,
-        "format_status": "warning_not_checked",
-        "format_message": "格式校验尚未接入自动检查，导出前需人工复核。",
+        "format_passed": bool(format_check.get("format_passed")),
+        "format_status": str(format_check.get("format_status") or "unchecked"),
+        "format_message": str(format_check.get("format_message") or ""),
+        "format_issue_count": len(issues),
+        "format_issues": issues[:20],
     }
 
 
@@ -180,7 +213,7 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
     chart_assets = ChartAssetRepository().list_by_project(conn, project_id=project_id)
     referenced_chart_placeholders = _referenced_chart_placeholders(conn, project_id=project_id)
     unapproved_chart_count = _unapproved_referenced_chart_count(chart_assets, referenced_chart_placeholders)
-    format_gate = _format_gate_state()
+    format_gate = _format_gate_state(conn, project_id=project_id)
     constraint_service = TenderConstraintService()
     constraint_set = constraint_service.latest_confirmed(conn, project_id=project_id)
     latest_constraint_set = constraint_service.latest(conn, project_id=project_id) if hasattr(constraint_service, "latest") else constraint_set

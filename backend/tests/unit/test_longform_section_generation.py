@@ -12,6 +12,7 @@ from tender_backend.services.longform_section_generation import (
 )
 from tender_backend.services.longform_quality import _present_section_codes
 from tender_backend.services.technical_chapter_strategies import LONGFORM_SECTION_SETS
+from tender_backend.services.technical_chapter_strategies.registry import CHAPTER_8_SECTIONS
 
 
 class ReviewPriority(Enum):
@@ -45,6 +46,13 @@ def test_plan_chapter_8_sections_required_tables_are_synonym_lists():
     assert tables and isinstance(tables[0], list)
     assert "质量控制点表" in tables[0]
     assert "WHS控制点表" in tables[0]
+
+
+def test_plan_chapter_8_sections_match_registry_codes_and_titles():
+    sections = plan_chapter_8_sections(target_pages=100)
+    expected = [tuple(heading.split(" ", 1)) for heading, _body in CHAPTER_8_SECTIONS]
+
+    assert [(section["section_code"], section["title"]) for section in sections] == expected
 
 
 def test_plan_chapter_sections_supports_work_plan_and_10x_chapters():

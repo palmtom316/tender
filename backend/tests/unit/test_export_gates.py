@@ -120,11 +120,54 @@ def test_chart_gate_counts_only_unapproved_referenced_assets():
 def test_format_gate_warning_state_is_not_reported_as_passed():
     state = _format_gate_state()
 
-    assert state == {
-        "format_passed": False,
-        "format_status": "warning_not_checked",
-        "format_message": "格式校验尚未接入自动检查，导出前需人工复核。",
-    }
+    assert state["format_passed"] is False
+    assert state["format_status"] == "warning_not_checked"
+    assert state["format_message"] == "格式校验尚未接入自动检查，导出前需人工复核。"
+    assert state["format_issue_count"] == 0
+    assert state["format_issues"] == []
+
+
+def test_format_gate_reads_latest_export_record_check_result():
+    project_id = uuid4()
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.params = params
+            self.result = [
+                {
+                    "metadata_json": {
+                        "render_evidence": {
+                            "format_check": {
+                                "format_passed": False,
+                                "format_status": "failed",
+                                "format_message": "发现 1 项格式问题。",
+                                "issues": [{"code": "table_missing_borders", "severity": "P1"}],
+                            }
+                        }
+                    }
+                }
+            ]
+            return self
+
+        def fetchone(self):
+            return self.result[0]
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    state = _format_gate_state(_Conn(), project_id=project_id)
+
+    assert state["format_passed"] is False
+    assert state["format_status"] == "failed"
+    assert state["format_issue_count"] == 1
+    assert state["format_issues"][0]["code"] == "table_missing_borders"
 
 
 def test_export_gate_blocks_without_confirmed_constraint_set_for_non_legacy(monkeypatch):
@@ -412,6 +455,137 @@ def test_create_export_blocks_when_final_gate_fails(monkeypatch):
 
     assert exc_info.value.status_code == 409
     assert "export gates block export" in str(exc_info.value.detail)
+
+
+def test_create_export_writes_actual_pages_back_to_chapter_drafts(monkeypatch, tmp_path):
+    project_id = uuid4()
+    output_path = tmp_path / "technical.docx"
+    output_path.write_bytes(b"fake-docx")
+    updates = []
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "SELECT id FROM project" in query:
+                self.result = [{"id": project_id}]
+            elif "UPDATE chapter_draft" in query:
+                updates.append((query, params))
+                self.result = []
+            elif "INSERT INTO export_record" in query:
+                self.result = [
+                    {
+                        "id": uuid4(),
+                        "project_id": project_id,
+                        "status": "completed",
+                        "template_name": "plain_docx",
+                        "export_key": str(output_path),
+                        "metadata_json": params[5],
+                    }
+                ]
+            else:
+                self.result = []
+            return self
+
+        def fetchone(self):
+            return self.result[0] if self.result else None
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(exports, "build_export_gate_state", lambda conn, *, project_id: {"can_export": True, "gates": {}})
+    monkeypatch.setattr(exports, "render_export", lambda conn, *, project_id, mode: str(output_path))
+    monkeypatch.setattr(
+        exports,
+        "inspect_rendered_docx_evidence",
+        lambda path: {"path": str(path), "page_count": {"status": "counted", "actual_pages": 95, "method": "test"}},
+    )
+
+    result = asyncio.run(
+        exports.create_export(
+            project_id,
+            exports.CreateExportBody(mode="single_docx"),
+            _Conn(),
+            CurrentUser(token="dev-token", role=Role.ADMIN, display_name="Developer"),
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert len(updates) == 1
+    assert "jsonb_set" in updates[0][0]
+    assert updates[0][1] == (95, "counted", project_id)
+
+
+def test_create_export_records_format_check_in_render_evidence(monkeypatch, tmp_path):
+    project_id = uuid4()
+    output_path = tmp_path / "technical.docx"
+    output_path.write_bytes(b"fake-docx")
+    inserted_metadata = {}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            if "SELECT id FROM project" in query:
+                self.result = [{"id": project_id}]
+            elif "INSERT INTO export_record" in query:
+                inserted_metadata.update(params[5].obj)
+                self.result = [
+                    {
+                        "id": uuid4(),
+                        "project_id": project_id,
+                        "status": "completed",
+                        "template_name": "plain_docx",
+                        "export_key": str(output_path),
+                        "metadata_json": params[5],
+                    }
+                ]
+            else:
+                self.result = []
+            return self
+
+        def fetchone(self):
+            return self.result[0] if self.result else None
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(exports, "build_export_gate_state", lambda conn, *, project_id: {"can_export": True, "gates": {}})
+    monkeypatch.setattr(exports, "render_export", lambda conn, *, project_id, mode: str(output_path))
+    monkeypatch.setattr(exports, "inspect_rendered_docx_evidence", lambda path: {"path": str(path), "page_count": {"status": "unchecked"}})
+    monkeypatch.setattr(
+        exports,
+        "check_docx_format",
+        lambda path: {"format_passed": True, "format_status": "passed", "format_message": "格式检查通过。", "issues": []},
+    )
+
+    asyncio.run(
+        exports.create_export(
+            project_id,
+            exports.CreateExportBody(mode="single_docx"),
+            _Conn(),
+            CurrentUser(token="dev-token", role=Role.ADMIN, display_name="Developer"),
+        )
+    )
+
+    assert inserted_metadata["render_evidence"]["format_check"]["format_passed"] is True
+    assert inserted_metadata["render_evidence"]["format_check"]["format_status"] == "passed"
 
 
 
