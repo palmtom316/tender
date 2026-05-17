@@ -585,6 +585,7 @@ def _chart_spec_system_prompt(chart_type: str) -> str:
         "你是投标文件图表规划助手。只输出 JSON，不要 Markdown。"
         "输出必须是合法 json object，并符合 tender chart spec。"
         "AI 只生成结构化 spec，不生成代码。"
+        "Never output coordinates, colors, dimensions, or SVG fragments. Only output semantic chart structure. "
         "不得编造日期、天数、人员姓名、证书编号、设备型号、风险等级、量化指标或许可结果。"
         "schedule_gantt/critical_path 的每个任务日期必须来自 context 中已确认的工期、里程碑或约束，"
         "并在任务 source_refs 中写入 constraint_id/source_chunk_id/user_confirmed_by 等来源；缺少来源时不要输出甘特图任务。"
