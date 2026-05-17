@@ -197,11 +197,12 @@ def _int_metadata(metadata: dict[str, Any], key: str) -> int:
 class LongformSectionGenerator:
     """Generate planned subsections, continuing until each reaches its character floor."""
 
-    def __init__(self, completion_fn: Callable[[dict], dict], max_rounds: int = 6):
+    def __init__(self, completion_fn: Callable[[dict], dict], max_rounds: int = 6, premium_threshold_chars: int = 2200):
         if max_rounds < 1:
             raise ValueError("max_rounds must be at least 1")
         self.completion_fn = completion_fn
         self.max_rounds = max_rounds
+        self.premium_threshold_chars = premium_threshold_chars
 
     def generate_sections(
         self,
@@ -230,6 +231,7 @@ class LongformSectionGenerator:
             prompt_hash = ""
             rounds = 0
             low_value_rounds = 0
+            used_premium_rounds = 0
 
             previous_outlines = [
                 {
@@ -256,8 +258,11 @@ class LongformSectionGenerator:
                             "percent": int(((len(section_results) + (round_index - 1) / self.max_rounds) / max(len(section_plan), 1)) * 100),
                         }
                     )
+                use_premium = round_index >= 2 and _weighted_text_units(generated) < self.premium_threshold_chars
+                if use_premium:
+                    used_premium_rounds += 1
                 payload = {
-                    "task": "generate_longform_subsection",
+                    "task": "generate_longform_subsection_premium" if use_premium else "generate_longform_subsection",
                     "chapter": "8",
                     "section_code": section_code,
                     "section_title": title,
@@ -325,6 +330,7 @@ class LongformSectionGenerator:
                     "status": status,
                     "continuation_rounds": rounds,
                     "low_value_rounds": low_value_rounds,
+                    "used_premium_rounds": used_premium_rounds,
                     "required_charts": required_charts,
                     "required_tables": required_tables,
                     "prompt_hash": prompt_hash,

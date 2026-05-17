@@ -11,6 +11,14 @@ TASK_PROFILES = {
         "max_tokens": 32768,
         "max_retries": 0,
     },
+    "generate_longform_subsection_premium": {
+        "primary_model": "deepseek-v4-pro",
+        "fallback_model": "deepseek-v4-flash",
+        "primary_thinking_mode": "max",
+        "timeout": 1800,
+        "max_tokens": 32768,
+        "max_retries": 0,
+    },
     "review_section": {
         "primary_model": "deepseek-v4-flash",
         "fallback_model": "qwen-max",

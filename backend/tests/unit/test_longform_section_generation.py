@@ -174,6 +174,34 @@ def test_generator_breaks_after_two_low_value_continuation_rounds() -> None:
     assert result["sections"][0]["low_value_rounds"] == 2
 
 
+def test_generator_switches_to_premium_task_for_underfilled_continuation_round() -> None:
+    task_types = []
+
+    def fake_completion(payload):
+        task_types.append(payload["task"])
+        if payload["round_index"] == 1:
+            return {"content": "首轮内容" * 20, "metadata": {}}
+        return {"content": "补充内容" * 600, "metadata": {}}
+
+    generator = LongformSectionGenerator(completion_fn=fake_completion, max_rounds=3, premium_threshold_chars=2200)
+    result = generator.generate_sections(
+        context={},
+        section_plan=[
+            {
+                "section_code": "8.4",
+                "title": "主要施工方法及技术要求",
+                "target_pages": 10,
+                "min_chars": 2300,
+                "required_charts": [],
+                "required_tables": [],
+            }
+        ],
+    )
+
+    assert task_types == ["generate_longform_subsection", "generate_longform_subsection_premium"]
+    assert result["sections"][0]["used_premium_rounds"] == 1
+
+
 def test_generator_keeps_subsection_order_and_metadata():
     def fake_completion(payload):
         return {"content": f"{payload['section_code']}内容" * 20, "metadata": {"output_tokens": 20}}

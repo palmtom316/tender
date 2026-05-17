@@ -265,11 +265,12 @@ def test_longform_subsection_rewrite_note_includes_density_hint(monkeypatch) -> 
             "required_charts": ["quality_system"],
             "required_tables": [],
             "round_index": 1,
+            "task": "generate_longform_subsection_premium",
         },
     )
 
     assert result["content"] == "正文"
-    assert captured["task_type"] == "generate_longform_subsection"
+    assert captured["task_type"] == "generate_longform_subsection_premium"
     assert captured["context"]["longform_subsection"]["subsection_density_hint"]["expected_chars"] == 2300
     assert "展开 6 个独立子专题" in captured["rewrite_note"]
     assert re.search(r"至少\s*13\s*个自然段", captured["rewrite_note"])

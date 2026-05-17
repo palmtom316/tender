@@ -594,7 +594,7 @@ def _request_ai_gateway_subsection_completion(conn: Connection | None, payload: 
         conn,
         subsection_context,
         rewrite_note="\n".join(part for part in rewrite_parts if part),
-        task_type="generate_longform_subsection",
+        task_type=str(payload.get("task") or "generate_longform_subsection"),
     )
     if ai_result is None:
         return None

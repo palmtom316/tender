@@ -45,6 +45,17 @@ def test_high_value_tender_profiles_allow_v4_pro() -> None:
         assert profile["max_retries"] == 0
 
 
+def test_longform_premium_profile_uses_v4_pro_max_thinking() -> None:
+    profile = TASK_PROFILES["generate_longform_subsection_premium"]
+
+    assert profile["primary_model"] == "deepseek-v4-pro"
+    assert profile["fallback_model"] == "deepseek-v4-flash"
+    assert profile["primary_thinking_mode"] == "max"
+    assert profile["timeout"] == 1800
+    assert profile["max_tokens"] == 32768
+    assert profile["max_retries"] == 0
+
+
 def test_tag_clause_profile_has_large_output_budget() -> None:
     profile = TASK_PROFILES["tag_clauses"]
 

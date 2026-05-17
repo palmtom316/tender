@@ -193,6 +193,7 @@ _V4_PRO_ALLOWED_TASKS = frozenset(
         "extract_tender_facts",
         "extract_scoring_criteria",
         "generate_longform_subsection",
+        "generate_longform_subsection_premium",
     }
 )
 
