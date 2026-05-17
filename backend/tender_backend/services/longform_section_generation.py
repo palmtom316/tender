@@ -197,7 +197,7 @@ def _int_metadata(metadata: dict[str, Any], key: str) -> int:
 class LongformSectionGenerator:
     """Generate planned subsections, continuing until each reaches its character floor."""
 
-    def __init__(self, completion_fn: Callable[[dict], dict], max_rounds: int = 4):
+    def __init__(self, completion_fn: Callable[[dict], dict], max_rounds: int = 6):
         if max_rounds < 1:
             raise ValueError("max_rounds must be at least 1")
         self.completion_fn = completion_fn
@@ -229,6 +229,7 @@ class LongformSectionGenerator:
             generated = ""
             prompt_hash = ""
             rounds = 0
+            low_value_rounds = 0
 
             previous_outlines = [
                 {
@@ -277,6 +278,10 @@ class LongformSectionGenerator:
                 completion = self.completion_fn(payload)
                 rounds = round_index
                 piece = _completion_content(completion)
+                if _weighted_text_units(piece) < 100:
+                    low_value_rounds += 1
+                else:
+                    low_value_rounds = 0
                 generated = f"{generated}\n\n{piece}".strip() if generated and piece else generated + piece
 
                 metadata = _completion_metadata(completion)
@@ -301,6 +306,8 @@ class LongformSectionGenerator:
 
                 if _weighted_text_units(generated) >= min_chars:
                     break
+                if low_value_rounds >= 2:
+                    break
 
             weighted_chars = _weighted_text_units(generated)
             status = "completed" if weighted_chars >= min_chars else "failed_min_chars"
@@ -317,6 +324,7 @@ class LongformSectionGenerator:
                     "actual_chars": weighted_chars,
                     "status": status,
                     "continuation_rounds": rounds,
+                    "low_value_rounds": low_value_rounds,
                     "required_charts": required_charts,
                     "required_tables": required_tables,
                     "prompt_hash": prompt_hash,

@@ -139,6 +139,41 @@ def test_generator_marks_section_failed_after_max_rounds():
     assert result["sections"][0]["continuation_rounds"] == 2
 
 
+def test_generator_defaults_to_six_rounds() -> None:
+    generator = LongformSectionGenerator(completion_fn=lambda _payload: {"content": "", "metadata": {}})
+
+    assert generator.max_rounds == 6
+
+
+def test_generator_breaks_after_two_low_value_continuation_rounds() -> None:
+    calls = []
+
+    def fake_completion(payload):
+        calls.append(payload)
+        return {"content": "短", "metadata": {}}
+
+    generator = LongformSectionGenerator(completion_fn=fake_completion, max_rounds=6)
+    result = generator.generate_sections(
+        context={},
+        section_plan=[
+            {
+                "section_code": "8.1",
+                "title": "编制依据",
+                "target_pages": 1,
+                "min_chars": 1000,
+                "required_charts": [],
+                "required_tables": [],
+            }
+        ],
+    )
+
+    assert len(calls) == 2
+    assert result["status"] == "failed"
+    assert result["sections"][0]["status"] == "failed_min_chars"
+    assert result["sections"][0]["continuation_rounds"] == 2
+    assert result["sections"][0]["low_value_rounds"] == 2
+
+
 def test_generator_keeps_subsection_order_and_metadata():
     def fake_completion(payload):
         return {"content": f"{payload['section_code']}内容" * 20, "metadata": {"output_tokens": 20}}
