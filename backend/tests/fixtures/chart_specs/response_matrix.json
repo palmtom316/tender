@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "chart_type": "response_matrix",
+    "title": "招标响应矩阵表",
+    "placeholder_key": "response_matrix",
+    "columns": ["招标要求", "响应措施", "证明材料"],
+    "rows": [
+      {"cells": ["工期要求", "节点计划控制", "进度计划表"]},
+      {"cells": ["质量要求", "三级验收", "验收记录"]}
+    ]
+  },
+  "expected_labels": ["工期要求", "三级验收"]
+}

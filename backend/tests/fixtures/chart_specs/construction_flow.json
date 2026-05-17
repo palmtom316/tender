@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "chart_type": "construction_flow",
+    "title": "施工组织流程图",
+    "placeholder_key": "construction_flow",
+    "nodes": [
+      {"id": "prepare", "label": "施工准备"},
+      {"id": "work", "label": "现场实施"},
+      {"id": "accept", "label": "验收移交"}
+    ],
+    "edges": [
+      {"from": "prepare", "to": "work"},
+      {"from": "work", "to": "accept"}
+    ]
+  },
+  "expected_labels": ["施工准备", "验收移交"]
+}

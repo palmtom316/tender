@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "chart_type": "safety_system",
+    "title": "安全管理体系图",
+    "placeholder_key": "safety_system",
+    "nodes": [
+      {"id": "brief", "label": "安全交底"},
+      {"id": "check", "label": "现场检查"},
+      {"id": "close", "label": "隐患闭环"}
+    ],
+    "edges": [
+      {"from": "brief", "to": "check"},
+      {"from": "check", "to": "close"}
+    ]
+  },
+  "expected_labels": ["安全交底", "隐患闭环"]
+}

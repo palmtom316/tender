@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "chart_type": "closure_flow",
+    "title": "闭环整改流程图",
+    "placeholder_key": "closure_flow",
+    "nodes": [
+      {"id": "inspect", "label": "现场检查"},
+      {"id": "rectify", "label": "整改落实"},
+      {"id": "verify", "label": "复核销项"}
+    ],
+    "edges": [
+      {"from": "inspect", "to": "rectify"},
+      {"from": "rectify", "to": "verify"}
+    ]
+  },
+  "expected_labels": ["现场检查", "复核销项"]
+}

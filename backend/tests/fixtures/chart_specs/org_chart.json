@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "chart_type": "org_chart",
+    "title": "项目组织机构图",
+    "placeholder_key": "org_chart",
+    "nodes": [
+      {"id": "manager", "label": "项目经理"},
+      {"id": "tech", "label": "技术负责人"},
+      {"id": "safe", "label": "安全负责人"}
+    ],
+    "edges": [
+      {"from": "manager", "to": "tech"},
+      {"from": "manager", "to": "safe"}
+    ]
+  },
+  "expected_labels": ["项目经理", "技术负责人"]
+}

@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "chart_type": "equipment_table",
+    "title": "主要设备配置表",
+    "placeholder_key": "equipment_table",
+    "columns": ["设备名称", "用途", "保障措施"],
+    "rows": [
+      {"cells": ["绝缘斗臂车", "高处作业", "进场前完成检验"]},
+      {"cells": ["电缆试验仪", "交接试验", "专人保管校验"]}
+    ]
+  },
+  "expected_labels": ["绝缘斗臂车", "电缆试验仪"]
+}

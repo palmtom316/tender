@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "chart_type": "critical_path",
+    "title": "关键线路计划图",
+    "placeholder_key": "critical_path",
+    "tasks": [
+      {"id": "survey", "label": "现场复测", "start": "2026-06-01", "end": "2026-06-03", "group": "准备阶段", "is_critical": true},
+      {"id": "outage", "label": "停电施工", "start": "2026-06-04", "end": "2026-06-08", "group": "实施阶段", "is_critical": true}
+    ],
+    "dependencies": [{"from": "survey", "to": "outage"}]
+  },
+  "expected_labels": ["现场复测", "停电施工"]
+}

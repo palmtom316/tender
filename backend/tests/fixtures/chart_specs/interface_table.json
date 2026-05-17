@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "chart_type": "interface_table",
+    "title": "接口协调事项表",
+    "placeholder_key": "interface_table",
+    "columns": ["接口事项", "责任单位", "协调动作"],
+    "rows": [
+      {"cells": ["停电窗口", "业主调度", "提前报审计划"]},
+      {"cells": ["物资到货", "供应单位", "联合验收确认"]}
+    ]
+  },
+  "expected_labels": ["停电窗口", "联合验收确认"]
+}

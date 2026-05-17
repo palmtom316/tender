@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "chart_type": "emergency_org",
+    "title": "应急组织体系图",
+    "placeholder_key": "emergency_org",
+    "nodes": [
+      {"id": "lead", "label": "应急指挥"},
+      {"id": "rescue", "label": "抢修处置"},
+      {"id": "support", "label": "后勤保障"}
+    ],
+    "edges": [
+      {"from": "lead", "to": "rescue"},
+      {"from": "lead", "to": "support"}
+    ]
+  },
+  "expected_labels": ["应急指挥", "抢修处置"]
+}

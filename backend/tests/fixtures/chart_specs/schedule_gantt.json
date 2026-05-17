@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "chart_type": "schedule_gantt",
+    "title": "施工进度计划图",
+    "placeholder_key": "schedule_gantt",
+    "tasks": [
+      {"id": "prepare", "label": "施工准备", "start": "2026-06-01", "end": "2026-06-03", "group": "准备阶段"},
+      {"id": "install", "label": "安装调试", "start": "2026-06-04", "end": "2026-06-10", "group": "实施阶段"}
+    ],
+    "dependencies": [{"from": "prepare", "to": "install"}]
+  },
+  "expected_labels": ["施工准备", "安装调试"]
+}

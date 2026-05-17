@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "chart_type": "quality_system",
+    "title": "质量保证体系图",
+    "placeholder_key": "quality_system",
+    "nodes": [
+      {"id": "plan", "label": "质量策划"},
+      {"id": "control", "label": "过程控制"},
+      {"id": "improve", "label": "持续改进"}
+    ],
+    "edges": [
+      {"from": "plan", "to": "control"},
+      {"from": "control", "to": "improve"}
+    ]
+  },
+  "expected_labels": ["质量策划", "持续改进"]
+}

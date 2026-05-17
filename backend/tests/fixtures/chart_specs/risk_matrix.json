@@ -1,0 +1,14 @@
+{
+  "spec": {
+    "chart_type": "risk_matrix",
+    "title": "施工风险分级矩阵",
+    "placeholder_key": "risk_matrix",
+    "rows": ["低影响", "中影响", "高影响"],
+    "columns": ["低概率", "中概率", "高概率"],
+    "cells": [
+      {"row": "高影响", "column": "中概率", "items": ["停电窗口延误"], "level": "high"},
+      {"row": "中影响", "column": "高概率", "items": ["物资到货滞后"], "level": "medium"}
+    ]
+  },
+  "expected_labels": ["停电窗口延误", "物资到货滞后"]
+}

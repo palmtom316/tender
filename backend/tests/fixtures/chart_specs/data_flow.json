@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "chart_type": "data_flow",
+    "title": "资料流转流程图",
+    "placeholder_key": "data_flow",
+    "nodes": [
+      {"id": "collect", "label": "资料收集"},
+      {"id": "review", "label": "资料审核"},
+      {"id": "archive", "label": "归档移交"}
+    ],
+    "edges": [
+      {"from": "collect", "to": "review"},
+      {"from": "review", "to": "archive"}
+    ]
+  },
+  "expected_labels": ["资料收集", "归档移交"]
+}

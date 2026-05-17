@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "chart_type": "indicator_table",
+    "title": "绿色施工指标表",
+    "placeholder_key": "indicator_table",
+    "columns": ["指标事项", "控制要求", "记录方式"],
+    "rows": [
+      {"cells": ["扬尘控制", "围挡喷淋", "每日巡检记录"]},
+      {"cells": ["材料节约", "限额领料", "台账复核"]}
+    ]
+  },
+  "expected_labels": ["扬尘控制", "台账复核"]
+}

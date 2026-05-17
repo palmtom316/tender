@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "chart_type": "responsibility_matrix",
+    "title": "岗位责任矩阵图",
+    "placeholder_key": "responsibility_matrix",
+    "roles": ["项目经理", "技术负责人", "安全负责人"],
+    "activities": ["施工准备", "技术交底", "安全检查"],
+    "assignments": [
+      {"role": "项目经理", "activity": "施工准备", "level": "负责"},
+      {"role": "技术负责人", "activity": "技术交底", "level": "负责"},
+      {"role": "安全负责人", "activity": "安全检查", "level": "负责"}
+    ]
+  },
+  "expected_labels": ["施工准备", "安全检查"]
+}
