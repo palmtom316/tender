@@ -9,14 +9,23 @@
 
 ## 总览结论
 
-**docxtpl 渲染管线已完整接入**（model / renderer / importer / API / 单元测试齐全），且 `docs/samples/sgcc_distribution_business_{1_3,4_24}/README.md + manifest.json` 已沉淀 1-24 章共约 50 个 DOCX 样章模板的占位符设计与资料位规范。但目前：
+**docxtpl 基础能力已接入，但商务标整卷模板闭环尚未打通**。代码层已具备模板包 model/repo、单 DOCX docxtpl 渲染器、单 DOCX importer、API 与单元测试；`docs/samples/sgcc_distribution_business_{1_3,4_24}/README.md + manifest.json` 也沉淀了 1-24 章约 50 个样章文件名、占位符设计与资料位规范。但目前：
 
-1. **1-24 章 docx 模板物理文件未入库**：`.gitignore` 排除 `docs/samples/**/*.docx`，仓库中只有 README/manifest，没有 docx 本体
-2. **未运行过 import**：migration `0043` 仅以 `source_kind='md'`、`render_mode='outline'` 录入了 24 个目录条目，从未调用 `import_template_package_from_directory` 把 docx 写入 `bid_template_item`
-3. **BusinessBidAssembler 不调用 docxtpl 渲染**：`business_bid_assembler.py:19-56` 只产出"目录 + 响应矩阵 + 缺料清单 + run 记录"，不触发 docxtpl 模板渲染
-4. **章节↔数据源↔渲染器绑定层缺失**：`evidence_asset`、`company_profile`、`person_profile`、`financial_statement`、`qualification_certificate` 五张通用表存在，但无章节维度的资料筛选/绑定规则
+1. **1-24 章 docx 模板物理文件未入库**：`docs/samples/sgcc_distribution_business_{1_3,4_24}` 只有 README/manifest，没有 docx 本体；`template_import_ready/sgcc_distribution_business_1_24_package/manifest.json` 声明了统一 `国网配网工程商务标1-24章.docx`，但该 docx 物理文件也未在仓库中出现。
+2. **seed migration 未导入 docx 模板**：migration `0043` 仅以 `source_kind='md'`、`render_mode='outline'` 录入商务目录条目；除非运行时另行导入，否则代码仓库无法证明已有 `source_kind='docx'` 的商务模板项。
+3. **当前 importer 是单 DOCX 模式**：`package_importer.py:202-216` 对同一目录下多个 DOCX 直接报错；如使用统一整卷 DOCX，importer 可按标题拆出 `single_docx_section` 条目，但后续 `docx_renderer.py:339-354` 只对 `single_docx`/`document` 走 docxtpl，尚未实现 `single_docx_section` 的章节抽取/渲染。
+4. **BusinessBidAssembler 不调用 docxtpl 渲染**：`business_bid_assembler.py:19-56` 只产出"目录 + 响应矩阵 + 缺料清单 + run 记录"，不触发 docxtpl 模板渲染、不写 `chapter_draft`。
+5. **章节↔数据源↔渲染器绑定层缺失**：`evidence_asset`、`company_profile`、`person_profile`、`financial_statement`、`qualification_certificate` 等通用表/接口存在，但无章节维度的资料筛选/绑定规则。
 
-商务标本质上是 **少量正文 + 大量附件**（证件扫描件、财务报表、认证证书）。**底层管线已就位**，差的是模板入库 + 章节-数据-资料的编排闭环，而非渲染器/导出器本身。
+商务标本质上是 **少量正文 + 大量附件**（证件扫描件、财务报表、认证证书）。当前差的不是从零建设 docxtpl，而是 **模板文件入库、`single_docx_section` 渲染补齐、章节-数据-资料绑定、整卷导出接入** 四个闭环。
+
+## 代码核实后的审核意见
+
+1. 报告主体判断成立：商务标最大缺口确实不是 longform，而是模板填充与附件编排闭环。
+2. 原“docxtpl 渲染管线已完整接入”表述偏强，应限定为“单 DOCX docxtpl 渲染基础已具备”；`single_docx_section` 目前只是 importer 产物，尚未被 renderer 按原样章章节渲染。
+3. 原“把 1-24 章 docx 文件放到 source_root 并跑一次 import”路径不匹配现有 importer；当前 importer 要么导入一个整卷 DOCX，要么需要先改造为多 DOCX 包导入。
+4. 不能从代码仓库证明“未运行过 import”的数据库事实；能确定的是 seed migration 只录入 md/outline 条目，仓库中未包含可导入的商务样章 docx 本体。
+5. companybase 导入能力仍是 MVP：`MVP_SHEETS = {"公司主体", "公司资料", "人员资料", "附件索引"}`，财务、资质、业绩、资产等 sheet 会被标记 unsupported，不会作为商务标资料自动导入。
 
 ---
 
@@ -53,14 +62,15 @@
 | 24.1-24.8 | 其他商务内容 | ✅ | ✅ 4_24 (各 0-23 资料位) | ❌ | ❌ | 24.4/24.5 缺研发/综合实力台账 |
 
 **核心结论:**
-- **24 章 100% 在 README/manifest 中沉淀了占位符与资料位设计**，但**0 章** docx 模板入库到 `bid_template_item`（`source_kind='md'` 而非 `'docx'`）
-- **附件型章节**（约 11 章）有 `evidence_asset` 表与 `package_renderer.py:179-300` PDF/图片嵌入能力，但**章节↔asset_category 绑定层缺失**
+- **24 章 100% 在 README/manifest 中沉淀了占位符与资料位设计**，但代码仓库内**0 章** docx 模板物理文件可供导入；seed migration 录入的是 `source_kind='md'` / `render_mode='outline'` 目录项，而非 docx 模板项。
+- **统一整卷 DOCX 路径已有 importer 雏形**：可从单 DOCX 标题拆出 `single_docx_section` 条目，但 renderer 端尚未实现按 `relative_path#chapter_code` 抽取章节并套用 docxtpl。
+- **附件型章节**（约 11 章）有 `evidence_asset` 表与 `package_renderer.py:179-300` PDF/图片嵌入能力，但**章节↔asset_category 绑定层缺失**，且整卷商务导出未接入 package renderer。
 - **台账型章节**：5.2/8.x/10/14/15/17/23.1 等共 6 项专项台账无对应数据模型
 - **承诺/说明文 4 类**（章 2/7/20/21）：样章已设计变量占位符，缺 importer 录入与签章/日期变量填充闭环
 
 ---
 
-## 二、docxtpl 管线接入度（已具备的底层能力）
+## 二、docxtpl 管线接入度（已具备与未闭合）
 
 | 组件 | 文件 | 状态 |
 |---|---|---|
@@ -68,11 +78,15 @@
 | Repo | `db/repositories/bid_template_package_repo.py:34-104` | ✅ |
 | DocxTpl 渲染器 | `services/template_service/docx_renderer.py:8` (`from docxtpl import DocxTemplate`)、`_render_single_docx_template:283-314` | ✅ |
 | 包渲染器 | `services/template_service/package_renderer.py:580` 调 `render_template_item_docx`；`:179-300` 已实现 PDF/图片附件嵌入 | ✅ |
-| Importer | `services/template_service/package_importer.py:172-176,229-233` 写入 `source_kind="docx"`、`render_mode="single_docx_section"` | ✅ |
+| Importer | `services/template_service/package_importer.py:168-176,219-234` 写入 `source_kind="docx"`、`render_mode="single_docx_section"` 或 `single_docx` | ⚠️ 仅支持单 DOCX；多 DOCX 目录会拒绝 |
 | API | `api/template_packages.py:367-419` `import_template_package_from_directory` | ✅ |
 | 单元测试 | `tests/unit/test_template_docx_renderer.py:174-216` 覆盖 `{{ company.company_name }}` 渲染 | ✅ |
+| `single_docx_section` 渲染 | `docx_renderer.py:339-354` | ❌ importer 可生成该模式，但 renderer 未按 `#章节号` 抽取原 DOCX 章节 |
 
-**底层管线完整可用**，差的只是把 1-24 章 docx 文件放到 source_root 并跑一次 import。
+**结论:** 单 DOCX 模板渲染和导入基础可用，但商务标 1-24 章推荐路径应是：
+1. 补齐统一整卷 `国网配网工程商务标1-24章.docx` 物理文件并导入，或改造 importer 支持多 DOCX 包；
+2. 补齐 `single_docx_section` 渲染器，能够按章节范围复制原样式、渲染占位符并输出对应章节；
+3. 再接入 BusinessBidAssembler / package_renderer 形成整卷输出。
 
 ---
 
@@ -87,6 +101,7 @@
 **缺口:**
 - 4 类承诺/说明 docx 模板本体未入库
 - `business_bid_assembler` 不构造 `context = {"company": ..., "tender": ..., "asset": ..., "deviation_table": ...}` 上下文调 `render_template_item_docx`
+- 如果采用统一整卷 DOCX，还需先补齐 `single_docx_section` 渲染，否则导入后的章节条目不会走原样章 docxtpl 渲染路径
 
 ---
 
@@ -99,7 +114,7 @@
 | `company_profile` | `0017:23-40` | 公司工商基础信息 | 缺法定代表人/成立日/注册地全要素 |
 | `person_profile` | `0017:43-60` | 人员简历 | 6.1 章无渲染入口 |
 | `qualification_certificate` | `0017:85-100` | 资质证书 | 缺章节↔category 映射 |
-| `financial_statement` | `0017:104-114` | 财务报表 | companybase 导入未覆盖（`MVP_SHEETS` 4 sheet 不含财务）；4 表科目结构未约束 |
+| `financial_statement` | `0017:104-114` + `api/master_data_financials.py` | 财务报表 | master-data API 存在，但 companybase 导入未覆盖（`MVP_SHEETS` 4 sheet 不含财务）；4 表科目结构未约束 |
 | `evidence_asset` | `0019:23-39` + `0021:91-103` | 通用附件 | 缺章节绑定层 |
 
 ### 缺失专项台账（6 项）
@@ -122,10 +137,10 @@
 | 整卷渲染 | ✅ `render_volume_docx(..., volume_type='business')` (`docx_exporter.py:460-469` → `_render_plain_docx`) | `_render_plain_docx` 只读 `chapter_draft.content_md`；**未调 `package_renderer` 走 docxtpl 路径** |
 | 章节分隔页 | ✅ `_add_chapter_divider_page` (`docx_exporter.py:211-247`) | — |
 | 偏差表 | ✅ `_add_deviation_table` | 商务/技术偏差未区分 |
-| PDF/图片附件嵌入 | ✅ `package_renderer.py:179-300` | **未接入商务卷整卷渲染流程** |
+| PDF/图片附件嵌入 | ✅ `package_renderer.py:179-300` | **未接入商务卷整卷渲染流程**；只在模板包渲染路径可用 |
 | 三栏页眉 | ❌ 仅固定字符串"投标文件"（`docx_exporter.py:183`）| 招标常见三栏（投标人/项目名/卷别）缺失 |
 | 骑缝章占位 | ❌ 仅 `project_template_instance_service.py:28,260` 作关键字识别 | **未实际渲染骑缝占位** |
-| 人员表注入 | ❌ 商务卷被 `_should_include_personnel_table` 排除（`docx_exporter.py:254`）| 6.1 章无法注入 |
+| 人员表注入 | ❌ 商务卷被 `_should_include_personnel_table` 排除（`docx_exporter.py:254`）| 普通商务卷导出无法自动注入 `{{personnel_table}}`；6.1 若走模板包渲染，还需章节绑定与简历卡片模板 |
 
 ---
 
@@ -150,7 +165,8 @@
 
 | 优先级 | 项 | 影响 |
 |---|---|---|
-| **P0** | 把 1-24 章 docx 模板从交付物（用户桌面/SharePoint）入库到 `source_root`，调 `import_template_package_from_directory`，把 `bid_template_item.source_kind` 从 `md` 改为 `docx`、`render_mode` 改为 `single_docx` | 让 24 章具备"模板渲染入口"——**当前最快路径** |
+| **P0** | 补齐统一整卷 DOCX 模板物理文件（或改造为多 DOCX 包导入），调 `import_template_package_from_directory`，把商务模板项从 seed 的 `md/outline` 目录项升级为 `docx` 模板项 | 让 24 章具备"模板导入入口" |
+| **P0** | 补齐 `single_docx_section` 渲染，或改造 importer 支持多 DOCX 章节包；当前 importer 拆章节后 renderer 不会按原 DOCX 章节范围渲染 | 让样章导入后的章节真正可用 |
 | **P0** | "章节↔数据源↔渲染器"绑定层：定义 `chapter_code → (template_item, context_builder, asset_categories)` 映射；BusinessBidAssembler 调 `render_template_item_docx` | 接通 docxtpl 渲染与公司库 |
 | **P0** | 承诺函/说明文 4 类（章 2/7/20/21）context_builder：投标人/项目名/日期/法人签章变量填充 | 4 类必填章节 |
 | **P0** | 5.1 基本情况表渲染器 + company_profile 字段补齐；6.1 人员汇总+简历渲染（解除 `_should_include_personnel_table` 商务卷排除）| 5.1 必填章 + 6.1 评分章 |
@@ -170,13 +186,13 @@
 | 短策略章数 | 3（6、12、13）| 0 |
 | 大纲注册 | 16/16 | 24/24 |
 | docxtpl 样章设计（README + manifest）| ⚠️ 部分 | ✅ 24/24 全覆盖 |
-| docxtpl 模板入库 | — | **0/24（最大缺口）** |
+| docxtpl 模板入库 | — | **仓库内 0/24 可证明**；需补齐统一整卷 DOCX 或多 DOCX 导入 |
 | 章节↔数据源绑定 | longform 章节有 required_facts | **0 章有绑定** |
 | 偏差表 | ✅ | ✅（通用） |
 | 行业 prompt | 5 套配网专用 | 0 套（商务标无需行业 prompt）|
-| 主要缺口 | 行业纵深 + 部分章节模板化 | **样章入库 + 编排闭环**（底层管线已具备） |
+| 主要缺口 | 行业纵深 + 部分章节模板化 | **样章入库 + `single_docx_section`/多 DOCX 渲染 + 编排闭环** |
 
-商务标与技术标形态不同：技术标核心是"长文生成"，商务标核心是"模板填充 + 附件编排"。底层 docxtpl 管线已就位，**最大缺口是 1-24 章 docx 模板入库 + 章节维度的资料编排闭环**。
+商务标与技术标形态不同：技术标核心是"长文生成"，商务标核心是"模板填充 + 附件编排"。商务标底层模板能力已有基础，但 **最大缺口是样章 DOCX 物理文件入库、`single_docx_section`/多 DOCX 渲染闭环、章节维度资料编排、整卷导出接入**。
 
 ---
 
@@ -184,14 +200,15 @@
 
 - 大纲注册：`backend/tender_backend/services/bid_outline_templates.py:30-91`（SGCC_DISTRIBUTION_BUSINESS_CHAPTERS）
 - 样章模板设计：`docs/samples/sgcc_distribution_business_1_3/README.md`、`docs/samples/sgcc_distribution_business_4_24/README.md` + `manifest.json`
-- docxtpl 渲染器：`backend/tender_backend/services/template_service/docx_renderer.py:283-314`（`_render_single_docx_template`）、`:339-372`（`render_template_item_docx` 分发）
+- 统一导入包清单：`docs/samples/template_import_ready/sgcc_distribution_business_1_24_package/manifest.json`（声明统一整卷 DOCX，但仓库缺物理文件）
+- docxtpl 渲染器：`backend/tender_backend/services/template_service/docx_renderer.py:283-314`（`_render_single_docx_template`）、`:339-372`（`render_template_item_docx` 分发；尚未处理 `single_docx_section`）
 - 包渲染器：`backend/tender_backend/services/template_service/package_renderer.py:179-300, 400-435, 580`
-- Importer：`backend/tender_backend/services/template_service/package_importer.py:172-176, 229-233`
+- Importer：`backend/tender_backend/services/template_service/package_importer.py:168-176, 202-216, 229-233`（单 DOCX；多 DOCX 目录拒绝）
 - API：`backend/tender_backend/api/template_packages.py:367-419`
 - BusinessBidAssembler：`backend/tender_backend/services/business_bid_assembler.py:19-56`
 - DOCX 导出：`backend/tender_backend/services/export_service/docx_exporter.py:82-469`
-- 数据底座：`backend/tender_backend/db/alembic/versions/0017_company_master_data.py`、`0019_evidence_assets.py`、`0021_template_taxonomy_and_company_libraries.py`、`0040_company_asset_models.py`
-- companybase 导入：`backend/tender_backend/services/companybase/companybase_import_service.py:26,185-252`
+- 数据底座：`backend/tender_backend/db/alembic/versions/0017_company_master_data.py`、`0019_evidence_assets.py`、`0021_template_taxonomy_and_company_libraries.py`、`0040_company_assets_mvp.py`
+- companybase 导入：`backend/tender_backend/services/companybase_import_service.py:1-36,185-252`（MVP 仅公司主体/公司资料/人员资料/附件索引）
 - 数据库模板：`backend/tender_backend/db/alembic/versions/0043_sgcc_distribution_business_template.py`（仅录目录条目，`source_kind='md'`）
 - 单元测试：`backend/tests/unit/test_template_docx_renderer.py:174-216`
 
@@ -203,3 +220,4 @@
 | --- | --- | --- |
 | v1.0 | 2026-05-18 | 初版。基于 2026-05-18 仓库代码盘点，对照国网配网商务标 24 章目录输出 gap。|
 | v1.1 | 2026-05-18 | 经"docxtpl 管线已接入"核实后修订：(1) 收紧"0 章有内容生成策略"等绝对化表述，明确底层管线（model/renderer/importer/API/单元测试）完整可用；(2) 区分"样章设计已沉淀（README+manifest 24/24）"与"模板入库（0/24）"两层；(3) P0 重排为模板入库 + 章节↔数据源绑定层 + 4 类承诺/说明文 context_builder；(4) 校正与技术标对比口径——商务标形态是"模板填充"，与技术标"长文生成"不同源。|
+| v1.2 | 2026-05-18 | 结合现有代码再次核实后修订：明确 importer 仅支持单 DOCX、多 DOCX 目录会拒绝；补充 `single_docx_section` 仅有导入拆分、缺 renderer 章节抽取/渲染的关键缺口；校正 companybase 导入路径与 MVP sheet 范围；将“底层管线完整可用”收紧为“单 DOCX 基础能力已具备，商务整卷闭环未打通”。 |
