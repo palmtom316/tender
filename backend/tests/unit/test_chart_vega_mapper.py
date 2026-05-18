@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tender_backend.services.chart_service.specs import parse_chart_spec
 from tender_backend.services.chart_service.vega_mapper import (
+    indicator_table_to_vega,
     responsibility_matrix_to_vega,
     risk_matrix_to_vega,
 )
@@ -100,3 +101,52 @@ def test_responsibility_matrix_to_vega_bounds_tall_matrix_dimensions() -> None:
 
     assert chart["width"] <= 900
     assert chart["height"] <= 2400
+
+
+def test_indicator_table_to_vega_emits_header_and_body_cells() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "indicator_table",
+            "title": "关键指标表",
+            "columns": ["指标", "目标", "单位"],
+            "rows": [
+                {"cells": ["合格率", "≥98", "%"]},
+                {"cells": ["返工率", "≤2", "%"]},
+            ],
+        }
+    )
+
+    chart = indicator_table_to_vega(spec)
+
+    assert chart["$schema"].startswith("https://vega.github.io/schema/vega-lite/")
+    assert chart["title"]["text"] == "关键指标表"
+
+    values = chart["data"]["values"]
+    assert len(values) == 3 * 3  # 1 header row + 2 body rows × 3 columns
+    header_cells = [item for item in values if item["is_header"]]
+    body_cells = [item for item in values if not item["is_header"]]
+    assert len(header_cells) == 3
+    assert len(body_cells) == 6
+    assert any(item["text"] == "指标" and item["is_header"] for item in values)
+    assert any(item["text"] == "合格率" and not item["is_header"] for item in values)
+
+    layer_marks = [layer["mark"]["type"] for layer in chart["layer"]]
+    assert "rect" in layer_marks
+    assert "text" in layer_marks
+
+
+def test_indicator_table_to_vega_grows_height_with_row_count() -> None:
+    rows = [{"cells": [f"指标{i}", f"≥{i}", "%"]} for i in range(12)]
+    spec = parse_chart_spec(
+        {
+            "chart_type": "indicator_table",
+            "title": "大表",
+            "columns": ["指标", "目标", "单位"],
+            "rows": rows,
+        }
+    )
+
+    chart = indicator_table_to_vega(spec)
+
+    # height must scale with body row count to keep cells readable; 12 rows + header
+    assert chart["height"] >= 13 * 24

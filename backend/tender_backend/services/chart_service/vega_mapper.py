@@ -11,6 +11,7 @@ from typing import Any
 from tender_backend.services.chart_service.specs import (
     ResponsibilityMatrixSpec,
     RiskMatrixSpec,
+    TableChartSpec,
 )
 from tender_backend.services.chart_service.visual_template import (
     FONT,
@@ -23,6 +24,8 @@ _RISK_LEVEL_ORDER = ["low", "medium", "high", "critical"]
 _RISK_LEVEL_CN = {"low": "低", "medium": "中", "high": "高", "critical": "极高"}
 _CELL_SUMMARY_THRESHOLD = 3
 _CELL_WRAP_CHARS = 10
+_INDICATOR_TABLE_ROW_HEIGHT = 28
+_INDICATOR_TABLE_TARGET_WIDTH = 720
 
 
 def risk_matrix_to_vega(spec: RiskMatrixSpec) -> dict[str, Any]:
@@ -178,6 +181,86 @@ def responsibility_matrix_to_vega(spec: ResponsibilityMatrixSpec) -> dict[str, A
                 },
                 "encoding": {
                     "text": {"field": "level", "type": "nominal"},
+                },
+            },
+        ],
+    }
+
+
+def indicator_table_to_vega(spec: TableChartSpec) -> dict[str, Any]:
+    """Map TableChartSpec(indicator_table) to a Vega-Lite table layout.
+
+    Documentary table: 1 header row + N body rows, each cell = rect + text.
+    Width is fixed to A4-friendly target; height grows with row count.
+    """
+    column_count = max(len(spec.columns), 1)
+    values: list[dict[str, Any]] = []
+    for col_index, column in enumerate(spec.columns):
+        values.append({"row": 0, "col": col_index, "text": column, "is_header": True})
+    for row_index, row in enumerate(spec.rows, start=1):
+        for col_index, cell in enumerate(row.cells):
+            values.append({"row": row_index, "col": col_index, "text": str(cell), "is_header": False})
+
+    total_rows = len(spec.rows) + 1
+    width = _INDICATOR_TABLE_TARGET_WIDTH
+    height = _INDICATOR_TABLE_ROW_HEIGHT * total_rows
+
+    return {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "config": _config(),
+        "title": _title(spec.title),
+        "width": width,
+        "height": height,
+        "data": {"values": values},
+        "encoding": {
+            "x": {
+                "field": "col",
+                "type": "ordinal",
+                "sort": list(range(column_count)),
+                "axis": None,
+            },
+            "y": {
+                "field": "row",
+                "type": "ordinal",
+                "sort": list(range(total_rows)),
+                "axis": None,
+            },
+        },
+        "layer": [
+            {
+                "mark": {
+                    "type": "rect",
+                    "stroke": PALETTE.border,
+                    "strokeWidth": 1,
+                },
+                "encoding": {
+                    "color": {
+                        "field": "is_header",
+                        "type": "nominal",
+                        "scale": {
+                            "domain": [True, False],
+                            "range": [PALETTE.surface_alt, PALETTE.surface],
+                        },
+                        "legend": None,
+                    }
+                },
+            },
+            {
+                "mark": {
+                    "type": "text",
+                    "fontSize": FONT.cell_text_px,
+                    "color": PALETTE.text,
+                    "limit": width // column_count - 12,
+                    "align": "center",
+                    "baseline": "middle",
+                    "lineBreak": "\n",
+                },
+                "encoding": {
+                    "text": {"field": "text", "type": "nominal"},
+                    "fontWeight": {
+                        "condition": {"test": "datum.is_header", "value": "bold"},
+                        "value": "normal",
+                    },
                 },
             },
         ],
