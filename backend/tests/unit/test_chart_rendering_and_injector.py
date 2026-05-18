@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from docx import Document
 
 from tender_backend.db.repositories.chart_asset_repo import ChartAssetRow
+from tender_backend.services.chart_service import renderers
 from tender_backend.services.chart_service.captions import FigureNumbering
 from tender_backend.services.chart_service.png_converter import svg_to_png
 from tender_backend.services.chart_service.renderers import render_chart_spec
@@ -42,7 +44,7 @@ def test_native_risk_matrix_renders_svg_and_png(tmp_path: Path, monkeypatch) -> 
 
 
 def test_risk_matrix_uses_vl_convert_when_flag_enabled(tmp_path: Path, monkeypatch) -> None:
-    import vl_convert  # noqa: F401
+    pytest.importorskip("vl_convert")
 
     monkeypatch.setenv("CHART_VEGA_ENGINE_ENABLED", "true")
     from tender_backend.core import config as _config
@@ -66,7 +68,8 @@ def test_risk_matrix_uses_vl_convert_when_flag_enabled(tmp_path: Path, monkeypat
     _config.get_settings.cache_clear()
 
 
-def test_flow_fallback_renders_declared_edges_and_labels() -> None:
+def test_flow_fallback_renders_declared_edges_and_labels(monkeypatch) -> None:
+    monkeypatch.setattr(renderers, "_render_mermaid_sidecar", lambda *_args, **_kw: None)
     spec = parse_chart_spec(
         {
             "chart_type": "quality_system",
@@ -123,7 +126,8 @@ def test_flow_fallback_handles_cycles_without_hanging() -> None:
     assert "data-edge='rectify-check'" in rendered.svg
 
 
-def test_gantt_fallback_renders_ticks_dependencies_sections_and_critical_path() -> None:
+def test_gantt_fallback_renders_ticks_dependencies_sections_and_critical_path(monkeypatch) -> None:
+    monkeypatch.setattr(renderers, "_render_mermaid_sidecar", lambda *_args, **_kw: None)
     spec = parse_chart_spec(
         {
             "chart_type": "schedule_gantt",
