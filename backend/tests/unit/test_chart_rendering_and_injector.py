@@ -18,31 +18,6 @@ from tender_backend.services.export_service import chart_asset_injector
 from tender_backend.services.export_service.chart_asset_injector import ChartAssetInjector
 
 
-def test_native_risk_matrix_renders_svg_and_png(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("CHART_VEGA_ENGINE_ENABLED", "false")
-    from tender_backend.core import config as _config
-
-    _config.get_settings.cache_clear()
-    spec = parse_chart_spec(
-        {
-            "chart_type": "risk_matrix",
-            "title": "项目风险矩阵",
-            "rows": ["低影响", "高影响"],
-            "columns": ["低概率", "高概率"],
-            "cells": [{"row": "高影响", "column": "高概率", "items": ["工期延误"], "level": "high"}],
-        }
-    )
-
-    rendered = render_chart_spec(spec)
-    png = svg_to_png(rendered.svg, tmp_path / "risk.png")
-
-    assert "项目风险矩阵" in rendered.svg
-    assert rendered.engine == "native_svg"
-    assert png.is_file()
-    assert png.stat().st_size > 0
-    _config.get_settings.cache_clear()
-
-
 def test_risk_matrix_uses_vl_convert_when_flag_enabled(tmp_path: Path, monkeypatch) -> None:
     pytest.importorskip("vl_convert")
 

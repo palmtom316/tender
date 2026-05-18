@@ -65,14 +65,22 @@ def render_chart_spec(spec: ChartSpec) -> ChartRenderResult:
         vega_svg = _render_vega_svg(risk_matrix_to_vega(spec)) if _vega_engine_enabled() else None
         if vega_svg:
             return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
-        return ChartRenderResult(svg=_render_risk_matrix_svg(spec), mermaid_source=None, engine="native_svg")
+        return ChartRenderResult(
+            svg=_render_placeholder_svg(spec.title, "Vega-Lite 引擎不可用"),
+            mermaid_source=None,
+            engine="placeholder",
+        )
     if spec.chart_type == "responsibility_matrix":
         vega_svg = (
             _render_vega_svg(responsibility_matrix_to_vega(spec)) if _vega_engine_enabled() else None
         )
         if vega_svg:
             return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
-        return ChartRenderResult(svg=_render_responsibility_matrix_svg(spec), mermaid_source=None, engine="native_svg")
+        return ChartRenderResult(
+            svg=_render_placeholder_svg(spec.title, "Vega-Lite 引擎不可用"),
+            mermaid_source=None,
+            engine="placeholder",
+        )
     if spec.chart_type == "indicator_table" and isinstance(spec, TableChartSpec):
         vega_svg = (
             _render_vega_svg(indicator_table_to_vega(spec)) if _vega_engine_enabled() else None
@@ -112,6 +120,19 @@ def build_mermaid_source(spec: ChartSpec) -> str | None:
 
 def _vega_engine_enabled() -> bool:
     return bool(get_settings().chart_vega_engine_enabled)
+
+
+def _render_placeholder_svg(title: str, message: str) -> str:
+    """Minimal placeholder SVG when primary engine unavailable and no fallback."""
+    width, height = 600, 200
+    return (
+        f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' "
+        f"viewBox='0 0 {width} {height}'>"
+        "<rect width='100%' height='100%' fill='#f8f9fa'/>"
+        f"<text x='{width/2}' y='80' text-anchor='middle' font-size='16' font-weight='700' fill='#1f2937'>{title}</text>"
+        f"<text x='{width/2}' y='120' text-anchor='middle' font-size='14' fill='#6b7280'>{message}</text>"
+        "</svg>"
+    )
 
 
 def _flow_to_gpt_vis_payload(spec: FlowChartSpec) -> dict[str, Any]:
@@ -319,68 +340,6 @@ def _render_gantt_summary_svg(spec: GanttChartSpec) -> str:
     return _render_table_svg(table_spec)
 
 
-def _render_risk_matrix_svg(spec: RiskMatrixSpec) -> str:
-    cell_w = 170
-    cell_h = 92
-    left = 150
-    top = 88
-    width = left + len(spec.columns) * cell_w + 36
-    height = top + len(spec.rows) * cell_h + 44
-    cell_map = {(cell.row, cell.column): cell for cell in spec.cells}
-    parts = [_svg_start(width, height), _title(spec.title, width)]
-    for col_index, column in enumerate(spec.columns):
-        x = left + col_index * cell_w
-        parts.append(_rect(x, top - 36, cell_w, 36, "#f1f5f9", "#9aa4af", 0))
-        parts.append(_text(column, x + cell_w / 2, top - 13, 13, anchor="middle", weight="600"))
-    for row_index, row in enumerate(spec.rows):
-        y = top + row_index * cell_h
-        parts.append(_rect(24, y, left - 24, cell_h, "#f1f5f9", "#9aa4af", 0))
-        parts.append(_text(row, 36, y + cell_h / 2 + 5, 13, anchor="start", weight="600"))
-        for col_index, column in enumerate(spec.columns):
-            x = left + col_index * cell_w
-            cell = cell_map.get((row, column))
-            fill = _risk_fill(cell.level if cell else None)
-            parts.append(_rect(x, y, cell_w, cell_h, fill, "#9aa4af", 0))
-            if cell and cell.items:
-                display = _risk_cell_summary(cell.items, cell.level) if len(cell.items) > 3 else "；".join(cell.items)
-                lines = _wrap(display, 12, 4)
-                for line_index, line in enumerate(lines):
-                    parts.append(_text(line, x + 10, y + 24 + line_index * 18, 12, anchor="start"))
-    parts.append("</svg>")
-    return "".join(parts)
-
-
-def _render_responsibility_matrix_svg(spec: ResponsibilityMatrixSpec) -> str:
-    first_w = 190
-    cell_w = 108
-    cell_h = 46
-    top = 88
-    left = 24
-    width = left + first_w + len(spec.roles) * cell_w + 30
-    height = top + (len(spec.activities) + 1) * cell_h + 36
-    assignments = {(item.activity, item.role): item.level for item in spec.assignments}
-    parts = [_svg_start(width, height), _title(spec.title, width)]
-    parts.append(_rect(left, top, first_w, cell_h, "#e8eef7", "#8b98a8", 0))
-    parts.append(_text("工作事项", left + 14, top + 29, 13, anchor="start", weight="600"))
-    for role_index, role in enumerate(spec.roles):
-        x = left + first_w + role_index * cell_w
-        parts.append(_rect(x, top, cell_w, cell_h, "#e8eef7", "#8b98a8", 0))
-        parts.append(_text(role, x + cell_w / 2, top + 29, 12, anchor="middle", weight="600"))
-    for activity_index, activity in enumerate(spec.activities):
-        y = top + (activity_index + 1) * cell_h
-        parts.append(_rect(left, y, first_w, cell_h, "#f8fafc", "#8b98a8", 0))
-        for line_index, line in enumerate(_wrap(activity, 12, 2)):
-            parts.append(_text(line, left + 12, y + 19 + line_index * 16, 12, anchor="start"))
-        for role_index, role in enumerate(spec.roles):
-            x = left + first_w + role_index * cell_w
-            parts.append(_rect(x, y, cell_w, cell_h, "#ffffff", "#8b98a8", 0))
-            value = assignments.get((activity, role), "")
-            if value:
-                parts.append(_text(value, x + cell_w / 2, y + 28, 12, anchor="middle", weight="600"))
-    parts.append("</svg>")
-    return "".join(parts)
-
-
 def _render_table_svg(spec: TableChartSpec) -> str:
     first_left = 24
     top = 88
@@ -463,25 +422,6 @@ def _wrap(value: str, chars: int, max_lines: int) -> list[str]:
         lines = lines[:max_lines]
         lines[-1] = lines[-1][: max(chars - 1, 1)] + "…"
     return lines
-
-
-def _risk_fill(level: str | None) -> str:
-    return {
-        "low": "#e7f5e8",
-        "medium": "#fff4ce",
-        "high": "#ffe0cc",
-        "critical": "#ffd6d6",
-    }.get(level or "", "#ffffff")
-
-
-def _risk_cell_summary(items: list[str], level: str | None) -> str:
-    level_name = {
-        "low": "低",
-        "medium": "中",
-        "high": "高",
-        "critical": "极高",
-    }.get(level or "", "风险")
-    return f"{len(items)}项·{level_name}"
 
 
 def _mermaid_text(value: str) -> str:
