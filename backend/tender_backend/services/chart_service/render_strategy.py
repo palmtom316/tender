@@ -12,13 +12,16 @@ class RenderStrategy:
     fallback: str | None = None
 
 
+_TABLE_TYPES_NATIVE_ONLY = TABLE_CHART_TYPES - {"indicator_table"}
+
 _STRATEGIES: dict[str, RenderStrategy] = {
     **{chart_type: RenderStrategy(chart_type, "mermaid_sidecar", "native_flow") for chart_type in FLOW_CHART_TYPES},
     "schedule_gantt": RenderStrategy("schedule_gantt", "mermaid_sidecar", "native_gantt"),
     "critical_path": RenderStrategy("critical_path", "mermaid_sidecar", "native_gantt"),
     "risk_matrix": RenderStrategy("risk_matrix", "vl_convert", "native_svg"),
     "responsibility_matrix": RenderStrategy("responsibility_matrix", "vl_convert", "native_svg"),
-    **{chart_type: RenderStrategy(chart_type, "native_svg", None) for chart_type in TABLE_CHART_TYPES},
+    "indicator_table": RenderStrategy("indicator_table", "vl_convert", "native_svg"),
+    **{chart_type: RenderStrategy(chart_type, "native_svg", None) for chart_type in _TABLE_TYPES_NATIVE_ONLY},
 }
 
 if set(_STRATEGIES) != SUPPORTED_CHART_TYPES:

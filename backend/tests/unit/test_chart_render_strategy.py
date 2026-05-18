@@ -29,6 +29,21 @@ def test_risk_matrix_uses_vl_convert_with_native_fallback() -> None:
     assert strategy.fallback == "native_svg"
 
 
+def test_indicator_table_uses_vl_convert_with_native_fallback() -> None:
+    strategy = resolve_render_strategy("indicator_table")
+
+    assert strategy.primary == "vl_convert"
+    assert strategy.fallback == "native_svg"
+
+
+def test_other_table_types_stay_native_svg_only() -> None:
+    for chart_type in ("response_matrix", "interface_table", "equipment_table"):
+        strategy = resolve_render_strategy(chart_type)
+
+        assert strategy.primary == "native_svg"
+        assert strategy.fallback is None
+
+
 def test_unknown_render_strategy_raises_key_error() -> None:
     with pytest.raises(KeyError):
         resolve_render_strategy("unknown_chart")

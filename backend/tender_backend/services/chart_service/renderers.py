@@ -24,6 +24,7 @@ from tender_backend.services.chart_service.specs import (
     TableRow,
 )
 from tender_backend.services.chart_service.vega_mapper import (
+    indicator_table_to_vega,
     responsibility_matrix_to_vega,
     risk_matrix_to_vega,
 )
@@ -61,6 +62,13 @@ def render_chart_spec(spec: ChartSpec) -> ChartRenderResult:
         if vega_svg:
             return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
         return ChartRenderResult(svg=_render_responsibility_matrix_svg(spec), mermaid_source=None, engine="native_svg")
+    if spec.chart_type == "indicator_table" and isinstance(spec, TableChartSpec):
+        vega_svg = (
+            _render_vega_svg(indicator_table_to_vega(spec)) if _vega_engine_enabled() else None
+        )
+        if vega_svg:
+            return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
+        return ChartRenderResult(svg=_render_table_svg(spec), mermaid_source=None, engine="native_svg")
     if strategy.primary == "native_svg" and isinstance(spec, TableChartSpec):
         return ChartRenderResult(svg=_render_table_svg(spec), mermaid_source=None, engine="native_svg")
     raise ValueError(f"unsupported chart type: {spec.chart_type}")
