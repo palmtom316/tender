@@ -28,6 +28,7 @@ from tender_backend.services.chart_service.vega_mapper import (
     responsibility_matrix_to_vega,
     risk_matrix_to_vega,
 )
+from tender_backend.services.chart_service.gpt_vis_client import render_via_gpt_vis
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,16 @@ class ChartRenderResult:
 
 def render_chart_spec(spec: ChartSpec) -> ChartRenderResult:
     strategy = resolve_render_strategy(spec.chart_type)
+    if strategy.primary == "gpt_vis" and isinstance(spec, FlowChartSpec):
+        gpt_vis_svg = render_via_gpt_vis(_flow_to_gpt_vis_payload(spec))
+        if gpt_vis_svg:
+            return ChartRenderResult(svg=gpt_vis_svg, mermaid_source=None, engine="gpt_vis")
+        # fall through to mermaid_sidecar fallback path
+        mermaid = build_mermaid_source(spec)
+        sidecar_svg = _render_mermaid_sidecar(mermaid)
+        if sidecar_svg:
+            return ChartRenderResult(svg=sidecar_svg, mermaid_source=mermaid, engine="mermaid_sidecar")
+        return ChartRenderResult(svg=_render_flow_svg(spec), mermaid_source=mermaid, engine="system_mermaid_fallback")
     if strategy.primary == "mermaid_sidecar":
         mermaid = build_mermaid_source(spec)
         sidecar_svg = _render_mermaid_sidecar(mermaid)
@@ -101,6 +112,27 @@ def build_mermaid_source(spec: ChartSpec) -> str | None:
 
 def _vega_engine_enabled() -> bool:
     return bool(get_settings().chart_vega_engine_enabled)
+
+
+def _flow_to_gpt_vis_payload(spec: FlowChartSpec) -> dict[str, Any]:
+    """Translate a FlowChartSpec into the gpt-vis-ssr render payload.
+
+    Maps tender flow chart types to GPT-Vis chart type names per
+    docs/plans/2026-05-18-gpt-vis-ssr-research.md §1.5:
+    - org_chart / emergency_org → organization-chart
+    - quality_system / safety_system → network-graph
+    - construction_flow / closure_flow / data_flow → flow-diagram
+    """
+    chart_type_map = {
+        "org_chart": "organization-chart",
+        "emergency_org": "organization-chart",
+        "quality_system": "network-graph",
+        "safety_system": "network-graph",
+    }
+    gpt_vis_type = chart_type_map.get(spec.chart_type, "flow-diagram")
+    nodes = [{"id": node.id, "label": node.label} for node in spec.nodes]
+    edges = [{"source": edge.from_, "target": edge.to, "label": edge.label or ""} for edge in spec.edges]
+    return {"type": gpt_vis_type, "data": {"title": spec.title, "nodes": nodes, "edges": edges}}
 
 
 def _render_vega_svg(spec: dict[str, Any]) -> str | None:

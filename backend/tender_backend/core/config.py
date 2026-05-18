@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     mermaid_render_url: str | None = None
     mermaid_render_timeout_seconds: float = 20.0
     chart_vega_engine_enabled: bool = True
+    chart_flow_engine: str = "mermaid_sidecar"
+    chart_gpt_vis_url: str | None = None
+    chart_gpt_vis_timeout_seconds: float = 20.0
     template_import_roots: str = ""
     version: str = "1.0.0"
 
