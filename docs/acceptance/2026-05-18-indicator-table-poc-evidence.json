@@ -1,0 +1,223 @@
+{
+  "samples": [
+    {
+      "name": "indicator_table",
+      "chart_type": "indicator_table",
+      "row_count": 2,
+      "col_count": 3,
+      "native_passed": true,
+      "native_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 11.0,
+        "aspect_ratio": 1.6065,
+        "docx_dpi": 166.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "native_issues": [],
+      "vl_convert_passed": false,
+      "vl_convert_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 12.0,
+        "aspect_ratio": 5.6308,
+        "docx_dpi": 244.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "vl_convert_issues": [
+        {
+          "code": "aspect_extreme",
+          "aspect_ratio": 5.631
+        }
+      ]
+    },
+    {
+      "name": "indicator_table_a",
+      "chart_type": "indicator_table",
+      "row_count": 4,
+      "col_count": 3,
+      "native_passed": true,
+      "native_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 11.0,
+        "aspect_ratio": 1.1475,
+        "docx_dpi": 166.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "native_issues": [],
+      "vl_convert_passed": true,
+      "vl_convert_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 12.0,
+        "aspect_ratio": 3.9355,
+        "docx_dpi": 244.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "vl_convert_issues": []
+    },
+    {
+      "name": "indicator_table_b",
+      "chart_type": "indicator_table",
+      "row_count": 8,
+      "col_count": 4,
+      "native_passed": true,
+      "native_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 11.0,
+        "aspect_ratio": 0.9501,
+        "docx_dpi": 216.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "native_issues": [],
+      "vl_convert_passed": true,
+      "vl_convert_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 12.0,
+        "aspect_ratio": 2.4564,
+        "docx_dpi": 244.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "vl_convert_issues": []
+    },
+    {
+      "name": "indicator_table_c",
+      "chart_type": "indicator_table",
+      "row_count": 15,
+      "col_count": 5,
+      "native_passed": true,
+      "native_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 11.0,
+        "aspect_ratio": 0.7151,
+        "docx_dpi": 266.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "native_issues": [],
+      "vl_convert_passed": true,
+      "vl_convert_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 12.0,
+        "aspect_ratio": 1.4818,
+        "docx_dpi": 244.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "vl_convert_issues": []
+    },
+    {
+      "name": "indicator_table_d",
+      "chart_type": "indicator_table",
+      "row_count": 6,
+      "col_count": 3,
+      "native_passed": true,
+      "native_metrics": {
+        "text_overflow_rate": 0.0,
+        "min_font_px": 11.0,
+        "aspect_ratio": 0.8925,
+        "docx_dpi": 166.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "native_issues": [],
+      "vl_convert_passed": false,
+      "vl_convert_metrics": {
+        "text_overflow_rate": 0.0909,
+        "min_font_px": 12.0,
+        "aspect_ratio": 3.0248,
+        "docx_dpi": 244.0,
+        "font_families": [
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "SimSun",
+          "sans-serif"
+        ],
+        "unknown_font_families": []
+      },
+      "vl_convert_issues": [
+        {
+          "code": "text_overflow",
+          "text": "钢材≤2%/砂浆≤3%/混凝土≤1.5%",
+          "limit": 14
+        },
+        {
+          "code": "text_overflow",
+          "text": "总价占比≥75% 通过集采招标",
+          "limit": 14
+        },
+        {
+          "code": "text_overflow_rate",
+          "rate": 0.0909,
+          "limit": 0.02
+        }
+      ]
+    }
+  ],
+  "decision": {
+    "decision": "adopt",
+    "pass_keys": [
+      "text_overflow_rate",
+      "min_font_px"
+    ],
+    "win_counts": {
+      "text_overflow_rate": 4,
+      "min_font_px": 5,
+      "aspect_ratio": 1
+    },
+    "comparable_counts": {
+      "text_overflow_rate": 5,
+      "min_font_px": 5,
+      "aspect_ratio": 5
+    },
+    "rule": "vl_convert 在 ≥2/3 关键指标(文字溢出率/最小字号/A4 比例)不劣于 native_svg 即 adopt"
+  }
+}
