@@ -1,13 +1,34 @@
 # 图表生成与渲染改造计划
 
 > 创建日期：2026-05-17
-> 版本：v2 (评审修订版,2026-05-17)
-> 状态：评审通过,待实施
+> 版本：v3 (Stage 1 收口版,2026-05-18)
+> 状态：改造 1 已收口;改造 2 POC 进行中
 > 范围：`backend/tender_backend/services/chart_service/` 部分 + `infra/` POC + 验收基础设施
 > 目标：在保留"后端 SVG 化、DOCX 可注入"主路径的前提下,**提升图表渲染质量**(而非追求像素级一致),为部分规则图替换手写 SVG 引擎,沉淀视觉规范与量化验收能力。
 > 关联任务：TaskList 共 17 任务
 
 ## 0. 修订记录
+
+### v3 (2026-05-18) — Stage 1 收口版
+
+改造 1 (risk_matrix + responsibility_matrix + indicator_table → vl-convert) 已完成灰度验收并收口:
+
+| 项 | 状态 |
+|---|---|
+| 灰度验收报告 | `docs/acceptance/2026-05-18-chart-refactor-stage1-gray-release.md` |
+| 业务方盲评 | 通过(2026-05-18) |
+| 旧 native SVG 矩阵渲染函数 | 已删除(`c6f4992`) |
+| indicator_table POC | adopt — 5 样本对比,vl_convert 在 min_font_px 5/5、text_overflow_rate 4/5 不劣于 native |
+| risk/responsibility matrix 生产流量 | 自 2026-05-15 渲染数万次无事故 |
+
+改造 2 (GPT-Vis-SSR POC) 进行中:
+
+| 项 | 状态 |
+|---|---|
+| GPT-Vis-SSR 调研备忘 | `docs/plans/2026-05-18-gpt-vis-ssr-research.md` — **核心发现:GPT-Vis 不支持 Gantt** |
+| POC 范围修订 | flow 50(原 flow 50 + gantt 50 收窄) |
+| 多引擎分发代码 | 已落地(`0861204`) — `CHART_FLOW_ENGINE` config + gpt_vis 分支 + mermaid 兜底 |
+| wrapper 镜像 + contract test | 待 Task C.1/C.2 |
 
 ### v2 (2026-05-17) — 评审反馈修订
 
