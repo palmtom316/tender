@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
+from zipfile import ZipFile
 
 from docx import Document
 
@@ -214,3 +216,175 @@ def test_render_template_item_docx_renders_single_docx_template(tmp_path: Path, 
 
     rendered = Document(result["output_path"])
     assert "投标人：REDACTED" in "\n".join(p.text for p in rendered.paragraphs)
+
+
+def test_render_single_docx_section_splits_relative_path_anchor(tmp_path: Path, monkeypatch) -> None:
+    package_id = uuid4()
+    item_id = uuid4()
+    template_path = tmp_path / "国网配网工程商务标1-24章.docx"
+    template = Document()
+    template.add_paragraph("5.1.应答人基本情况表")
+    template.add_paragraph("投标人：{{ company.company_name }}")
+    template.save(template_path)
+
+    item = SimpleNamespace(
+        id=item_id,
+        package_id=package_id,
+        item_code="5.1",
+        item_name="应答人基本情况表",
+        filename=template_path.name,
+        relative_path=f"{template_path.name}#5.1",
+        render_mode="single_docx_section",
+        item_type="chapter",
+    )
+    package = SimpleNamespace(id=package_id, source_root=str(tmp_path))
+
+    class _Repo:
+        def get_item_by_id(self, conn, *, item_id):
+            return item
+
+        def get_by_id(self, conn, *, package_id):
+            return package
+
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.BidTemplatePackageRepository",
+        lambda: _Repo(),
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.build_item_render_context",
+        lambda conn, *, item_id: {
+            "ready": True,
+            "missing_required_bindings": [],
+            "context": {"company": {"company_name": "REDACTED"}},
+        },
+    )
+
+    result = render_template_item_docx(None, item_id=item_id, output_dir=tmp_path / "out")
+
+    rendered = Document(result["output_path"])
+    assert "投标人：REDACTED" in "\n".join(p.text for p in rendered.paragraphs)
+
+
+def test_render_single_docx_section_extracts_target_chapter_only(tmp_path: Path, monkeypatch) -> None:
+    package_id = uuid4()
+    item_id = uuid4()
+    template_path = tmp_path / "国网配网工程商务标1-24章.docx"
+    template = Document()
+    template.add_paragraph("5.1.应答人基本情况表")
+    template.add_paragraph("5.1 正文：{{ company.company_name }}")
+    template.add_paragraph("5.1.1.法定代表人信息")
+    template.add_paragraph("法定代表人：{{ company.legal_representative }}")
+    template.add_paragraph("5.2.企业业绩表")
+    template.add_paragraph("5.2 正文不应进入输出")
+    table = template.add_table(rows=1, cols=1)
+    table.rows[0].cells[0].text = "5.2 表格不应进入输出"
+    template.save(template_path)
+
+    item = SimpleNamespace(
+        id=item_id,
+        package_id=package_id,
+        item_code="5.1",
+        item_name="应答人基本情况表",
+        filename=template_path.name,
+        relative_path=f"{template_path.name}#5.1",
+        render_mode="single_docx_section",
+        item_type="chapter",
+    )
+    package = SimpleNamespace(id=package_id, source_root=str(tmp_path))
+
+    class _Repo:
+        def get_item_by_id(self, conn, *, item_id):
+            return item
+
+        def get_by_id(self, conn, *, package_id):
+            return package
+
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.BidTemplatePackageRepository",
+        lambda: _Repo(),
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.build_item_render_context",
+        lambda conn, *, item_id: {
+            "ready": True,
+            "missing_required_bindings": [],
+            "context": {
+                "company": {
+                    "company_name": "REDACTED",
+                    "legal_representative": "张三",
+                }
+            },
+        },
+    )
+
+    result = render_template_item_docx(None, item_id=item_id, output_dir=tmp_path / "out")
+
+    rendered = Document(result["output_path"])
+    paragraphs = "\n".join(paragraph.text for paragraph in rendered.paragraphs)
+    tables = "\n".join(cell.text for table in rendered.tables for row in table.rows for cell in row.cells)
+    assert "5.1 正文：REDACTED" in paragraphs
+    assert "法定代表人：张三" in paragraphs
+    assert "5.2.企业业绩表" not in paragraphs
+    assert "5.2 正文不应进入输出" not in paragraphs
+    assert "5.2 表格不应进入输出" not in tables
+
+
+def test_render_single_docx_section_preserves_media_relationships(tmp_path: Path, monkeypatch) -> None:
+    package_id = uuid4()
+    item_id = uuid4()
+    image_path = tmp_path / "seal.jpg"
+    image_path.write_bytes(
+        base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
+            "2wBDAf//////////////////////////////////////////////////////////////////////////////////////"
+            "wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Al//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EFBQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EFBQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EFBABAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z"
+        )
+    )
+    template_path = tmp_path / "国网配网工程商务标1-24章.docx"
+    template = Document()
+    template.add_paragraph("5.1.应答人基本情况表")
+    template.add_paragraph("图片章：")
+    template.add_picture(str(image_path))
+    template.add_paragraph("5.2.企业业绩表")
+    template.add_paragraph("5.2 正文不应进入输出")
+    template.save(template_path)
+
+    item = SimpleNamespace(
+        id=item_id,
+        package_id=package_id,
+        item_code="5.1",
+        item_name="应答人基本情况表",
+        filename=template_path.name,
+        relative_path=f"{template_path.name}#5.1",
+        render_mode="single_docx_section",
+        item_type="chapter",
+    )
+    package = SimpleNamespace(id=package_id, source_root=str(tmp_path))
+
+    class _Repo:
+        def get_item_by_id(self, conn, *, item_id):
+            return item
+
+        def get_by_id(self, conn, *, package_id):
+            return package
+
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.BidTemplatePackageRepository",
+        lambda: _Repo(),
+    )
+    monkeypatch.setattr(
+        "tender_backend.services.template_service.docx_renderer.build_item_render_context",
+        lambda conn, *, item_id: {
+            "ready": True,
+            "missing_required_bindings": [],
+            "context": {},
+        },
+    )
+
+    result = render_template_item_docx(None, item_id=item_id, output_dir=tmp_path / "out")
+
+    rendered = Document(result["output_path"])
+    assert len(rendered.inline_shapes) == 1
+    assert "5.2.企业业绩表" not in "\n".join(paragraph.text for paragraph in rendered.paragraphs)
+    with ZipFile(result["output_path"]) as archive:
+        assert any(name.startswith("word/media/") for name in archive.namelist())

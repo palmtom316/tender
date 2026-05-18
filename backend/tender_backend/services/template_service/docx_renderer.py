@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from uuid import UUID
 
 from docx import Document
+from docx.oxml.ns import qn
 from docxtpl import DocxTemplate
 from psycopg import Connection
 
@@ -12,6 +15,7 @@ from tender_backend.core.config import get_settings
 from tender_backend.core.path_safety import ensure_path_within_root
 from tender_backend.db.repositories.bid_template_package_repo import BidTemplatePackageRepository
 from tender_backend.services.template_service.context_preview import build_item_render_context
+from tender_backend.services.template_service.package_importer import _docx_heading_match
 from tender_backend.services.tender_requirement_priority import load_tender_requirement_overrides
 
 
@@ -280,6 +284,92 @@ def _resolve_item_template_path(conn: Connection, item) -> Path:
         raise FileNotFoundError(str(exc)) from exc
 
 
+def _split_docx_section_relative_path(relative_path: str, fallback_code: str | None = None) -> tuple[str, str]:
+    docx_path, separator, anchor = relative_path.rpartition("#")
+    chapter_code = (anchor or fallback_code or "").strip()
+    if not separator or not docx_path.strip() or not chapter_code:
+        raise ValueError("single_docx_section template item requires relative_path formatted as '<docx>#<chapter_code>'")
+    return docx_path.strip(), chapter_code
+
+
+def _code_parts(code: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in code.split("."))
+    except ValueError:
+        return ()
+
+
+def _block_text(element) -> str:
+    return "".join(node.text or "" for node in element.iter(qn("w:t"))).strip()
+
+
+def _extract_single_docx_section(source_path: Path, chapter_code: str, output_path: Path) -> None:
+    shutil.copyfile(source_path, output_path)
+    section_doc = Document(str(output_path))
+    target_parts = _code_parts(chapter_code)
+    if not target_parts:
+        raise ValueError(f"invalid chapter code for single_docx_section: {chapter_code}")
+
+    elements = [element for element in section_doc.element.body.iterchildren() if element.tag != qn("w:sectPr")]
+    start_idx: int | None = None
+    end_idx = len(elements)
+    for idx, element in enumerate(elements):
+        if element.tag == qn("w:sectPr"):
+            continue
+        heading = _docx_heading_match(_block_text(element)) if element.tag == qn("w:p") else None
+        if heading is not None:
+            current_code, _ = heading
+            current_parts = _code_parts(current_code)
+            if start_idx is not None and current_code != chapter_code and current_parts and len(current_parts) <= len(target_parts):
+                end_idx = idx
+                break
+            if start_idx is None and current_code == chapter_code:
+                start_idx = idx
+
+    if start_idx is None:
+        raise ValueError(f"chapter code not found in single DOCX template: {chapter_code}")
+    if start_idx >= end_idx:
+        raise ValueError(f"chapter section is empty in single DOCX template: {chapter_code}")
+    keep_elements = set(elements[start_idx:end_idx])
+    for element in elements:
+        if element in keep_elements:
+            continue
+        section_doc.element.body.remove(element)
+    section_doc.save(str(output_path))
+
+
+def _render_single_docx_section_template(
+    conn: Connection,
+    *,
+    item,
+    context: dict,
+    output_dir: Path | None,
+    output_filename: str | None,
+) -> Path:
+    relative_docx_path, chapter_code = _split_docx_section_relative_path(item.relative_path, item.item_code)
+    section_item = type(
+        "_SectionTemplateItem",
+        (),
+        {"package_id": item.package_id, "relative_path": relative_docx_path},
+    )()
+    template_path = _resolve_item_template_path(conn, section_item)
+    if not template_path.is_file():
+        raise FileNotFoundError(f"template source file not found: {template_path}")
+
+    root = output_dir or get_settings().template_render_root
+    root.mkdir(parents=True, exist_ok=True)
+    filename = output_filename or _sanitize_filename(f"{item.item_code or chapter_code}_{item.item_name}.docx")
+    output_path = root / filename
+
+    with tempfile.TemporaryDirectory(prefix="single-docx-section-") as temp_dir:
+        section_template_path = Path(temp_dir) / "section.docx"
+        _extract_single_docx_section(template_path, chapter_code, section_template_path)
+        doc = DocxTemplate(str(section_template_path))
+        doc.render(context)
+        doc.save(str(output_path))
+    return output_path
+
+
 def _render_single_docx_template(
     conn: Connection,
     *,
@@ -336,6 +426,23 @@ def render_template_item_docx(
         raise ValueError(f"template item is not ready for rendering: missing {missing}")
 
     context = render_context["context"]
+    if item.render_mode == "single_docx_section":
+        output_path = _render_single_docx_section_template(
+            conn,
+            item=item,
+            context=context,
+            output_dir=output_dir,
+            output_filename=output_filename,
+        )
+        return {
+            "item_id": str(item.id),
+            "item_name": item.item_name,
+            "filename": item.filename,
+            "output_path": str(output_path),
+            "ready": True,
+            "context_keys": sorted(context.keys()),
+        }
+
     if item.render_mode == "single_docx" or item.item_type == "document":
         output_path = _render_single_docx_template(
             conn,

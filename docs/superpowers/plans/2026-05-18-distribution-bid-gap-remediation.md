@@ -82,11 +82,11 @@
 - Modify: `backend/tender_backend/services/template_service/docx_renderer.py`
 - Test: `backend/tests/unit/test_template_docx_renderer.py`
 
-- [ ] **Step 1:** 写失败测试 `test_render_single_docx_section_splits_relative_path_anchor`：构造 `relative_path="国网配网工程商务标1-24章.docx#5.1"`，断言 renderer 会拆分出 `docx_path` 与 `chapter_code`，不会把带 `#` 的字符串直接传给路径解析。
-- [ ] **Step 2:** 写失败测试 `test_render_single_docx_section_extracts_target_chapter_only`：给定包含 `5.1` 与 `5.2` 的样章，渲染 `#5.1` 后输出只包含 5.1 段落，不包含 5.2 标题。
-- [ ] **Step 3:** 实现 `_render_single_docx_section_template(conn, item, context, output_dir, output_filename)`：按 `relative_path` 拆分 anchor；解析源 DOCX 的段落与表格；从目标章节标题开始，到下一同级或上级章节标题前结束；生成临时 DOCX 后再执行 DocxTemplate.render(context)。
-- [ ] **Step 4:** 在 `render_template_item_docx` 中把 `item.render_mode == "single_docx_section"` 接入新分支；保留 `single_docx` / `document` 既有行为。
-- [ ] **Step 5:** 跑：`pytest backend/tests/unit/test_template_docx_renderer.py -v`。
+- [x] **Step 1:** 写失败测试 `test_render_single_docx_section_splits_relative_path_anchor`：构造 `relative_path="国网配网工程商务标1-24章.docx#5.1"`，断言 renderer 会拆分出 `docx_path` 与 `chapter_code`，不会把带 `#` 的字符串直接传给路径解析。
+- [x] **Step 2:** 写失败测试 `test_render_single_docx_section_extracts_target_chapter_only`：给定包含 `5.1` 与 `5.2` 的样章，渲染 `#5.1` 后输出只包含 5.1 段落，不包含 5.2 标题。
+- [x] **Step 3:** 实现 `_render_single_docx_section_template(conn, item, context, output_dir, output_filename)`：按 `relative_path` 拆分 anchor；解析源 DOCX 的段落与表格；从目标章节标题开始，到下一同级或上级章节标题前结束；生成临时 DOCX 后再执行 DocxTemplate.render(context)。
+- [x] **Step 4:** 在 `render_template_item_docx` 中把 `item.render_mode == "single_docx_section"` 接入新分支；保留 `single_docx` / `document` 既有行为。
+- [x] **Step 5:** 跑：`pytest backend/tests/unit/test_template_docx_renderer.py -v`。
 
 ### Task A.4：商务模板项导入/升级为单 DOCX section
 
