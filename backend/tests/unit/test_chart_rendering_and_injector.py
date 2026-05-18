@@ -164,10 +164,13 @@ def test_gantt_fallback_renders_ticks_dependencies_sections_and_critical_path(mo
 
 
 def test_table_chart_renderer_outputs_grid_cells() -> None:
+    # response_matrix stays on native_svg per render_strategy (indicator_table
+    # was lifted onto vl_convert in 2cdf3b9 / Task 2.2). This test still
+    # exercises the native table renderer contract.
     spec = parse_chart_spec(
         {
-            "chart_type": "indicator_table",
-            "title": "绿色施工指标表",
+            "chart_type": "response_matrix",
+            "title": "绿色施工响应矩阵",
             "columns": ["指标", "来源", "记录"],
             "rows": [{"cells": ["节水", "招标文件", "台账"]}],
         }
@@ -176,7 +179,7 @@ def test_table_chart_renderer_outputs_grid_cells() -> None:
     rendered = render_chart_spec(spec)
 
     assert rendered.engine == "native_svg"
-    assert "绿色施工指标表" in rendered.svg
+    assert "绿色施工响应矩阵" in rendered.svg
     assert "节水" in rendered.svg
     assert "招标文件" in rendered.svg
 
