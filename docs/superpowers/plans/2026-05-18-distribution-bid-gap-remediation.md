@@ -105,10 +105,10 @@
 - Create: `backend/tender_backend/services/template_service/business_chapter_bindings.py`
 - Test: `backend/tests/unit/test_business_chapter_bindings.py`
 
-- [ ] **Step 1:** 定义 `ChapterBinding(chapter_code, context_builder, asset_categories, narrative_generator=None)`，为 24 章建立最小可运行映射。
-- [ ] **Step 2:** 先覆盖已存在主数据：公司主体、人员资料、公司资料、附件索引、资质证书、业绩、财务附件；缺失专项台账的章节返回明确 `missing_materials`，不得伪造数据。
-- [ ] **Step 3:** 每个 context builder 单测断言返回 dict 中包含模板占位符需要的 `company`、`tender`、`asset` 等顶层 key；缺失数据以结构化缺口返回。
-- [ ] **Step 4:** 跑：`pytest backend/tests/unit/test_business_chapter_bindings.py -v`。
+- [x] **Step 1:** 定义 `ChapterBinding(chapter_code, context_builder, asset_categories, narrative_generator=None)`，为 24 章建立最小可运行映射。
+- [x] **Step 2:** 先覆盖已存在主数据：公司主体、人员资料、公司资料、附件索引、资质证书、业绩、财务附件；缺失专项台账的章节返回明确 `missing_materials`，不得伪造数据。
+- [x] **Step 3:** 每个 context builder 单测断言返回 dict 中包含模板占位符需要的 `company`、`tender`、`asset` 等顶层 key；缺失数据以结构化缺口返回。
+- [x] **Step 4:** 跑：`pytest backend/tests/unit/test_business_chapter_bindings.py -v`。
 
 ### Task A.6：BusinessBidAssembler 接入 docxtpl 渲染并记录 artifact
 
