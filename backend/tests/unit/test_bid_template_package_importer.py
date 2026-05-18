@@ -70,6 +70,21 @@ def test_build_template_items_from_directory_rejects_multiple_docx_files(tmp_pat
         build_template_items_from_directory(source_dir)
 
 
+def test_import_multi_docx_directory_returns_clear_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    import_root = tmp_path / "imports"
+    source_dir = import_root / "sgcc_distribution_business"
+    source_dir.mkdir(parents=True)
+    (source_dir / "商务标1-12章.docx").write_bytes(b"docx")
+    (source_dir / "商务标13-24章.docx").write_bytes(b"docx")
+
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    get_settings.cache_clear()
+
+    with pytest.raises(ValueError, match="Single-DOCX template packages are required"):
+        build_template_items_from_directory(source_dir)
+
+
 def test_build_template_items_from_docx_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
     import_root = tmp_path / "imports"
@@ -119,6 +134,55 @@ def test_build_template_items_from_business_single_docx_splits_chapter_headings(
         "国网配网工程商务标.docx#23.1",
     ]
     assert all(item.render_mode == "single_docx_section" for item in items)
+
+
+def test_import_single_docx_creates_section_items_with_docx_anchor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    get_settings.cache_clear()
+    import_root = tmp_path / "imports"
+    package_dir = import_root / "sgcc_distribution_business_1_24_package"
+    package_dir.mkdir(parents=True)
+    template_path = package_dir / "国网配网工程商务标1-24章.docx"
+    document = Document()
+    document.add_paragraph("5.1.应答人基本情况表")
+    document.add_paragraph("基本情况正文")
+    document.add_paragraph("5.2.企业业绩表")
+    document.add_paragraph("业绩正文")
+    document.save(template_path)
+
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    get_settings.cache_clear()
+
+    items = build_template_items_from_directory(package_dir)
+
+    assert [(item.source_kind, item.render_mode, item.relative_path) for item in items] == [
+        ("docx", "single_docx_section", "国网配网工程商务标1-24章.docx#5.1"),
+        ("docx", "single_docx_section", "国网配网工程商务标1-24章.docx#5.2"),
+    ]
+
+
+def test_import_single_docx_does_not_treat_body_number_references_as_headings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get_settings.cache_clear()
+    import_root = tmp_path / "imports"
+    import_root.mkdir()
+    template_path = import_root / "国网配网工程商务标1-24章.docx"
+    document = Document()
+    document.add_paragraph("5.1.应答人基本情况表")
+    document.add_paragraph("5.1 正文段落中引用章节编号，不是标题")
+    document.add_paragraph("5.2.企业业绩表")
+    document.save(template_path)
+
+    monkeypatch.setenv("TEMPLATE_IMPORT_ROOTS", str(import_root))
+    get_settings.cache_clear()
+
+    items = build_template_items_from_directory(template_path)
+
+    assert [(item.item_code, item.item_name) for item in items] == [
+        ("5.1", "应答人基本情况表"),
+        ("5.2", "企业业绩表"),
+    ]
 
 
 def test_build_template_items_from_directory_rejects_empty_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

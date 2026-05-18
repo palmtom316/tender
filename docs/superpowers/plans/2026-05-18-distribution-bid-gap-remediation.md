@@ -71,10 +71,10 @@
 - Modify: `backend/tender_backend/services/template_service/package_importer.py`
 - Test: `backend/tests/unit/test_bid_template_package_importer.py`
 
-- [ ] **Step 1:** 写失败测试 `test_import_single_docx_creates_section_items_with_docx_anchor`：给定单 DOCX 包，断言生成的模板项包含 `source_kind="docx"`、`render_mode="single_docx_section"`、`relative_path="<docx>#<chapter_code>"`。
-- [ ] **Step 2:** 写回归测试 `test_import_multi_docx_directory_returns_clear_error`：给定目录含 2 个 DOCX，断言抛出包含"Single-DOCX template packages are required"的错误。该测试固定当前 P0 边界，避免误以为多 DOCX 已支持。
-- [ ] **Step 3:** 如标题识别漏掉商务 1-24 章中的合法标题，只调整 `_docx_heading_match` 的章节号识别规则，并保留对正文编号条款的过滤。
-- [ ] **Step 4:** 跑：`pytest backend/tests/unit/test_bid_template_package_importer.py -v`。
+- [x] **Step 1:** 写失败测试 `test_import_single_docx_creates_section_items_with_docx_anchor`：给定单 DOCX 包，断言生成的模板项包含 `source_kind="docx"`、`render_mode="single_docx_section"`、`relative_path="<docx>#<chapter_code>"`。
+- [x] **Step 2:** 写回归测试 `test_import_multi_docx_directory_returns_clear_error`：给定目录含 2 个 DOCX，断言抛出包含"Single-DOCX template packages are required"的错误。该测试固定当前 P0 边界，避免误以为多 DOCX 已支持。
+- [x] **Step 3:** 如标题识别漏掉商务 1-24 章中的合法标题，只调整 `_docx_heading_match` 的章节号识别规则，并保留对正文编号条款的过滤。
+- [x] **Step 4:** 跑：`pytest backend/tests/unit/test_bid_template_package_importer.py -v`。
 
 ### Task A.3：实现 `single_docx_section` 章节抽取与渲染
 

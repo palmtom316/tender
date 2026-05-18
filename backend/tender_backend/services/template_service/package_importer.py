@@ -16,7 +16,8 @@ from tender_backend.db.repositories.bid_template_package_repo import (
 
 
 _CODED_NAME_RE = re.compile(r"^(?P<code>\d+(?:\.\d+)*)\.(?P<title>.+)$")
-_DOCX_HEADING_RE = re.compile(r"^(?P<code>[一二三四五六七八九十]+|\d+(?:\.\d+)*)(?P<sep>、|．|\.)(?P<title>.+)$")
+_DOCX_CHINESE_HEADING_RE = re.compile(r"^(?P<code>[一二三四五六七八九十]+)、(?P<title>.+)$")
+_DOCX_NUMERIC_HEADING_RE = re.compile(r"^(?P<code>\d+(?:\.\d+)*)(?P<sep>．|\.)(?P<title>[^\d.．].*)$")
 _KEY_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _DOCX_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 _OPTIONAL_MARKERS = ("如有", "若", "适用于", "联合体", "无需递交")
@@ -121,16 +122,17 @@ def _normalize_docx_heading_code(raw: str) -> str:
 
 
 def _docx_heading_match(text: str) -> tuple[str, str] | None:
-    match = _DOCX_HEADING_RE.match(text.strip())
+    stripped = text.strip()
+    chinese_match = _DOCX_CHINESE_HEADING_RE.match(stripped)
+    if chinese_match is not None:
+        return _normalize_docx_heading_code(chinese_match.group("code")), chinese_match.group("title").strip()
+
+    match = _DOCX_NUMERIC_HEADING_RE.match(stripped)
     if match is None:
         return None
     raw_code = match.group("code")
     sep = match.group("sep")
     title = match.group("title").strip()
-    if re.fullmatch(r"[一二三四五六七八九十]+", raw_code):
-        if sep != "、":
-            return None
-        return _normalize_docx_heading_code(raw_code), title
     # Accept numeric dotted headings like "23.1.保证金明细表", but reject body
     # numbered clauses such as "1．截止应答截止日，..." inside a chapter.
     if sep != "." or len(title) > 60 or title.endswith(("；", "。", "，", ";", ".")):
