@@ -1,13 +1,28 @@
 # 图表生成与渲染改造计划
 
 > 创建日期：2026-05-17
-> 版本：v3 (Stage 1 收口版,2026-05-18)
-> 状态：改造 1 已收口;改造 2 POC 进行中
+> 版本：v4 (Stage 2 POC 基础设施版,2026-05-18)
+> 状态：改造 1 已收口;改造 2 POC 基础设施已落地,100 对图对比/盲评待真实样本执行
 > 范围：`backend/tender_backend/services/chart_service/` 部分 + `infra/` POC + 验收基础设施
 > 目标：在保留"后端 SVG 化、DOCX 可注入"主路径的前提下,**提升图表渲染质量**(而非追求像素级一致),为部分规则图替换手写 SVG 引擎,沉淀视觉规范与量化验收能力。
 > 关联任务：TaskList 共 17 任务
 
 ## 0. 修订记录
+
+### v4 (2026-05-18) — Stage 2 POC 基础设施版
+
+改造 2 (GPT-Vis-SSR POC) 基础设施已落地,但不做 cutover:
+
+| 项 | 状态 |
+|---|---|
+| wrapper 镜像 | 已新增 `infra/gpt-vis-ssr/`,自构 `tender-gpt-vis-ssr:dev` |
+| npm 版本 | `@antv/gpt-vis-ssr@^0.3.7`;`^1.0.0` 不存在,已纠正 |
+| contract test | `backend/tests/integration/test_gpt_vis_contract.py` 7 项 live 通过 |
+| 输出限制 | SSR 包实测只输出 PNG buffer;wrapper 返回 SVG shell 内嵌 PNG data URI,不是原生矢量 SVG |
+| 多引擎默认 | `CHART_FLOW_ENGINE=mermaid_sidecar`;GPT-Vis 仅通过 env 显式启用,失败回退 mermaid/native |
+| POC decision | **pending** — 需真实 flow 50 样本量化对比 + 30 对业务盲评后决定 adopt/reject |
+
+T10 cutover 状态:**待启动独立计划**。在 POC decision 之前禁止把默认引擎切到 `gpt_vis`。
 
 ### v3 (2026-05-18) — Stage 1 收口版
 
@@ -28,7 +43,7 @@
 | GPT-Vis-SSR 调研备忘 | `docs/plans/2026-05-18-gpt-vis-ssr-research.md` — **核心发现:GPT-Vis 不支持 Gantt** |
 | POC 范围修订 | flow 50(原 flow 50 + gantt 50 收窄) |
 | 多引擎分发代码 | 已落地(`0861204`) — `CHART_FLOW_ENGINE` config + gpt_vis 分支 + mermaid 兜底 |
-| wrapper 镜像 + contract test | 待 Task C.1/C.2 |
+| wrapper 镜像 + contract test | 已在 v4 落地 |
 
 ### v2 (2026-05-17) — 评审反馈修订
 

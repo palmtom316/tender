@@ -115,6 +115,9 @@ services:
       AI_GATEWAY_SHARED_SECRET: ${AI_GATEWAY_SHARED_SECRET:-}
       MERMAID_RENDER_URL: ${MERMAID_RENDER_URL:-http://mermaid-render:3000}
       MERMAID_RENDER_TIMEOUT_SECONDS: ${MERMAID_RENDER_TIMEOUT_SECONDS:-20}
+      CHART_FLOW_ENGINE: ${CHART_FLOW_ENGINE:-mermaid_sidecar}
+      CHART_GPT_VIS_URL: ${CHART_GPT_VIS_URL:-http://gpt-vis-ssr:7102}
+      CHART_GPT_VIS_TIMEOUT_SECONDS: ${CHART_GPT_VIS_TIMEOUT_SECONDS:-20}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
       TEMPLATE_IMPORT_ROOTS: ${TEMPLATE_IMPORT_ROOTS:-/workspace/backend/data/template_imports}
@@ -183,6 +186,26 @@ services:
       timeout: 3s
       retries: 20
       start_period: 10s
+    restart: unless-stopped
+
+  gpt-vis-ssr:
+    build:
+      context: ./gpt-vis-ssr
+    image: tender-gpt-vis-ssr:dev
+    container_name: tender-gpt-vis-ssr
+    profiles: ["app"]
+    environment:
+      PORT: 7102
+      MAX_CONCURRENT: ${GPT_VIS_MAX_CONCURRENT:-4}
+      RENDER_TIMEOUT_MS: ${GPT_VIS_RENDER_TIMEOUT_MS:-20000}
+    ports:
+      - "${GPT_VIS_PORT:-7102}:7102"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7102/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
 
   worker-io:

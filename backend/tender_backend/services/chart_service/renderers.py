@@ -151,8 +151,8 @@ def _flow_to_gpt_vis_payload(spec: FlowChartSpec) -> dict[str, Any]:
         "safety_system": "network-graph",
     }
     gpt_vis_type = chart_type_map.get(spec.chart_type, "flow-diagram")
-    nodes = [{"id": node.id, "label": node.label} for node in spec.nodes]
-    edges = [{"source": edge.from_, "target": edge.to, "label": edge.label or ""} for edge in spec.edges]
+    nodes = [{"name": node.id, "label": node.label} for node in spec.nodes]
+    edges = [{"source": edge.from_, "target": edge.to, "name": edge.label or ""} for edge in spec.edges]
     return {"type": gpt_vis_type, "data": {"title": spec.title, "nodes": nodes, "edges": edges}}
 
 

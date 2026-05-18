@@ -1,0 +1,16 @@
+{
+  "name": "gpt-vis-ssr-wrapper",
+  "version": "1.0.0",
+  "description": "HTTP wrapper for @antv/gpt-vis-ssr with Express + concurrency limiting",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@antv/gpt-vis-ssr": "^0.3.7",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -85,6 +85,9 @@ def test_flow_to_gpt_vis_payload_defaults_to_flow_diagram():
     assert payload["type"] == "flow-diagram"
     assert len(payload["data"]["nodes"]) == 3
     assert len(payload["data"]["edges"]) == 2
+    assert payload["data"]["nodes"][0]["name"] == "start"
+    assert payload["data"]["nodes"][0]["label"] == "准备"
+    assert payload["data"]["edges"][0]["name"] == ""
 
 
 def test_render_chart_spec_falls_back_to_mermaid_when_gpt_vis_url_unset(monkeypatch):

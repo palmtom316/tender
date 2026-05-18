@@ -85,6 +85,7 @@ GPT-Vis 26 类按 README:
 | 离线部署 | **未提及** | npm install + 自构镜像理论可行;但 GPT-Vis 渲染 organization-chart 等关系图依赖前端图标资源(SVG sprite),需打入镜像 |
 | 并发 | **未提及** | 每次 render() 创建 node-canvas 实例,内存占用与图复杂度线性正相关;无内置 throttle |
 | 失败回退 | **未提及** | wrapper 需自行设超时 + try/catch + 返回 `success=false` |
+| 输出格式 | README 只示例 `toBuffer()` | 实测 `@antv/gpt-vis-ssr@0.3.7` 的 `toBuffer()`/`toBuffer("svg")` 均输出 PNG;本仓库 wrapper 返回 SVG shell 内嵌 PNG data URI,不是原生矢量 SVG |
 
 ## 二、与 mermaid sidecar 的同形性核查
 
@@ -149,7 +150,7 @@ CMD ["node", "server.js"]
 ```
 
 `server.js` 用 Express 暴露:
-- `POST /render` — body `{type, data, theme?}` → `{success, svg, errorMessage}`
+- `POST /render` — body `{type, data, theme?}` → `{success, svg, errorMessage}`;其中 `svg` 是 SVG shell + embedded PNG,用于兼容后端 SVG 字符串 contract
 - `GET /health` — 200
 - 内部 `Semaphore(max=4)` 做并发限流
 
@@ -166,7 +167,7 @@ CMD ["node", "server.js"]
 | T7 端口 | 7102 占位 | 保留 7102 |
 | T17 contract test | 6 类(基本 SVG / A4 / 中文 / 4xx / 超时 / 离线 / 并发) | 不变,但**输入 schema 必须用 wrapper 定义的 `{type, data, theme?}`** |
 | T8 多引擎分发 | flow + gantt 都改 | **改为仅 flow**;gantt 主路径保持 mermaid + native_gantt 不动 |
-| T9 100 对图对比 | flow 50 + gantt 50 | **改为 flow 50;gantt 0** |
+| T9 100 对图对比 | flow 50 + gantt 50 | **改为 flow 50;gantt 0**;同时把"SVG shell 内嵌 PNG"列入可读性与 DOCX 注入风险项 |
 
 ## 七、不在本 POC 范围
 
@@ -191,3 +192,4 @@ CMD ["node", "server.js"]
 | 版本 | 日期 | 内容 |
 | --- | --- | --- |
 | v1.0 | 2026-05-18 | 初版调研;明确 GPT-Vis-SSR 是 Node 库非 HTTP 服务,需自构 wrapper;Gantt 不支持,POC 范围从 flow 50 + gantt 50 收窄到 flow 50。 |
+| v1.1 | 2026-05-18 | T7/T17 实测补充:`@antv/gpt-vis-ssr@0.3.7` npm 真实版本;直接 require 需忽略 CSS;默认 theme 必须为 `default`;输出为 PNG buffer,wrapper 以 SVG shell 内嵌 PNG 满足后端 contract;live contract 7 项通过。 |

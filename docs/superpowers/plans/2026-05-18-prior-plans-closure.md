@@ -13,6 +13,17 @@
 - `docs/plans/2026-05-17-chart-rendering-refactor-plan.md`(改造 1 上游完工,改造 2 整段未启)
 - `docs/superpowers/plans/2026-05-17-chart-generation-quality-upgrade.md`(已并入 Followup Roadmap,本计划不再单列任务)
 
+## 当前执行状态(2026-05-18 核查)
+
+| Track | 状态 | 证据 / 阻塞 |
+|---|---|---|
+| Track 1 Followup Roadmap 文档同步 | ✅ 已完成 | `fab015b` 已同步 Track A/B/E 代码侧完成状态;E-5 evidence 仍按 Track 4 阻塞处理 |
+| Track 2 Chart Refactor 改造 1 收尾 | ✅ 已完成 | indicator_table POC=`adopt`;灰度验收归档;`_render_risk_matrix_svg` / `_render_responsibility_matrix_svg` 已删除;`test_chart_*.py` 131 项通过 |
+| Track 3 GPT-Vis-SSR POC 基础设施 | ⚠️ 部分完成 | T6/T7/T8/T17 已完成:wrapper 镜像 healthy,live contract 7 项通过;T9 真实 50 flow 样本量化对比 + 30 对业务盲评未执行 |
+| Track 4 综合 e2e + 评标专家盲评 | ⛔ 阻塞 | 需要真实 `project-id`、第 8/9/10.x 章生成产物、3 个 DOCX(含 1 个暗标项目)和评标专家输入;当前不能伪造 evidence |
+
+**关键偏差:** GPT-Vis-SSR 实测 `@antv/gpt-vis-ssr@0.3.7` 只输出 PNG buffer,wrapper 以 SVG shell 内嵌 PNG data URI 满足后端 SVG 字符串 contract。该限制已写入 `docs/plans/2026-05-18-gpt-vis-ssr-research.md` 和 chart refactor v4。
+
 ---
 
 ## 一、Track 1 — Followup Roadmap 文档同步(纯文档,无代码)
@@ -705,21 +716,23 @@ Track 4 (综合 e2e + 盲评)                                                   
 
 ## 六、Success Criteria(hard stop)
 
-- [ ] Track 1:Followup Roadmap 文档 checkbox 与代码状态一致,修订记录追加 v1.3
-- [ ] Track 2:`_render_risk_matrix_svg` / `_render_responsibility_matrix_svg` 已从 renderers.py 删除;indicator_table POC 落 evidence 与决策;灰度验收报告归档
+- [x] Track 1:Followup Roadmap 文档 checkbox 与代码状态一致,修订记录追加 v1.3
+- [x] Track 2:`_render_risk_matrix_svg` / `_render_responsibility_matrix_svg` 已从 renderers.py 删除;indicator_table POC 落 evidence 与决策;灰度验收报告归档
 - [ ] Track 3:6 类 contract test 全绿;100 对图 POC report 落地;POC decision = adopt/reject 任一明确;若 reject,gpt-vis-ssr 容器已下线
+  - 2026-05-18 核查:T7/T17/T8 已完成,`gpt-vis-ssr` healthy,live contract 7/7 通过;T9 真实样本 POC 与人工盲评仍缺输入,decision 不能伪造。
 - [ ] Track 4:三份 evidence(`chapter-8-followup-final` / `longform-8-9-10` / `followup-blind-review`)归档;Followup Roadmap v1.4 收口;`2026-05-15-longform-launch-closure.md` 追加 Phase 2 Final Decision
+  - 2026-05-18 核查:缺真实项目 ID、DOCX 产物和专家评分输入,当前阻塞。
 
 ---
 
 ## 七、Risk Controls
 
-- [ ] Task 2.3 indicator_table POC 若 reject,**必须**回滚 Task 2.1/2.2 的 strategy 改动,避免线上路由到失败 mapper
-- [ ] Task 2.5 删除旧函数前必须确认 Task 2.4 通过;若灰度验收任一项不达标,立即回滚 strategy 改动,**不删函数**
+- [x] Task 2.3 indicator_table POC 若 reject,**必须**回滚 Task 2.1/2.2 的 strategy 改动,避免线上路由到失败 mapper
+- [x] Task 2.5 删除旧函数前必须确认 Task 2.4 通过;若灰度验收任一项不达标,立即回滚 strategy 改动,**不删函数**
 - [ ] Task 3.2 部署 gpt-vis-ssr 时 PVE 资源压力 +300~500MB,先确认有冗余;若达成 reject 决策,Task 3.5 Step 6 必须执行容器下线
-- [ ] Task 3.4 多引擎分发上线后,默认 `CHART_FLOW_ENGINE=mermaid_sidecar`,POC 期间禁止改默认值
+- [x] Task 3.4 多引擎分发上线后,默认 `CHART_FLOW_ENGINE=mermaid_sidecar`,POC 期间禁止改默认值
 - [ ] Task 4.1 / 4.2 e2e 若失败,**不勾选**,停在 RCA 阶段,与用户对齐再决定继续
-- [ ] Track 4 启动前 Track 2 必须完成 — 否则盲评对象不稳定
+- [x] Track 4 启动前 Track 2 必须完成 — 否则盲评对象不稳定
 
 ---
 
@@ -736,3 +749,4 @@ Track 4 (综合 e2e + 盲评)                                                   
 | 版本 | 日期 | 内容 |
 | --- | --- | --- |
 | v1.0 | 2026-05-18 | 初版落盘。整理 2026-05-17 三份计划遗留(Followup Roadmap Track A/B/E 文档同步、D-1/D-2/E-5 综合 e2e + 盲评;Chart Refactor 改造 1 收尾、改造 2 POC)。|
+| v1.1 | 2026-05-18 | 执行核查同步:Track 1/2 完成;Track 3 完成 T6/T7/T8/T17,live contract 7/7 通过,但 T9 真实样本 POC + 盲评未完成;Track 4 因缺真实项目 ID/DOCX/专家评分输入阻塞。|

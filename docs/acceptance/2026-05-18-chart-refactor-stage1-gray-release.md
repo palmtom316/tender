@@ -95,8 +95,8 @@
 | 动作 | 状态 |
 | --- | --- |
 | 保留 vl_convert 作为 risk/responsibility/indicator_table 的主路径 | ✅ 已上线 |
-| 删除 `_render_risk_matrix_svg` / `_render_responsibility_matrix_svg`(改造 1 计划 T5) | 待 Task B.2 执行(本计划下一步) |
-| 更新 `chart-rendering-refactor-plan.md` 修订记录至 v3 | 待 Task B.3 执行 |
+| 删除 `_render_risk_matrix_svg` / `_render_responsibility_matrix_svg`(改造 1 计划 T5) | ✅ 已完成(`c6f4992`) |
+| 更新 `chart-rendering-refactor-plan.md` 修订记录至 v3/v4 | ✅ 已完成 |
 | 保留 `_render_table_svg` 作为其他 TABLE_CHART_TYPES(response/interface/equipment)的 fallback,也保留为 indicator_table 二级 fallback | ✅ 保留 |
 | 留待:visual_template 加最小矩阵尺寸下限 | 后续 UX 迭代 |
 
@@ -118,3 +118,4 @@
 | 版本 | 日期 | 内容 |
 | --- | --- | --- |
 | v1.0 | 2026-05-18 | 初版。指标 + 盲评 + 业务方批准齐备,改造 1 正式收口。|
+| v1.1 | 2026-05-18 | 同步后续执行结果:`_render_risk_matrix_svg` / `_render_responsibility_matrix_svg` 已删除,chart-rendering-refactor-plan 已更新至 v4。|
