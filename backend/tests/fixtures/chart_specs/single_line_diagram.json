@@ -1,0 +1,11 @@
+{
+  "spec": {
+    "chart_type": "single_line_diagram",
+    "title": "一次接线结构化占位图",
+    "placeholder_key": "single_line_diagram",
+    "elements": ["10kV进线", "环网柜", "配变", "低压出线"],
+    "notes": ["待人工复核一次接线关系"],
+    "manual_review_required": true
+  },
+  "expected_labels": ["10kV进线", "人工复核"]
+}

@@ -272,9 +272,9 @@
 - Modify: `backend/tender_backend/services/chart_service/renderers.py`
 - Test: `backend/tests/unit/test_chart_service.py`
 
-- [ ] **Step 1:** 新增 `single_line_diagram`、`site_layout`、`outage_timeline`、`wbs_tree`、`fmea_matrix` spec。
-- [ ] **Step 2:** 渲染路径：停电时序复用甘特，WBS 用 mermaid，FMEA 复用矩阵；单线图/平面布置图若 vega-lite 表达不足，P0 只输出结构化占位图并标记需要人工复核。
-- [ ] **Step 3:** 每类 chart 至少一个 fixture 和 SVG 非空测试。
+- [x] **Step 1:** 新增 `single_line_diagram`、`site_layout`、`outage_timeline`、`wbs_tree`、`fmea_matrix` spec。
+- [x] **Step 2:** 渲染路径：停电时序复用甘特，WBS 用 mermaid，FMEA 复用矩阵；单线图/平面布置图若 vega-lite 表达不足，P0 只输出结构化占位图并标记需要人工复核。
+- [x] **Step 3:** 每类 chart 至少一个 fixture 和 SVG 非空测试。
 
 ### Task D.3：companybase 电力施工资质与业绩字段
 

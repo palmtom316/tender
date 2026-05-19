@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from tender_backend.core.config import get_settings
-from tender_backend.services.chart_service.specs import FLOW_CHART_TYPES, TABLE_CHART_TYPES, SUPPORTED_CHART_TYPES
+from tender_backend.services.chart_service.specs import (
+    DIAGRAM_PLACEHOLDER_TYPES,
+    FLOW_CHART_TYPES,
+    TABLE_CHART_TYPES,
+    SUPPORTED_CHART_TYPES,
+)
 
 
 @dataclass(frozen=True)
@@ -13,7 +18,7 @@ class RenderStrategy:
     fallback: str | None = None
 
 
-_TABLE_TYPES_NATIVE_ONLY = TABLE_CHART_TYPES - {"indicator_table"}
+_TABLE_TYPES_NATIVE_ONLY = TABLE_CHART_TYPES - {"indicator_table", "fmea_matrix"}
 
 # Static strategies for non-flow chart types. Flow types are resolved
 # dynamically in resolve_render_strategy() so the CHART_FLOW_ENGINE
@@ -23,10 +28,13 @@ _TABLE_TYPES_NATIVE_ONLY = TABLE_CHART_TYPES - {"indicator_table"}
 _STATIC_STRATEGIES: dict[str, RenderStrategy] = {
     "schedule_gantt": RenderStrategy("schedule_gantt", "mermaid_sidecar", "native_gantt"),
     "critical_path": RenderStrategy("critical_path", "mermaid_sidecar", "native_gantt"),
+    "outage_timeline": RenderStrategy("outage_timeline", "mermaid_sidecar", "native_gantt"),
     "risk_matrix": RenderStrategy("risk_matrix", "vl_convert", "native_svg"),
     "responsibility_matrix": RenderStrategy("responsibility_matrix", "vl_convert", "native_svg"),
     "indicator_table": RenderStrategy("indicator_table", "vl_convert", "native_svg"),
+    "fmea_matrix": RenderStrategy("fmea_matrix", "vl_convert", "native_svg"),
     **{chart_type: RenderStrategy(chart_type, "native_svg", None) for chart_type in _TABLE_TYPES_NATIVE_ONLY},
+    **{chart_type: RenderStrategy(chart_type, "native_svg", None) for chart_type in DIAGRAM_PLACEHOLDER_TYPES},
 }
 
 _NON_FLOW_TYPES = set(_STATIC_STRATEGIES)

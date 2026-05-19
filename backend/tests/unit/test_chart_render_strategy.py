@@ -91,6 +91,27 @@ def test_gantt_strategy_stays_mermaid_even_when_flow_engine_is_gpt_vis(monkeypat
     assert critical.fallback == "native_gantt"
 
 
+def test_outage_timeline_uses_gantt_render_path() -> None:
+    strategy = resolve_render_strategy("outage_timeline")
+
+    assert strategy.primary == "mermaid_sidecar"
+    assert strategy.fallback == "native_gantt"
+
+
+def test_wbs_tree_uses_flow_render_path() -> None:
+    strategy = resolve_render_strategy("wbs_tree")
+
+    assert strategy.primary == "mermaid_sidecar"
+    assert strategy.fallback == "native_flow"
+
+
+def test_structured_diagrams_use_native_placeholder_path() -> None:
+    for chart_type in ("single_line_diagram", "site_layout"):
+        strategy = resolve_render_strategy(chart_type)
+        assert strategy.primary == "native_svg"
+        assert strategy.fallback is None
+
+
 def test_matrix_strategies_unaffected_by_flow_engine_override(monkeypatch) -> None:
     monkeypatch.setenv("CHART_FLOW_ENGINE", "gpt_vis")
     config.get_settings.cache_clear()

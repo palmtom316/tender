@@ -1,0 +1,14 @@
+{
+  "spec": {
+    "chart_type": "outage_timeline",
+    "title": "停电窗口时序图",
+    "placeholder_key": "outage_timeline",
+    "tasks": [
+      {"id": "permit", "label": "停电许可", "start": "2026-06-01", "end": "2026-06-01", "group": "停电窗口"},
+      {"id": "field_work", "label": "现场施工", "start": "2026-06-02", "end": "2026-06-03", "group": "停电窗口"},
+      {"id": "restore", "label": "复电确认", "start": "2026-06-04", "end": "2026-06-04", "group": "复电"}
+    ],
+    "dependencies": [{"from": "permit", "to": "field_work"}, {"from": "field_work", "to": "restore"}]
+  },
+  "expected_labels": ["停电许可", "复电确认"]
+}

@@ -32,7 +32,7 @@ from tender_backend.services.chart_service.templates import get_chart_template
 from tender_backend.services.ai_gateway_client import ai_gateway_headers
 
 
-SOURCE_REQUIRED_CHART_TYPES = {"schedule_gantt", "critical_path"}
+SOURCE_REQUIRED_CHART_TYPES = {"schedule_gantt", "critical_path", "outage_timeline"}
 SOURCE_TRACE_KEYS = {
     "constraint_id",
     "constraint_ids",
@@ -373,7 +373,7 @@ def _prepare_payload(*, chart_type: str, title: str, spec_json: dict[str, Any]) 
     payload["chart_type"] = chart_type
     if title:
         payload["title"] = title
-    if chart_type in {"org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org", "closure_flow", "data_flow"}:
+    if chart_type in {"org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org", "closure_flow", "data_flow", "wbs_tree"}:
         payload["nodes"] = _normalize_flow_nodes(payload.get("nodes") or payload.get("steps") or [])
         if "edges" not in payload:
             parent_edges = _flow_parent_edges(payload["nodes"])
@@ -430,7 +430,7 @@ def _fallback_metadata(reason: str, *, rendered: bool) -> dict[str, Any]:
 
 def default_chart_spec(*, chart_type: str, title: str, placeholder_key: str | None = None) -> dict[str, Any]:
     base: dict[str, Any] = {"placeholder_key": placeholder_key or f"{chart_type}_main", "_default_spec": True}
-    if chart_type in {"schedule_gantt", "critical_path"}:
+    if chart_type in {"schedule_gantt", "critical_path", "outage_timeline"}:
         return {
             **base,
             "columns": ["阶段/工序", "计划开始条件", "计划完成条件", "衔接关系", "来源"],
@@ -458,11 +458,18 @@ def default_chart_spec(*, chart_type: str, title: str, placeholder_key: str | No
                 {"role": "安全负责人", "activity": "安全检查", "level": "负责"},
             ],
         }
-    if chart_type in {"response_matrix", "indicator_table", "interface_table", "equipment_table"}:
+    if chart_type in {"response_matrix", "indicator_table", "interface_table", "equipment_table", "fmea_matrix"}:
         return {
             **base,
             "columns": ["事项", "来源", "措施"],
             "rows": [{"cells": [title, "待补充来源", "按确认要求执行"]}],
+        }
+    if chart_type in {"single_line_diagram", "site_layout"}:
+        return {
+            **base,
+            "elements": [title, "待补充结构化要素"],
+            "notes": ["P0输出结构化占位图，需人工复核后替换为正式图纸。"],
+            "manual_review_required": True,
         }
     return {
         **base,
@@ -574,6 +581,21 @@ def _chart_spec_system_prompt(chart_type: str) -> str:
             ],
             "dependencies": [{"from": "prepare", "to": "next_task"}],
         },
+        "outage_timeline": {
+            "chart_type": "outage_timeline",
+            "placeholder_key": "outage_timeline",
+            "tasks": [
+                {
+                    "id": "permit",
+                    "label": "停电许可",
+                    "start": "YYYY-MM-DD",
+                    "end": "YYYY-MM-DD",
+                    "group": "停电窗口",
+                    "source_refs": [{"constraint_id": "..."}],
+                }
+            ],
+            "dependencies": [{"from": "permit", "to": "field_work"}],
+        },
         "risk_matrix": {
             "chart_type": "risk_matrix",
             "placeholder_key": "risk_matrix",
@@ -587,6 +609,26 @@ def _chart_spec_system_prompt(chart_type: str) -> str:
             "roles": ["项目经理", "技术负责人"],
             "activities": ["施工准备"],
             "assignments": [{"role": "项目经理", "activity": "施工准备", "level": "负责"}],
+        },
+        "fmea_matrix": {
+            "chart_type": "fmea_matrix",
+            "placeholder_key": "fmea_matrix",
+            "columns": ["工序", "失效模式", "影响", "控制措施"],
+            "rows": [{"cells": ["电缆接头", "受潮", "绝缘下降", "环境封闭与耐压试验"]}],
+        },
+        "single_line_diagram": {
+            "chart_type": "single_line_diagram",
+            "placeholder_key": "single_line_diagram",
+            "elements": ["进线", "开关设备", "配变", "出线"],
+            "notes": ["仅输出结构化占位，需人工复核一次接线关系"],
+            "manual_review_required": True,
+        },
+        "site_layout": {
+            "chart_type": "site_layout",
+            "placeholder_key": "site_layout",
+            "elements": ["施工围挡", "材料堆场", "电缆沟", "临时通道"],
+            "notes": ["仅输出结构化占位，需结合现场平面图复核"],
+            "manual_review_required": True,
         },
     }
     example = schemas.get(
@@ -604,7 +646,7 @@ def _chart_spec_system_prompt(chart_type: str) -> str:
         "AI 只生成结构化 spec，不生成代码。"
         "Never output coordinates, colors, dimensions, or SVG fragments. Only output semantic chart structure. "
         "不得编造日期、天数、人员姓名、证书编号、设备型号、风险等级、量化指标或许可结果。"
-        "schedule_gantt/critical_path 的每个任务日期必须来自 context 中已确认的工期、里程碑或约束，"
+        "schedule_gantt/critical_path/outage_timeline 的每个任务日期必须来自 context 中已确认的工期、里程碑或约束，"
         "并在任务 source_refs 中写入 constraint_id/source_chunk_id/user_confirmed_by 等来源；缺少来源时不要输出甘特图任务。"
         "risk_matrix 的 cells[].level 只能使用 low/medium/high/critical。"
         "示例 JSON："

@@ -52,6 +52,7 @@ _TEMPLATES: dict[str, ChartTemplate] = {
     "emergency_org": _flow("emergency_org", max_nodes=16),
     "closure_flow": _flow("closure_flow", max_nodes=16, page_profile="a4_landscape"),
     "data_flow": _flow("data_flow", max_nodes=16, page_profile="a4_landscape"),
+    "wbs_tree": _flow("wbs_tree", max_nodes=24, page_profile="a4_landscape"),
     "schedule_gantt": ChartTemplate(
         chart_type="schedule_gantt",
         layout_family="gantt",
@@ -67,6 +68,14 @@ _TEMPLATES: dict[str, ChartTemplate] = {
         density_limits={"max_tasks": 14, "max_dependencies": 20, "max_nodes": 14},
         text_rules={"task_chars": 16, "max_lines": 2, "min_font_px": 11},
         degradation_policy={"overflow": "critical_summary_table"},
+    ),
+    "outage_timeline": ChartTemplate(
+        chart_type="outage_timeline",
+        layout_family="gantt",
+        page_profile="a4_landscape",
+        density_limits={"max_tasks": 16, "max_groups": 6, "max_nodes": 16},
+        text_rules={"task_chars": 16, "max_lines": 2, "min_font_px": 11},
+        degradation_policy={"overflow": "summary_table"},
     ),
     "risk_matrix": ChartTemplate(
         chart_type="risk_matrix",
@@ -88,6 +97,9 @@ _TEMPLATES: dict[str, ChartTemplate] = {
     "indicator_table": _table("indicator_table", max_rows=80, max_columns=6),
     "interface_table": _table("interface_table", max_rows=80, max_columns=8),
     "equipment_table": _table("equipment_table", max_rows=80, max_columns=8),
+    "fmea_matrix": _table("fmea_matrix", max_rows=40, max_columns=10),
+    "single_line_diagram": _table("single_line_diagram", max_rows=40, max_columns=4),
+    "site_layout": _table("site_layout", max_rows=40, max_columns=4),
 }
 
 

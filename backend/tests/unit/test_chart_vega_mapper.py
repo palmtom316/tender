@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 from tender_backend.services.chart_service.specs import parse_chart_spec
-from tender_backend.services.chart_service.vega_mapper import (
-    indicator_table_to_vega,
-    responsibility_matrix_to_vega,
-    risk_matrix_to_vega,
-)
+from tender_backend.services.chart_service import vega_mapper
+from tender_backend.services.chart_service.vega_mapper import indicator_table_to_vega, responsibility_matrix_to_vega, risk_matrix_to_vega
 
 
 def test_risk_matrix_to_vega_emits_full_grid_and_color_scale() -> None:
@@ -150,3 +147,20 @@ def test_indicator_table_to_vega_grows_height_with_row_count() -> None:
 
     # height must scale with body row count to keep cells readable; 12 rows + header
     assert chart["height"] >= 13 * 24
+
+
+def test_fmea_matrix_to_vega_reuses_table_grid() -> None:
+    spec = parse_chart_spec(
+        {
+            "chart_type": "fmea_matrix",
+            "title": "施工FMEA矩阵",
+            "columns": ["工序", "失效模式", "影响", "控制措施"],
+            "rows": [{"cells": ["电缆接头", "受潮", "绝缘下降", "环境封闭与耐压试验"]}],
+        }
+    )
+
+    chart = vega_mapper.fmea_matrix_to_vega(spec)
+
+    assert chart["title"]["text"] == "施工FMEA矩阵"
+    assert any(item["text"] == "失效模式" and item["is_header"] for item in chart["data"]["values"])
+    assert any(item["text"] == "绝缘下降" and not item["is_header"] for item in chart["data"]["values"])

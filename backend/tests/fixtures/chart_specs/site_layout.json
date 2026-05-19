@@ -1,0 +1,11 @@
+{
+  "spec": {
+    "chart_type": "site_layout",
+    "title": "现场平面布置结构化占位图",
+    "placeholder_key": "site_layout",
+    "elements": ["施工围挡", "材料堆场", "电缆沟", "临时通道"],
+    "notes": ["待结合现场平面图复核"],
+    "manual_review_required": true
+  },
+  "expected_labels": ["施工围挡", "人工复核"]
+}

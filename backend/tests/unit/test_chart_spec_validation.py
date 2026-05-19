@@ -9,7 +9,7 @@ from tender_backend.services.chart_service.specs import parse_chart_spec, valida
 from tender_backend.services.chart_service.specs import SUPPORTED_CHART_TYPES
 
 
-@pytest.mark.parametrize("chart_type", sorted(SUPPORTED_CHART_TYPES - {"schedule_gantt", "critical_path"}))
+@pytest.mark.parametrize("chart_type", sorted(SUPPORTED_CHART_TYPES - {"schedule_gantt", "critical_path", "outage_timeline"}))
 def test_default_chart_specs_parse_and_render_for_supported_non_schedule_types(chart_type: str) -> None:
     title = f"{chart_type} 默认图表"
     spec_json = default_chart_spec(chart_type=chart_type, title=title, placeholder_key=f"{chart_type}_main")
@@ -24,7 +24,7 @@ def test_default_chart_specs_parse_and_render_for_supported_non_schedule_types(c
     assert title in rendered.svg
 
 
-@pytest.mark.parametrize("chart_type", ["schedule_gantt", "critical_path"])
+@pytest.mark.parametrize("chart_type", ["schedule_gantt", "critical_path", "outage_timeline"])
 def test_default_schedule_specs_are_source_safe_table_fallbacks(chart_type: str) -> None:
     spec_json = default_chart_spec(chart_type=chart_type, title="进度计划图", placeholder_key=f"{chart_type}_main")
 
@@ -155,3 +155,79 @@ def test_extended_flow_and_critical_path_specs_validate() -> None:
     assert closure["valid"] is True
     assert data_flow["valid"] is True
     assert critical_path["valid"] is True
+
+
+@pytest.mark.parametrize(
+    ("chart_type", "spec_json"),
+    [
+        (
+            "single_line_diagram",
+            {
+                "elements": ["10kV进线", "环网柜", "配变", "低压出线"],
+                "notes": ["结构化占位，需人工复核一次接线关系"],
+            },
+        ),
+        (
+            "site_layout",
+            {
+                "elements": ["施工围挡", "材料堆场", "电缆沟", "临时通道"],
+                "notes": ["结构化占位，需结合现场平面图复核"],
+            },
+        ),
+        (
+            "outage_timeline",
+            {
+                "tasks": [
+                    {"id": "permit", "label": "停电许可", "start": "2026-06-01", "end": "2026-06-01"},
+                    {"id": "work", "label": "施工窗口", "start": "2026-06-02", "end": "2026-06-03"},
+                ],
+                "dependencies": [{"from": "permit", "to": "work"}],
+            },
+        ),
+        (
+            "wbs_tree",
+            {
+                "nodes": [
+                    {"id": "root", "label": "配网改造"},
+                    {"id": "line", "label": "线路施工", "parent": "root"},
+                    {"id": "test", "label": "试验送电", "parent": "root"},
+                ],
+            },
+        ),
+        (
+            "fmea_matrix",
+            {
+                "columns": ["工序", "失效模式", "影响", "控制措施"],
+                "rows": [{"cells": ["电缆接头", "受潮", "绝缘下降", "环境封闭与耐压试验"]}],
+            },
+        ),
+    ],
+)
+def test_distribution_deep_chart_types_validate_and_render_nonempty(chart_type: str, spec_json: dict) -> None:
+    title = f"{chart_type} 图表"
+    payload = {"chart_type": chart_type, "title": title, **spec_json}
+
+    validation = validate_chart_spec(payload)
+
+    assert validation["valid"] is True, validation["issues"]
+    rendered = render_chart_spec(parse_chart_spec(payload))
+    assert rendered.svg.lstrip().startswith("<svg")
+    assert len(rendered.svg) > 120
+    assert title in rendered.svg
+
+
+def test_single_line_and_site_layout_render_structured_manual_review_placeholders() -> None:
+    for chart_type in ("single_line_diagram", "site_layout"):
+        spec = parse_chart_spec(
+            {
+                "chart_type": chart_type,
+                "title": "结构化占位图",
+                "elements": ["进线", "设备", "出线"],
+                "notes": ["待人工复核"],
+            }
+        )
+
+        rendered = render_chart_spec(spec)
+
+        assert rendered.engine == "structured_placeholder"
+        assert "人工复核" in rendered.svg

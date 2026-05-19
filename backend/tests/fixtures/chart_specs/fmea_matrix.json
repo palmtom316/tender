@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "chart_type": "fmea_matrix",
+    "title": "施工FMEA矩阵",
+    "placeholder_key": "fmea_matrix",
+    "columns": ["工序", "失效模式", "影响", "控制措施"],
+    "rows": [
+      {"cells": ["电缆接头", "受潮", "绝缘下降", "环境封闭与耐压试验"]},
+      {"cells": ["台区复电", "相序错误", "用户侧异常", "送电前核相与复电确认"]}
+    ]
+  },
+  "expected_labels": ["电缆接头", "绝缘下降"]
+}

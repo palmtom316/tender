@@ -16,6 +16,7 @@ from tender_backend.services.chart_service.render_strategy import resolve_render
 from tender_backend.services.chart_service.templates import get_chart_template
 from tender_backend.services.chart_service.specs import (
     ChartSpec,
+    DiagramPlaceholderSpec,
     FlowChartSpec,
     GanttChartSpec,
     ResponsibilityMatrixSpec,
@@ -24,6 +25,7 @@ from tender_backend.services.chart_service.specs import (
     TableRow,
 )
 from tender_backend.services.chart_service.vega_mapper import (
+    fmea_matrix_to_vega,
     indicator_table_to_vega,
     responsibility_matrix_to_vega,
     risk_matrix_to_vega,
@@ -88,6 +90,13 @@ def render_chart_spec(spec: ChartSpec) -> ChartRenderResult:
         if vega_svg:
             return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
         return ChartRenderResult(svg=_render_table_svg(spec), mermaid_source=None, engine="native_svg")
+    if spec.chart_type == "fmea_matrix" and isinstance(spec, TableChartSpec):
+        vega_svg = _render_vega_svg(fmea_matrix_to_vega(spec)) if _vega_engine_enabled() else None
+        if vega_svg:
+            return ChartRenderResult(svg=vega_svg, mermaid_source=None, engine="vl_convert")
+        return ChartRenderResult(svg=_render_table_svg(spec), mermaid_source=None, engine="native_svg")
+    if isinstance(spec, DiagramPlaceholderSpec):
+        return ChartRenderResult(svg=_render_diagram_placeholder_svg(spec), mermaid_source=None, engine="structured_placeholder")
     if strategy.primary == "native_svg" and isinstance(spec, TableChartSpec):
         return ChartRenderResult(svg=_render_table_svg(spec), mermaid_source=None, engine="native_svg")
     raise ValueError(f"unsupported chart type: {spec.chart_type}")
@@ -106,7 +115,7 @@ def build_mermaid_source(spec: ChartSpec) -> str | None:
             else:
                 lines.append(f"  {from_id} --> {to_id}")
         return "\n".join(lines)
-    if isinstance(spec, GanttChartSpec) and spec.chart_type == "schedule_gantt":
+    if isinstance(spec, GanttChartSpec) and spec.chart_type in {"schedule_gantt", "outage_timeline"}:
         lines = ["gantt", f"  title {_mermaid_text(spec.title)}", "  dateFormat  YYYY-MM-DD"]
         current_group: str | None = None
         for task in spec.tasks:
@@ -133,6 +142,25 @@ def _render_placeholder_svg(title: str, message: str) -> str:
         f"<text x='{width/2}' y='120' text-anchor='middle' font-size='14' fill='#6b7280'>{message}</text>"
         "</svg>"
     )
+
+
+def _render_diagram_placeholder_svg(spec: DiagramPlaceholderSpec) -> str:
+    width = 760
+    top = 96
+    row_height = 34
+    elements = list(spec.elements) or ["待补充结构化要素"]
+    notes = list(spec.notes) or ["需结合原始图纸、现场资料或一次接线资料人工复核"]
+    rows = elements + notes + ["人工复核后替换为正式图纸"]
+    height = top + len(rows) * row_height + 44
+    parts = [_svg_start(width, height), _title(spec.title, width)]
+    parts.append(_text("结构化占位图：需人工复核", width / 2, 68, 13, anchor="middle", fill="#6b7280"))
+    for index, value in enumerate(rows):
+        y = top + index * row_height
+        fill = "#eef6ff" if index < len(elements) else "#fff7ed"
+        parts.append(_rect(36, y - 20, width - 72, 28, fill, "#cbd5e1", 4))
+        parts.append(_text(value, 52, y, 12, anchor="start", fill="#1f2937"))
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 def _flow_to_gpt_vis_payload(spec: FlowChartSpec) -> dict[str, Any]:

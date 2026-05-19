@@ -305,6 +305,10 @@ def _config() -> dict[str, Any]:
     }
 
 
+def fmea_matrix_to_vega(spec: TableChartSpec) -> dict[str, Any]:
+    return indicator_table_to_vega(spec)
+
+
 def _risk_cell_display(items: list[str], level: str | None) -> str:
     if not items:
         return ""

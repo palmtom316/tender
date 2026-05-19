@@ -1,0 +1,14 @@
+{
+  "spec": {
+    "chart_type": "wbs_tree",
+    "title": "配网施工WBS分解图",
+    "placeholder_key": "wbs_tree",
+    "nodes": [
+      {"id": "root", "label": "配网改造"},
+      {"id": "line", "label": "线路施工", "parent": "root"},
+      {"id": "station", "label": "站房施工", "parent": "root"},
+      {"id": "test", "label": "试验送电", "parent": "root"}
+    ]
+  },
+  "expected_labels": ["配网改造", "试验送电"]
+}

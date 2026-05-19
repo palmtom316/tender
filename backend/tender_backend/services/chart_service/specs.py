@@ -12,8 +12,11 @@ SUPPORTED_CHART_TYPES = {
     "construction_flow",
     "schedule_gantt",
     "critical_path",
+    "outage_timeline",
+    "wbs_tree",
     "responsibility_matrix",
     "risk_matrix",
+    "fmea_matrix",
     "quality_system",
     "safety_system",
     "emergency_org",
@@ -21,6 +24,8 @@ SUPPORTED_CHART_TYPES = {
     "indicator_table",
     "interface_table",
     "equipment_table",
+    "single_line_diagram",
+    "site_layout",
     "closure_flow",
     "data_flow",
 }
@@ -33,6 +38,7 @@ FLOW_CHART_TYPES = {
     "emergency_org",
     "closure_flow",
     "data_flow",
+    "wbs_tree",
 }
 
 TABLE_CHART_TYPES = {
@@ -40,6 +46,12 @@ TABLE_CHART_TYPES = {
     "indicator_table",
     "interface_table",
     "equipment_table",
+    "fmea_matrix",
+}
+
+DIAGRAM_PLACEHOLDER_TYPES = {
+    "single_line_diagram",
+    "site_layout",
 }
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
@@ -90,7 +102,7 @@ class ChartEdge(BaseModel):
 
 
 class FlowChartSpec(BaseModel):
-    chart_type: Literal["org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org", "closure_flow", "data_flow"]
+    chart_type: Literal["org_chart", "construction_flow", "quality_system", "safety_system", "emergency_org", "closure_flow", "data_flow", "wbs_tree"]
     title: str = Field(min_length=1, max_length=100)
     placeholder_key: str | None = None
     direction: Literal["TB", "TD", "BT", "LR", "RL"] = "TB"
@@ -158,7 +170,7 @@ class GanttDependency(BaseModel):
 
 
 class GanttChartSpec(BaseModel):
-    chart_type: Literal["schedule_gantt", "critical_path"]
+    chart_type: Literal["schedule_gantt", "critical_path", "outage_timeline"]
     title: str = Field(min_length=1, max_length=100)
     placeholder_key: str | None = None
     date_format: Literal["YYYY-MM-DD"] = "YYYY-MM-DD"
@@ -301,7 +313,7 @@ class TableRow(BaseModel):
 
 
 class TableChartSpec(BaseModel):
-    chart_type: Literal["response_matrix", "indicator_table", "interface_table", "equipment_table"]
+    chart_type: Literal["response_matrix", "indicator_table", "interface_table", "equipment_table", "fmea_matrix"]
     title: str = Field(min_length=1, max_length=100)
     placeholder_key: str | None = None
     columns: list[str] = Field(min_length=1, max_length=12)
@@ -334,7 +346,33 @@ class TableChartSpec(BaseModel):
         return self
 
 
-ChartSpec = FlowChartSpec | GanttChartSpec | RiskMatrixSpec | ResponsibilityMatrixSpec | TableChartSpec
+class DiagramPlaceholderSpec(BaseModel):
+    chart_type: Literal["single_line_diagram", "site_layout"]
+    title: str = Field(min_length=1, max_length=100)
+    placeholder_key: str | None = None
+    elements: list[str] = Field(default_factory=list, max_length=40)
+    notes: list[str] = Field(default_factory=list, max_length=20)
+    manual_review_required: bool = True
+    caption_title: str | None = Field(default=None, max_length=100)
+    figure_no: str | None = Field(default=None, max_length=30)
+
+    @field_validator("title", "caption_title", "figure_no")
+    @classmethod
+    def plain_text(cls, value: str | None) -> str | None:
+        return _plain_text(value) if value is not None else None
+
+    @field_validator("placeholder_key")
+    @classmethod
+    def safe_placeholder(cls, value: str | None) -> str | None:
+        return _safe_placeholder(value)
+
+    @field_validator("elements", "notes")
+    @classmethod
+    def plain_list(cls, values: list[str]) -> list[str]:
+        return [_plain_text(value) for value in values if _plain_text(value)]
+
+
+ChartSpec = FlowChartSpec | GanttChartSpec | RiskMatrixSpec | ResponsibilityMatrixSpec | TableChartSpec | DiagramPlaceholderSpec
 
 
 def parse_chart_spec(spec_json: dict[str, Any]) -> ChartSpec:
@@ -342,7 +380,7 @@ def parse_chart_spec(spec_json: dict[str, Any]) -> ChartSpec:
     try:
         if chart_type in FLOW_CHART_TYPES:
             return FlowChartSpec.model_validate(spec_json)
-        if chart_type in {"schedule_gantt", "critical_path"}:
+        if chart_type in {"schedule_gantt", "critical_path", "outage_timeline"}:
             return GanttChartSpec.model_validate(spec_json)
         if chart_type == "risk_matrix":
             return RiskMatrixSpec.model_validate(spec_json)
@@ -350,6 +388,8 @@ def parse_chart_spec(spec_json: dict[str, Any]) -> ChartSpec:
             return ResponsibilityMatrixSpec.model_validate(spec_json)
         if chart_type in TABLE_CHART_TYPES:
             return TableChartSpec.model_validate(spec_json)
+        if chart_type in DIAGRAM_PLACEHOLDER_TYPES:
+            return DiagramPlaceholderSpec.model_validate(spec_json)
     except ValidationError as exc:
         raise ChartValidationError(_validation_issues(exc)) from exc
     raise ChartValidationError([{"code": "unsupported_chart_type", "message": f"unsupported chart type: {chart_type}"}])
