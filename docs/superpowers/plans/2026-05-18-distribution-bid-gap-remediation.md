@@ -93,12 +93,14 @@
 
 **Files:**
 - Use: existing package import API/script path for `bid_template_package`
+- Create: `scripts/import_confidential_business_template_package.py`
+- Test: `backend/tests/unit/test_import_confidential_business_template_script.py`
 - Create only if needed: `backend/tender_backend/db/alembic/versions/<next>_sgcc_distribution_business_docx_templates.py`
 
-- [ ] **Step 1:** 优先通过现有 template package import 流程重新导入 `sgcc_distribution_business_v1`，使数据库中的 `bid_template_item` 来自单 DOCX 标题拆分结果。
-- [ ] **Step 2:** 若必须用 migration 更新 seed 数据，版本号必须从当前 Alembic head 后创建；当前核查 head 为 `0056_longform_generation_evidence.py`，不得创建 `0050_*` 或 `0051_*`。
-- [ ] **Step 3:** migration 不得无条件把所有商务项改为 DOCX；必须先检查目标样章文件存在，或只更新已确认属于 `sgcc_distribution_business_v1` 且 `item_code` 能在单 DOCX 中匹配到的记录。
-- [ ] **Step 4:** 验证抽样 SQL：`source_kind='docx'`、`render_mode='single_docx_section'`、`relative_path` 形如 `国网配网工程商务标1-24章.docx#5.1`。
+- [x] **Step 1:** 优先通过现有 template package import 流程重新导入 `sgcc_distribution_business_v1`，使数据库中的 `bid_template_item` 来自单 DOCX 标题拆分结果。
+- [x] **Step 2:** 若必须用 migration 更新 seed 数据，版本号必须从当前 Alembic head 后创建；当前核查 head 为 `0056_longform_generation_evidence.py`，不得创建 `0050_*` 或 `0051_*`。（未使用 seed migration；通过 import 流程导入。）
+- [x] **Step 3:** migration 不得无条件把所有商务项改为 DOCX；必须先检查目标样章文件存在，或只更新已确认属于 `sgcc_distribution_business_v1` 且 `item_code` 能在单 DOCX 中匹配到的记录。（未使用 migration；脚本只导入指定机密单 DOCX。）
+- [x] **Step 4:** 验证抽样 SQL：`source_kind='docx'`、`render_mode='single_docx_section'`、`relative_path` 形如 `sgcc_distribution_business_20258B_merged.docx#5.1`。
 
 ### Task A.5：章节与上下文绑定层
 
