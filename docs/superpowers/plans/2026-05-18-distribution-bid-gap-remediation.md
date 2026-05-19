@@ -296,9 +296,9 @@
 - Modify: `backend/tender_backend/db/repositories/master_data_repo.py`
 - Test: `backend/tests/unit/test_master_data_repo.py`
 
-- [ ] **Step 1:** 建立 `outage_window`、`live_work_plan`、`distribution_automation` 三类 ledger，均以 `company_key/project_id`、`metadata_json`、`evidence_asset_id` 为基础。
-- [ ] **Step 2:** 接入章 8/9/10 相关 context builder，不阻塞 Track C 的基础交付。
-- [ ] **Step 3:** 单测覆盖增删查改和缺失 evidence 的验收提示。
+- [x] **Step 1:** 建立 `outage_window`、`live_work_plan`、`distribution_automation` 三类 ledger，均以 `company_key/project_id`、`metadata_json`、`evidence_asset_id` 为基础。
+- [x] **Step 2:** 接入章 8/9/10 相关 context builder，不阻塞 Track C 的基础交付。
+- [x] **Step 3:** 单测覆盖增删查改和缺失 evidence 的验收提示。
 
 ---
 

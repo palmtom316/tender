@@ -24,6 +24,11 @@ POWER_PERFORMANCE_METADATA_FIELDS: tuple[str, ...] = (
     "distribution_type",
     "is_live_work",
 )
+DISTRIBUTION_DOMAIN_LEDGER_TYPES: tuple[str, ...] = (
+    "outage_window",
+    "live_work_plan",
+    "distribution_automation",
+)
 
 
 def build_power_performance_metadata(
@@ -47,6 +52,20 @@ def build_power_performance_metadata(
         if value is not None:
             metadata[key] = value
     return metadata
+
+
+def distribution_domain_ledger_evidence_warnings(records: list[Any]) -> list[dict[str, str]]:
+    warnings: list[dict[str, str]] = []
+    for record in records:
+        if isinstance(record, dict):
+            evidence_asset_id = record.get("evidence_asset_id")
+            ledger_type = str(record.get("ledger_type") or "")
+        else:
+            evidence_asset_id = getattr(record, "evidence_asset_id", None)
+            ledger_type = str(getattr(record, "ledger_type", "") or "")
+        if evidence_asset_id is None:
+            warnings.append({"ledger_type": ledger_type, "reason": "missing_evidence_asset"})
+    return warnings
 
 
 @dataclass(frozen=True)
@@ -189,6 +208,18 @@ class BusinessSpecialtyLedgerRow:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class DistributionDomainLedgerRow:
+    id: UUID
+    project_id: UUID | None
+    company_key: str | None
+    ledger_type: str
+    evidence_asset_id: UUID | None
+    metadata_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
 _LIBRARY_COMPANY_COLUMNS = (
     "id, company_key, company_name, company_type, enabled, metadata_json, created_at, updated_at"
 )
@@ -220,6 +251,10 @@ _EVIDENCE_COLUMNS = (
 )
 _BUSINESS_SPECIALTY_LEDGER_COLUMNS = (
     "id, library_company_id, company_key, ledger_type, year, evidence_asset_id, "
+    "metadata_json, created_at, updated_at"
+)
+_DISTRIBUTION_DOMAIN_LEDGER_COLUMNS = (
+    "id, project_id, company_key, ledger_type, evidence_asset_id, "
     "metadata_json, created_at, updated_at"
 )
 
@@ -365,6 +400,19 @@ def _to_business_specialty_ledger(row: dict[str, Any]) -> BusinessSpecialtyLedge
         company_key=row.get("company_key"),
         ledger_type=row["ledger_type"],
         year=row["year"],
+        evidence_asset_id=row.get("evidence_asset_id"),
+        metadata_json=dict(row["metadata_json"] or {}),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _to_distribution_domain_ledger(row: dict[str, Any]) -> DistributionDomainLedgerRow:
+    return DistributionDomainLedgerRow(
+        id=row["id"],
+        project_id=row.get("project_id"),
+        company_key=row.get("company_key"),
+        ledger_type=row["ledger_type"],
         evidence_asset_id=row.get("evidence_asset_id"),
         metadata_json=dict(row["metadata_json"] or {}),
         created_at=row["created_at"],
@@ -969,6 +1017,89 @@ class MasterDataRepository:
 
     def delete_business_specialty_ledger(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="business_specialty_ledger", record_id=record_id)
+
+    def list_distribution_domain_ledgers(
+        self,
+        conn: Connection,
+        *,
+        project_id: UUID | None = None,
+        company_key: str | None = None,
+        ledger_type: str | None = None,
+    ) -> list[DistributionDomainLedgerRow]:
+        clauses: list[str] = []
+        values: list[Any] = []
+        if project_id is not None:
+            clauses.append("project_id = %s")
+            values.append(project_id)
+        if company_key:
+            clauses.append("company_key = %s")
+            values.append(company_key)
+        if ledger_type:
+            clauses.append("ledger_type = %s")
+            values.append(ledger_type)
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                f"""
+                SELECT {_DISTRIBUTION_DOMAIN_LEDGER_COLUMNS}
+                FROM distribution_domain_ledger
+                {where_sql}
+                ORDER BY ledger_type, updated_at DESC, created_at DESC
+                """,
+                values,
+            ).fetchall()
+        return [_to_distribution_domain_ledger(row) for row in rows]
+
+    def get_distribution_domain_ledger(self, conn: Connection, record_id: UUID) -> DistributionDomainLedgerRow | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"SELECT {_DISTRIBUTION_DOMAIN_LEDGER_COLUMNS} FROM distribution_domain_ledger WHERE id = %s",
+                (record_id,),
+            ).fetchone()
+        return _to_distribution_domain_ledger(row) if row else None
+
+    def create_distribution_domain_ledger(self, conn: Connection, **fields: Any) -> DistributionDomainLedgerRow:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"""
+                INSERT INTO distribution_domain_ledger (
+                  id, project_id, company_key, ledger_type, evidence_asset_id, metadata_json
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                RETURNING {_DISTRIBUTION_DOMAIN_LEDGER_COLUMNS}
+                """,
+                (
+                    uuid4(),
+                    fields.get("project_id"),
+                    fields.get("company_key"),
+                    fields["ledger_type"],
+                    fields.get("evidence_asset_id"),
+                    json.dumps(fields.get("metadata_json") or {}, ensure_ascii=False),
+                ),
+            ).fetchone()
+        conn.commit()
+        assert row is not None
+        return _to_distribution_domain_ledger(row)
+
+    def update_distribution_domain_ledger(
+        self,
+        conn: Connection,
+        record_id: UUID,
+        **fields: Any,
+    ) -> DistributionDomainLedgerRow | None:
+        return self._update_json_record(
+            conn,
+            table="distribution_domain_ledger",
+            record_id=record_id,
+            fields=fields,
+            allowed_fields={"project_id", "company_key", "ledger_type", "evidence_asset_id", "metadata_json"},
+            json_fields={"metadata_json"},
+            returning=_DISTRIBUTION_DOMAIN_LEDGER_COLUMNS,
+            mapper=_to_distribution_domain_ledger,
+        )
+
+    def delete_distribution_domain_ledger(self, conn: Connection, record_id: UUID) -> bool:
+        return self._delete(conn, table="distribution_domain_ledger", record_id=record_id)
 
     def _update_json_record(
         self,

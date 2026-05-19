@@ -8,8 +8,10 @@ from tender_backend.db.repositories.master_data_repo import (
     POWER_CERTIFICATE_GRADES,
     POWER_CERTIFICATE_TYPES,
     POWER_PERFORMANCE_METADATA_FIELDS,
+    DISTRIBUTION_DOMAIN_LEDGER_TYPES,
     MasterDataRepository,
     build_power_performance_metadata,
+    distribution_domain_ledger_evidence_warnings,
 )
 
 
@@ -69,6 +71,28 @@ def _ledger_row(
         "company_key": company_key,
         "ledger_type": ledger_type,
         "year": year,
+        "evidence_asset_id": evidence_asset_id,
+        "metadata_json": metadata_json or {},
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _distribution_ledger_row(
+    *,
+    record_id: UUID | None = None,
+    project_id: UUID | None = None,
+    company_key: str = "main_company",
+    ledger_type: str = "outage_window",
+    evidence_asset_id: UUID | None = None,
+    metadata_json: dict | None = None,
+) -> dict:
+    now = datetime(2026, 5, 19, 9, 0, 0)
+    return {
+        "id": record_id or uuid4(),
+        "project_id": project_id,
+        "company_key": company_key,
+        "ledger_type": ledger_type,
         "evidence_asset_id": evidence_asset_id,
         "metadata_json": metadata_json or {},
         "created_at": now,
@@ -219,6 +243,86 @@ def test_project_performance_repository_persists_power_domain_metadata() -> None
     insert_sql, insert_params = conn.cursor_obj.executed[0]
     assert "INSERT INTO project_performance" in insert_sql
     assert json.loads(insert_params[-1]) == metadata
+
+
+def test_distribution_domain_ledger_types_cover_outage_live_work_and_automation() -> None:
+    assert DISTRIBUTION_DOMAIN_LEDGER_TYPES == (
+        "outage_window",
+        "live_work_plan",
+        "distribution_automation",
+    )
+
+
+def test_distribution_domain_ledger_crud_and_filters() -> None:
+    record_id = uuid4()
+    project_id = uuid4()
+    evidence_asset_id = uuid4()
+    original = _distribution_ledger_row(
+        record_id=record_id,
+        project_id=project_id,
+        ledger_type="outage_window",
+        evidence_asset_id=evidence_asset_id,
+        metadata_json={"window": "2026-06-01 09:00-18:00"},
+    )
+    updated = _distribution_ledger_row(
+        record_id=record_id,
+        project_id=project_id,
+        ledger_type="outage_window",
+        evidence_asset_id=evidence_asset_id,
+        metadata_json={"window": "2026-06-02 09:00-18:00"},
+    )
+    repo = MasterDataRepository()
+
+    create_conn = _FakeConn(_RecordingCursor([original]))
+    created = repo.create_distribution_domain_ledger(
+        create_conn,
+        project_id=project_id,
+        company_key="main_company",
+        ledger_type="outage_window",
+        evidence_asset_id=evidence_asset_id,
+        metadata_json={"window": "2026-06-01 09:00-18:00"},
+    )
+    list_conn = _FakeConn(_RecordingCursor([original]))
+    listed = repo.list_distribution_domain_ledgers(
+        list_conn,
+        project_id=project_id,
+        ledger_type="outage_window",
+    )
+    update_conn = _FakeConn(_RecordingCursor([updated]))
+    changed = repo.update_distribution_domain_ledger(
+        update_conn,
+        record_id,
+        metadata_json={"window": "2026-06-02 09:00-18:00"},
+    )
+    delete_conn = _FakeConn(_RecordingCursor([]))
+    deleted = repo.delete_distribution_domain_ledger(delete_conn, record_id)
+
+    assert created.ledger_type == "outage_window"
+    assert listed[0].project_id == project_id
+    assert changed is not None
+    assert changed.metadata_json["window"] == "2026-06-02 09:00-18:00"
+    assert deleted is True
+    assert "INSERT INTO distribution_domain_ledger" in create_conn.cursor_obj.executed[0][0]
+    assert "project_id = %s" in list_conn.cursor_obj.executed[0][0]
+    assert "ledger_type = %s" in list_conn.cursor_obj.executed[0][0]
+    assert "UPDATE distribution_domain_ledger" in update_conn.cursor_obj.executed[0][0]
+    assert "DELETE FROM distribution_domain_ledger" in delete_conn.cursor_obj.executed[0][0]
+
+
+def test_distribution_domain_ledger_evidence_warnings_flag_missing_evidence() -> None:
+    records = [
+        _distribution_ledger_row(ledger_type="live_work_plan", evidence_asset_id=None),
+        _distribution_ledger_row(ledger_type="distribution_automation", evidence_asset_id=uuid4()),
+    ]
+
+    warnings = distribution_domain_ledger_evidence_warnings(records)
+
+    assert warnings == [
+        {
+            "ledger_type": "live_work_plan",
+            "reason": "missing_evidence_asset",
+        }
+    ]
 
 
 def test_create_business_specialty_ledger_persists_company_year_evidence_and_metadata() -> None:

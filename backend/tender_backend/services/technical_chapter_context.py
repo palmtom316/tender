@@ -15,6 +15,7 @@ from tender_backend.services.technical_chapter_strategies import (
     strategy_for_chapter,
 )
 from tender_backend.services.tender_constraint_service import TenderConstraintService
+from tender_backend.db.repositories.master_data_repo import distribution_domain_ledger_evidence_warnings
 
 
 class TechnicalChapterContextBuilder:
@@ -27,6 +28,7 @@ class TechnicalChapterContextBuilder:
         requirement_ids = [item["requirement_id"] for item in constraints if item.get("requirement_id")]
         strategy = strategy_for_chapter(chapter.get("chapter_code"))
         tender_summary = self._tender_summary(conn, project_id=project_id)
+        distribution_domain_ledgers = self._distribution_domain_ledgers(conn, project_id=project_id)
         return {
             "project_id": str(project_id),
             "chapter": chapter,
@@ -40,6 +42,10 @@ class TechnicalChapterContextBuilder:
             "personnel_selections": self._personnel_selections(conn, project_id=project_id),
             "equipment_selections": self._equipment_selections(conn, project_id=project_id),
             "company_assets": self._company_assets(conn),
+            "distribution_domain_ledgers": distribution_domain_ledgers,
+            "distribution_domain_ledger_warnings": distribution_domain_ledger_evidence_warnings(
+                distribution_domain_ledgers
+            ),
             "chart_assets": self._chart_assets(conn, project_id=project_id, chapter_id=chapter_id),
             "recommended_charts": chart_recommendations_for_chapter(chapter.get("chapter_code")),
             "strategy": _strategy_to_dict(strategy),
@@ -230,6 +236,20 @@ class TechnicalChapterContextBuilder:
                 ORDER BY sort_order, created_at DESC
                 LIMIT 8
                 """,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _distribution_domain_ledgers(self, conn: Connection, *, project_id: UUID) -> list[dict[str, Any]]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """
+                SELECT id, project_id, company_key, ledger_type, evidence_asset_id, metadata_json,
+                       created_at, updated_at
+                FROM distribution_domain_ledger
+                WHERE project_id = %s OR project_id IS NULL
+                ORDER BY ledger_type, updated_at DESC, created_at DESC
+                """,
+                (project_id,),
             ).fetchall()
         return [dict(row) for row in rows]
 

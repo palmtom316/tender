@@ -44,6 +44,8 @@ class _Cursor:
             self.result = self.conn.performances
         elif "FROM evidence_asset" in query:
             self.result = self.conn.evidence_assets
+        elif "FROM distribution_domain_ledger" in query:
+            self.result = self.conn.distribution_domain_ledgers
         else:
             self.result = []
         return self
@@ -133,6 +135,28 @@ class _Conn:
         self.evidence_assets = [
             {"id": uuid4(), "asset_name": "质量体系认证证书", "asset_domain": "qualification", "asset_type": "certificate", "file_name": "quality.pdf"}
         ]
+        self.distribution_domain_ledgers = [
+            {
+                "id": uuid4(),
+                "project_id": self.project_id,
+                "company_key": "main_company",
+                "ledger_type": "outage_window",
+                "evidence_asset_id": uuid4(),
+                "metadata_json": {"window": "2026-06-01 09:00-18:00"},
+                "created_at": "2026-05-19T09:00:00",
+                "updated_at": "2026-05-19T09:00:00",
+            },
+            {
+                "id": uuid4(),
+                "project_id": self.project_id,
+                "company_key": "main_company",
+                "ledger_type": "live_work_plan",
+                "evidence_asset_id": None,
+                "metadata_json": {"scope": "低压台区不停电作业"},
+                "created_at": "2026-05-19T09:00:00",
+                "updated_at": "2026-05-19T09:00:00",
+            },
+        ]
         self.queries = []
 
     def cursor(self, *args, **kwargs):
@@ -157,6 +181,10 @@ def test_technical_chapter_context_builder_collects_traceable_inputs():
     assert context["company_assets"]["certificates"][0]["certificate_name"] == "电力工程施工总承包"
     assert context["company_assets"]["performances"][0]["project_name"] == "10kV配网改造"
     assert context["company_assets"]["evidence_assets"][0]["asset_name"] == "质量体系认证证书"
+    assert context["distribution_domain_ledgers"][0]["ledger_type"] == "outage_window"
+    assert context["distribution_domain_ledger_warnings"] == [
+        {"ledger_type": "live_work_plan", "reason": "missing_evidence_asset"}
+    ]
     assert context["chart_assets"][0]["placeholder_key"] == "quality_system"
     assert "quality_system" in context["recommended_charts"]
     assert "response_matrix" in context["recommended_charts"]
@@ -183,6 +211,7 @@ def test_technical_chapter_context_builder_handles_empty_optional_data():
     conn.certificates = []
     conn.performances = []
     conn.evidence_assets = []
+    conn.distribution_domain_ledgers = []
 
     context = TechnicalChapterContextBuilder().build(conn, project_id=conn.project_id, chapter_id=conn.chapter_id)
 
@@ -190,6 +219,8 @@ def test_technical_chapter_context_builder_handles_empty_optional_data():
     assert context["constraints"] == []
     assert context["standard_clauses"] == []
     assert context["company_assets"]["company_profiles"] == []
+    assert context["distribution_domain_ledgers"] == []
+    assert context["distribution_domain_ledger_warnings"] == []
     assert "quality_system" in context["recommended_charts"]
     assert context["matched_keywords"] == []
     assert context["prompt_template"]["status"] == "loaded"
