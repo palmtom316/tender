@@ -11,6 +11,44 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 
 
+POWER_CERTIFICATE_TYPES: tuple[str, ...] = (
+    "承装（修、试）电力设施许可证",
+    "输变电工程专业承包",
+    "电力工程施工总承包",
+)
+POWER_CERTIFICATE_GRADES: tuple[str, ...] = ("一级", "二级", "三级", "四级", "五级")
+POWER_PERFORMANCE_METADATA_FIELDS: tuple[str, ...] = (
+    "voltage_level_kv",
+    "circuit_count",
+    "capacity_mva",
+    "distribution_type",
+    "is_live_work",
+)
+
+
+def build_power_performance_metadata(
+    base: dict[str, Any] | None = None,
+    *,
+    voltage_level_kv: int | float | str | None = None,
+    circuit_count: int | str | None = None,
+    capacity_mva: int | float | str | None = None,
+    distribution_type: str | None = None,
+    is_live_work: bool | None = None,
+) -> dict[str, Any]:
+    metadata = dict(base or {})
+    candidates = {
+        "voltage_level_kv": voltage_level_kv,
+        "circuit_count": circuit_count,
+        "capacity_mva": capacity_mva,
+        "distribution_type": distribution_type,
+        "is_live_work": is_live_work,
+    }
+    for key, value in candidates.items():
+        if value is not None:
+            metadata[key] = value
+    return metadata
+
+
 @dataclass(frozen=True)
 class LibraryCompanyRow:
     id: UUID

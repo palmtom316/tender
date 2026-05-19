@@ -284,10 +284,10 @@
 - Modify as needed: `backend/tender_backend/api/master_data_certificates.py`
 - Test: `backend/tests/unit/test_master_data_repo.py`
 
-- [ ] **Step 1:** 不引用不存在的 `db/models/qualification_certificate.py`、`project_performance.py`。按当前 repository + migration 模式扩展。
-- [ ] **Step 2:** 资质枚举扩展：承装/承修/承试电力设施许可证、输变电专业承包、电力工程总承包；等级支持一级至五级。
-- [ ] **Step 3:** 业绩 metadata 增加 `voltage_level_kv`、`circuit_count`、`capacity_mva`、`distribution_type`、`is_live_work`。
-- [ ] **Step 4:** 保持字符串兼容，不把历史自由文本一次性硬切为 enum。
+- [x] **Step 1:** 不引用不存在的 `db/models/qualification_certificate.py`、`project_performance.py`。按当前 repository + migration 模式扩展。
+- [x] **Step 2:** 资质枚举扩展：承装/承修/承试电力设施许可证、输变电专业承包、电力工程总承包；等级支持一级至五级。
+- [x] **Step 3:** 业绩 metadata 增加 `voltage_level_kv`、`circuit_count`、`capacity_mva`、`distribution_type`、`is_live_work`。
+- [x] **Step 4:** 保持字符串兼容，不把历史自由文本一次性硬切为 enum。
 
 ### Task D.4：不停电作业 / 配网自动化 / 停电窗口数据模型
 

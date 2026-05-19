@@ -10,7 +10,12 @@ from psycopg import Connection
 
 from tender_backend.core.security import get_current_user
 from tender_backend.db.deps import get_db_conn
-from tender_backend.db.repositories.master_data_repo import MasterDataRepository
+from tender_backend.db.repositories.master_data_repo import (
+    POWER_CERTIFICATE_GRADES,
+    POWER_CERTIFICATE_TYPES,
+    POWER_PERFORMANCE_METADATA_FIELDS,
+    MasterDataRepository,
+)
 
 
 router = APIRouter(tags=["master-data"], dependencies=[Depends(get_current_user)])
@@ -62,6 +67,12 @@ class QualificationCertificateOut(QualificationCertificateBase):
     updated_at: str
 
 
+class PowerIndustryOptionsOut(BaseModel):
+    certificate_types: list[str]
+    certificate_grades: list[str]
+    performance_metadata_fields: list[str]
+
+
 def _certificate_out(row) -> QualificationCertificateOut:
     return QualificationCertificateOut(
         id=row.id,
@@ -79,6 +90,15 @@ def _certificate_out(row) -> QualificationCertificateOut:
         metadata_json=row.metadata_json,
         created_at=row.created_at.isoformat(),
         updated_at=row.updated_at.isoformat(),
+    )
+
+
+@router.get("/master-data/power-industry-options", response_model=PowerIndustryOptionsOut)
+async def get_power_industry_options() -> PowerIndustryOptionsOut:
+    return PowerIndustryOptionsOut(
+        certificate_types=list(POWER_CERTIFICATE_TYPES),
+        certificate_grades=list(POWER_CERTIFICATE_GRADES),
+        performance_metadata_fields=list(POWER_PERFORMANCE_METADATA_FIELDS),
     )
 
 
