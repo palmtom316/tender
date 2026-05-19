@@ -40,10 +40,10 @@
 
 | Track | 状态 | 修订后判断 |
 |---|---|---|
-| Track A 商务标模板闭环 | ⛔ 未闭环 | 单 DOCX importer 基础已具备；缺 `single_docx_section` renderer、BusinessBidAssembler 写草稿、整卷导出读取渲染产物 |
-| Track B 商务标台账与正文 | ⛔ 未启动 | companybase MVP 只导入 `公司主体/公司资料/人员资料/附件索引`；财务与专项 sheet 未接入 |
-| Track C 技术标交付闭环 | ⚠️ 部分完成 | 5 章 longform 完备；非 longform 章节有通用 fallback，但缺承诺函/证照/人员附件等专用交付语义 |
-| Track D 配网行业纵深 | ⛔ 未启动 | 5 套通用 prompt 已存在；缺业务线切片、专用 chart_type、companybase 电力枚举 |
+| Track A 商务标模板闭环 | ✅ 已完成 | 已打通机密单 DOCX 样章检查、`single_docx_section` 渲染、BusinessBidAssembler artifact、商务整卷导出和本地机密验收 |
+| Track B 商务标台账与正文 | ✅ 已完成 | 已接入财务与 6 类专项台账、4 类承诺/说明文 context builder、正文型章节生成和商务/技术偏差表分离 |
+| Track C 技术标交付闭环 | ✅ 已完成 | 已补齐 16 章 strategy、完整技术标验收入口和可配置暗标校验 |
+| Track D 配网行业纵深 | ✅ 已完成 | 已补齐 4 业务线切片、5 类 chart_type、电力行业主数据和配网领域 ledger |
 | Track E 2026-05-17 遗留收口 | ⚠️ 阻塞 | Track 3 T9 缺真实样本；Track 4 缺真实 project-id + DOCX + 专家评分输入 |
 
 ---
