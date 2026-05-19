@@ -87,3 +87,29 @@ def test_run_business_bid_acceptance_collects_24_chapter_evidence(monkeypatch, t
     assert evidence["chapters"][4]["chapter_code"] == "5"
     assert evidence["chapters"][4]["rendered"] is True
     assert evidence["chapters"][4]["size_kb"] > 0
+
+
+def test_business_bid_acceptance_hard_stop_accepts_subchapter_records(tmp_path):
+    output = tmp_path / "business.docx"
+    document = Document()
+    document.add_paragraph("business bid")
+    document.save(output)
+    chapters = []
+    for index in range(1, 25):
+        chapters.append(
+            {
+                "chapter_code": str(index),
+                "rendered": True,
+                "placeholder_unfilled_count": 0,
+            }
+        )
+    chapters.extend(
+        [
+            {"chapter_code": "8.1", "rendered": True, "placeholder_unfilled_count": 0},
+            {"chapter_code": "8.1.1", "rendered": True, "placeholder_unfilled_count": 0},
+        ]
+    )
+
+    failures = business_acceptance._hard_stop_failures(chapters=chapters, output_docx=output)
+
+    assert failures == []

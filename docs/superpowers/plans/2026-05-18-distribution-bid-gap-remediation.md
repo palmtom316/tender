@@ -147,7 +147,7 @@
 - [x] **Step 1:** 脚本入参：`--project-id`、`--company-id`、`--output-dir`、`--enable-docxtpl`。
 - [x] **Step 2:** 脚本执行：打开灰度开关 -> `BusinessBidAssembler.assemble(...)` -> `render_volume_docx(volume_type='business')` -> 输出 DOCX。
 - [x] **Step 3:** evidence JSON 至少包含每章 `chapter_code`、`rendered`、`rendered_docx_path`、`missing_material_count`、`placeholder_unfilled_count`、`size_kb`。
-- [ ] **Step 4:** hard stop：24 章均有章节记录，关键章节 1/2/5/6/8/10/23/24 无未填占位符，整卷 DOCX 非空且可由 python-docx 打开。（脚本已实现门禁；真实 `project_id/company_id/DATABASE_URL` 验收未执行。）
+- [x] **Step 4:** hard stop：24 章均有章节记录，关键章节 1/2/5/6/8/10/23/24 无未填占位符，整卷 DOCX 非空且可由 python-docx 打开。（本地机密 evidence：`docs/acceptance/private/business_bid_acceptance_20258B/evidence.json`，不提交原始 evidence。）
 
 ---
 

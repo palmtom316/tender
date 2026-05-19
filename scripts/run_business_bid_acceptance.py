@@ -83,8 +83,11 @@ def _docx_openable(path: Path) -> bool:
 def _hard_stop_failures(*, chapters: list[dict], output_docx: Path) -> list[str]:
     failures: list[str] = []
     chapter_by_code = {chapter["chapter_code"]: chapter for chapter in chapters}
-    if len(chapters) != 24:
-        failures.append(f"expected 24 business chapter records, got {len(chapters)}")
+    top_level_codes = {chapter["chapter_code"] for chapter in chapters if "." not in chapter["chapter_code"]}
+    expected_top_level_codes = {str(index) for index in range(1, 25)}
+    missing_top_level = sorted(expected_top_level_codes - top_level_codes, key=lambda value: int(value))
+    if missing_top_level:
+        failures.append("missing top-level business chapters: " + ", ".join(missing_top_level))
     for code in sorted(CRITICAL_CHAPTER_CODES, key=lambda value: int(value)):
         chapter = chapter_by_code.get(code)
         if chapter is None:
