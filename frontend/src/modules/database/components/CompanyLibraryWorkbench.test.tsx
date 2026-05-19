@@ -53,7 +53,7 @@ describe("CompanyLibraryWorkbench", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     fetchLibraryCompaniesMock
       .mockResolvedValueOnce([
-        { id: "lib-1", company_name: "REDACTED", company_type: "施工总承包", company_key: "REDACTED", enabled: true, metadata_json: {}, created_at: "", updated_at: "" },
+        { id: "lib-1", company_name: "重庆示例电力", company_type: "施工总承包", company_key: "cq-demo", enabled: true, metadata_json: {}, created_at: "", updated_at: "" },
         { id: "lib-2", company_name: "重庆山城电建", company_type: "输变电", company_key: "cq-sc", enabled: true, metadata_json: {}, created_at: "", updated_at: "" },
       ])
       .mockResolvedValueOnce([
@@ -73,21 +73,21 @@ describe("CompanyLibraryWorkbench", () => {
 
     render(<CompanyLibraryWorkbench />);
 
-    expect(await screen.findByRole("button", { name: "删除公司库 REDACTED" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "删除公司库 重庆示例电力" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除公司库 重庆山城电建" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "删除公司库 REDACTED" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除公司库 重庆示例电力" }));
 
     await waitFor(() => expect(deleteLibraryCompanyMock).toHaveBeenCalledWith("lib-1"));
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "删除公司库 REDACTED" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: "删除公司库 重庆示例电力" })).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: "删除公司库 重庆山城电建" })).toBeInTheDocument();
   });
 
   it("renders contract performance ledger and submits structured form", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    fetchLibraryCompaniesMock.mockResolvedValue([{ id: "lib-1", company_name: "REDACTED", company_type: "施工总承包", company_key: "REDACTED", enabled: true, metadata_json: {}, created_at: "", updated_at: "" }]);
+    fetchLibraryCompaniesMock.mockResolvedValue([{ id: "lib-1", company_name: "重庆示例电力", company_type: "施工总承包", company_key: "cq-demo", enabled: true, metadata_json: {}, created_at: "", updated_at: "" }]);
     fetchAssetTaxonomyMock.mockResolvedValue({
       domains: [
         { domain: "company_qualification", label: "公司资质文件", categories: [["business_license", "营业执照"]] },

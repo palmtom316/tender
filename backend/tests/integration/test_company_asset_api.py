@@ -141,7 +141,7 @@ def test_company_asset_crud_flow() -> None:
     try:
         library_company = client.post(
             "/api/master-data/library-companies",
-            json={"company_name": "REDACTED"},
+            json={"company_name": "重庆示例电力工程有限责任公司"},
         )
         assert library_company.status_code == 201
         library_company_id = UUID(library_company.json()["id"])
@@ -202,7 +202,7 @@ def test_company_asset_delete_conflict_returns_409() -> None:
         project_id = uuid4()
         conn.execute(
             "INSERT INTO library_company (id, company_key, company_name) VALUES (%s, %s, %s)",
-            (library_company_id, "REDACTED", "REDACTED"),
+            (library_company_id, "cq-demo", "重庆示例电力工程有限责任公司"),
         )
         conn.execute(
             """

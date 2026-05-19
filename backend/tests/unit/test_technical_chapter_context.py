@@ -129,7 +129,7 @@ class _Conn:
         self.equipment = [{"id": uuid4(), "asset_type": "tool", "intended_role": "质量检测", "snapshot_json": {"name": "接地电阻测试仪"}, "confirmed": True}]
         self.charts = [{"id": uuid4(), "chart_type": "quality_system", "placeholder_key": "quality_system", "title": "质量管理体系图", "status": "draft"}]
         self.company_profiles = [
-            {"id": uuid4(), "company_name": "REDACTED", "business_scope": "输变电工程施工", "profile_json": {"strength": "国网项目经验"}}
+            {"id": uuid4(), "company_name": "示例电力工程公司", "business_scope": "输变电工程施工", "profile_json": {"strength": "国网项目经验"}}
         ]
         self.certificates = [
             {"id": uuid4(), "certificate_name": "电力工程施工总承包", "grade": "二级", "specialty": "电力工程", "valid_to": "2027-12-31", "status": "active"}
@@ -182,7 +182,7 @@ def test_technical_chapter_context_builder_collects_traceable_inputs():
     assert context["standard_clauses"][0]["standard_name"] == "国家电网施工质量标准"
     assert context["personnel_selections"][0]["snapshot_json"]["name"] == "张三"
     assert context["equipment_selections"][0]["snapshot_json"]["name"] == "接地电阻测试仪"
-    assert context["company_assets"]["company_profiles"][0]["company_name"] == "REDACTED"
+    assert context["company_assets"]["company_profiles"][0]["company_name"] == "示例电力工程公司"
     assert context["company_assets"]["certificates"][0]["certificate_name"] == "电力工程施工总承包"
     assert context["company_assets"]["performances"][0]["project_name"] == "10kV配网改造"
     assert context["company_assets"]["evidence_assets"][0]["asset_name"] == "质量体系认证证书"

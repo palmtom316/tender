@@ -22,7 +22,7 @@ def _full_materials() -> dict:
         for category in binding.asset_categories
     }
     return {
-        "company": {"company_name": "REDACTED", "legal_representative": "张三"},
+        "company": {"company_name": "重庆示例电力工程有限责任公司", "legal_representative": "张三"},
         "tender": {"project_name": "配网工程", "purchaser_name": "REDACTED"},
         "assets": [
             {"asset_category": category, "file_name": f"{category}.pdf"}
@@ -65,7 +65,7 @@ def test_each_business_chapter_builder_returns_context_shape_for_full_materials(
     result = binding.context_builder(chapter_code, _full_materials(), binding)
 
     assert result["chapter_code"] == chapter_code
-    assert result["company"]["company_name"] == "REDACTED"
+    assert result["company"]["company_name"] == "重庆示例电力工程有限责任公司"
     assert result["tender"]["project_name"] == "配网工程"
     assert result["missing_materials"] == []
 
@@ -74,7 +74,7 @@ def test_build_business_chapter_context_wraps_render_context_for_assembler_consu
     result = build_business_chapter_context("5", _full_materials())
 
     assert result["chapter_code"] == "5"
-    assert result["context"]["company"]["company_name"] == "REDACTED"
+    assert result["context"]["company"]["company_name"] == "重庆示例电力工程有限责任公司"
     assert result["context"]["tender"]["project_name"] == "配网工程"
     assert isinstance(result["asset_categories"], list)
     assert result["missing_materials"] == []
@@ -85,12 +85,12 @@ def test_generic_attachment_builders_report_missing_assets_as_structured_gaps(ch
     result = build_business_chapter_context(
         chapter_code,
         {
-            "company": {"company_name": "REDACTED"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司"},
             "tender": {"project_name": "配网工程"},
         },
     )
 
-    assert result["context"]["company"]["company_name"] == "REDACTED"
+    assert result["context"]["company"]["company_name"] == "重庆示例电力工程有限责任公司"
     assert result["context"]["tender"]["project_name"] == "配网工程"
     assert {"chapter_code": chapter_code, "material_key": "asset", "reason": "missing_required_material"} in result["missing_materials"]
 
@@ -100,14 +100,14 @@ def test_commitment_builders_return_company_tender_and_signature_block(chapter_c
     result = build_business_chapter_context(
         chapter_code,
         {
-            "company": {"company_name": "REDACTED", "legal_representative": "张三"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司", "legal_representative": "张三"},
             "tender": {"project_name": "配网工程", "purchaser_name": "REDACTED"},
             "commit_date": "2026-05-19",
             "signature_block": {"signer": "法定代表人"},
         },
     )
 
-    assert result["context"]["company"]["company_name"] == "REDACTED"
+    assert result["context"]["company"]["company_name"] == "重庆示例电力工程有限责任公司"
     assert result["context"]["company"]["legal_representative"] == "张三"
     assert result["context"]["tender"]["project_name"] == "配网工程"
     assert result["context"]["tender"]["purchaser_name"] == "REDACTED"
@@ -161,7 +161,7 @@ def test_specialty_ledger_builders_report_structured_gaps_without_fabricating_da
     result = build_business_chapter_context(
         chapter_code,
         {
-            "company": {"company_name": "REDACTED"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司"},
             "tender": {"project_name": "配网工程"},
         },
     )
@@ -174,13 +174,13 @@ def test_company_profile_binding_returns_template_context_keys() -> None:
     result = build_business_chapter_context(
         "5",
         {
-            "company": {"company_name": "REDACTED"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司"},
             "tender": {"project_name": "配网工程"},
             "assets": [{"asset_category": "business_license", "file_name": "营业执照.pdf"}],
         },
     )
 
-    assert result["context"]["company"]["company_name"] == "REDACTED"
+    assert result["context"]["company"]["company_name"] == "重庆示例电力工程有限责任公司"
     assert result["context"]["tender"]["project_name"] == "配网工程"
     assert result["context"]["asset"][0]["file_name"] == "营业执照.pdf"
     assert result["missing_materials"] == []
@@ -190,7 +190,7 @@ def test_attachment_index_alias_feeds_asset_context() -> None:
     result = build_business_chapter_context(
         "3",
         {
-            "company": {"company_name": "REDACTED"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司"},
             "tender": {"project_name": "配网工程"},
             "attachment_index": [{"asset_category": "business_license", "file_name": "营业执照.pdf"}],
         },
@@ -218,7 +218,7 @@ def test_people_binding_uses_personnel_and_reports_missing_company() -> None:
 
 def test_certificate_performance_and_financial_builders_reuse_existing_master_data() -> None:
     materials = {
-        "company": {"company_name": "REDACTED"},
+        "company": {"company_name": "重庆示例电力工程有限责任公司"},
         "tender": {"project_name": "配网工程"},
         "certificates": [{"certificate_name": "质量管理体系认证证书"}],
         "performances": [{"project_name": "10kV配网改造"}],
@@ -240,7 +240,7 @@ def test_financial_attachments_alias_feeds_financial_asset_context() -> None:
     result = build_business_chapter_context(
         "8",
         {
-            "company": {"company_name": "REDACTED"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司"},
             "tender": {"project_name": "配网工程"},
             "financial_statements": [{"fiscal_year": 2024, "statement_type": "annual_report"}],
             "financial_attachments": [{"file_name": "2024审计报告.pdf"}],
@@ -255,12 +255,12 @@ def test_missing_specialty_ledger_is_structured_gap_not_fabricated_data() -> Non
     result = build_business_chapter_context(
         "10",
         {
-            "company": {"company_name": "REDACTED"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司"},
             "tender": {"project_name": "配网工程"},
         },
     )
 
-    assert result["context"]["company"]["company_name"] == "REDACTED"
+    assert result["context"]["company"]["company_name"] == "重庆示例电力工程有限责任公司"
     assert "bank_accounts" not in result["context"]
     assert result["missing_materials"] == [
         {"chapter_code": "10", "material_key": "bank_accounts", "reason": "missing_specialty_ledger"}

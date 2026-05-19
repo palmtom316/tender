@@ -278,7 +278,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
 
         company = client.post(
             "/api/master-data/company-profiles",
-            json={"company_name": "REDACTED", "contact_name": "王莉莉"},
+            json={"company_name": "重庆示例电力工程有限责任公司", "contact_name": "王莉莉"},
         )
         assert company.status_code == 201
         person = client.post(
@@ -290,7 +290,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
             "/api/master-data/certificates",
             json={
                 "certificate_name": "质量管理体系认证证书",
-                "holder_name": "REDACTED",
+                "holder_name": "重庆示例电力工程有限责任公司",
                 "certificate_no": "ISO-001",
             },
         )
@@ -371,8 +371,8 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         assert preview.status_code == 200
         body = preview.json()
         preview_bindings = {row["binding_name"]: row for row in body["items"][0]["bindings"]}
-        assert preview_bindings["company_basic"]["data"]["company_name"] == "REDACTED"
-        assert preview_bindings["company_basic"]["data"]["company_title"] == "REDACTED"
+        assert preview_bindings["company_basic"]["data"]["company_name"] == "重庆示例电力工程有限责任公司"
+        assert preview_bindings["company_basic"]["data"]["company_title"] == "重庆示例电力工程有限责任公司"
         assert preview_bindings["company_basic"]["data"]["contact_summary"] == "王莉莉"
         assert preview_bindings["team_people"]["matched_count"] == 1
         assert preview_bindings["certificate_assets"]["matched_count"] == 1
@@ -380,8 +380,8 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         item_render = client.get(f"/api/template-items/{document_item_id}/render-context")
         assert item_render.status_code == 200
         assert item_render.json()["ready"] is True
-        assert item_render.json()["context"]["company"]["company_name"] == "REDACTED"
-        assert item_render.json()["context"]["company"]["company_title"] == "REDACTED"
+        assert item_render.json()["context"]["company"]["company_name"] == "重庆示例电力工程有限责任公司"
+        assert item_render.json()["context"]["company"]["company_title"] == "重庆示例电力工程有限责任公司"
         assert item_render.json()["bindings"][0]["field_mapping_mode"] == "augment"
 
         suggestions = client.get(f"/api/template-items/{document_item_id}/field-mapping-suggestions")
@@ -410,7 +410,7 @@ def test_binding_rule_and_context_preview_flow(tmp_path: Path, monkeypatch: pyte
         assert rendered.json()["output_path"].endswith(".docx")
         rendered_doc = Document(rendered.json()["output_path"])
         rendered_text = "\n".join(paragraph.text for paragraph in rendered_doc.paragraphs)
-        assert "投标人：REDACTED" in rendered_text
+        assert "投标人：重庆示例电力工程有限责任公司" in rendered_text
         assert "项目人员数：1" in rendered_text
         assert "附件数：1" in rendered_text
 

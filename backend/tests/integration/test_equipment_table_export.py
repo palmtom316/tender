@@ -24,7 +24,7 @@ def test_equipment_table_renderer_preview_and_xlsx() -> None:
         asset_id = uuid4()
         conn.execute(
             "INSERT INTO library_company (id, company_key, company_name) VALUES (%s, %s, %s)",
-            (library_company_id, f"l-{library_company_id.hex[:8]}", "REDACTED"),
+            (library_company_id, f"l-{library_company_id.hex[:8]}", "重庆示例电力工程有限责任公司"),
         )
         conn.execute("INSERT INTO project (id, name) VALUES (%s, %s)", (project_id, "测试项目"))
         conn.execute(

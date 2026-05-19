@@ -151,7 +151,7 @@ def test_render_docx_injects_equipment_tables(tmp_path: Path, monkeypatch: pytes
         _apply_docx_schema(conn)
         conn.execute(
             "INSERT INTO library_company (id, company_key, company_name) VALUES (%s, %s, %s)",
-            (library_company_id, f"REDACTED-{library_company_id.hex[:8]}", "REDACTED"),
+            (library_company_id, f"cq-demo-{library_company_id.hex[:8]}", "重庆示例电力工程有限责任公司"),
         )
         conn.execute("INSERT INTO project (id, name) VALUES (%s, %s)", (project_id, "测试项目"))
         conn.execute(
@@ -210,7 +210,7 @@ def test_render_docx_injects_personnel_table(tmp_path: Path, monkeypatch: pytest
         _apply_docx_schema(conn)
         conn.execute(
             "INSERT INTO library_company (id, company_key, company_name) VALUES (%s, %s, %s)",
-            (library_company_id, f"cq-personnel-{library_company_id.hex[:8]}", "REDACTED"),
+            (library_company_id, f"cq-personnel-{library_company_id.hex[:8]}", "重庆示例电力工程有限责任公司"),
         )
         conn.execute("INSERT INTO project (id, name) VALUES (%s, %s)", (project_id, "测试项目"))
         conn.execute(

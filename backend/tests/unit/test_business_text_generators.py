@@ -29,7 +29,7 @@ def test_generate_business_text_uses_fake_gateway_without_blind_sensitive_fields
         "11",
         {
             "company": {
-                "company_name": "REDACTED",
+                "company_name": "重庆示例电力工程有限责任公司",
                 "legal_representative": "张三",
                 "contact_phone": "13800000000",
             },
@@ -51,7 +51,7 @@ def test_generate_business_text_uses_fake_gateway_without_blind_sensitive_fields
     assert result["missing_materials"] == []
     assert result["evidence_refs"] == ["asset-green-1"]
     prompt_blob = str(calls[0]["messages"])
-    assert "REDACTED" not in prompt_blob
+    assert "重庆示例电力工程有限责任公司" not in prompt_blob
     assert "张三" not in prompt_blob
     assert "13800000000" not in prompt_blob
     assert "配网工程" not in prompt_blob
@@ -69,7 +69,7 @@ def test_generate_business_text_reports_missing_materials_without_calling_gatewa
     result = generate_business_text(
         "15",
         {
-            "company": {"company_name": "REDACTED"},
+            "company": {"company_name": "重庆示例电力工程有限责任公司"},
             "tender": {"project_name": "配网工程"},
         },
         completion_fn=fake_gateway,

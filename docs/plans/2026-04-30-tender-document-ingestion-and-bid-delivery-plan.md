@@ -486,7 +486,7 @@
 
 ## Test And Acceptance To-Do
 
-- [ ] 使用真实 ZIP 样例：`docs/国网招标文件/包1_完整招标文件_REDACTED.zip`。
+- [ ] 使用真实 ZIP 样例（本地放置于 `docs/国网招标文件/` 或通过 `SGCC_TENDER_SAMPLE_ZIP` 环境变量指定）。
 - [ ] 准备至少 1 个 PDF 招标文件样例。
 - [ ] ZIP 解包测试。
 - [ ] GBK 文件名测试。

@@ -17,6 +17,13 @@ def _db_url() -> str | None:
     return os.environ.get("DATABASE_URL")
 
 
+def _sample_tender_zip() -> Path:
+    custom = os.environ.get("SGCC_TENDER_SAMPLE_ZIP")
+    if custom:
+        return Path(custom)
+    return Path(__file__).resolve().parents[3] / "docs" / "国网招标文件" / "sample_tender_package.zip"
+
+
 def _apply_tender_document_schema(conn: psycopg.Connection) -> None:
     conn.execute(load_initial_schema_sql())
     conn.execute("""
@@ -103,7 +110,7 @@ def test_upload_real_zip_tender_package(tmp_path: Path, monkeypatch: pytest.Monk
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
 
-    sample = Path(__file__).resolve().parents[3] / "docs" / "国网招标文件" / "包1_完整招标文件_REDACTED.zip"
+    sample = _sample_tender_zip()
     if not sample.is_file():
         pytest.skip("real SGCC tender ZIP sample is not available")
 
@@ -264,7 +271,7 @@ def test_parse_uploaded_zip_office_files(tmp_path: Path, monkeypatch: pytest.Mon
     if not db_url:
         pytest.skip("DATABASE_URL not set; skipping integration test")
 
-    sample = Path(__file__).resolve().parents[3] / "docs" / "国网招标文件" / "包1_完整招标文件_REDACTED.zip"
+    sample = _sample_tender_zip()
     if not sample.is_file():
         pytest.skip("real SGCC tender ZIP sample is not available")
 

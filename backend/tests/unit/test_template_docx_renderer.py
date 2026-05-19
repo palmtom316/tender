@@ -57,7 +57,7 @@ def test_render_company_profile_accepts_mapped_alias_fields() -> None:
         doc,
         {
             "company": {
-                "company_title": "REDACTED",
+                "company_title": "重庆示例电力工程有限责任公司",
                 "credit_code": "91500105MA5U123456",
                 "address_text": "重庆市江北区",
                 "contact_summary": "王莉莉 / 13800000000",
@@ -67,7 +67,7 @@ def test_render_company_profile_accepts_mapped_alias_fields() -> None:
 
     table = doc.tables[0]
     values = [cell.text for row in table.rows for cell in row.cells]
-    assert "REDACTED" in values
+    assert "重庆示例电力工程有限责任公司" in values
     assert "91500105MA5U123456" in values
     assert "重庆市江北区" in values
     assert "王莉莉 / 13800000000" in values
@@ -208,14 +208,14 @@ def test_render_template_item_docx_renders_single_docx_template(tmp_path: Path, 
         lambda conn, *, item_id: {
             "ready": True,
             "missing_required_bindings": [],
-            "context": {"company": {"company_name": "REDACTED"}},
+            "context": {"company": {"company_name": "重庆示例电力工程有限责任公司"}},
         },
     )
 
     result = render_template_item_docx(None, item_id=item_id, output_dir=tmp_path / "out")
 
     rendered = Document(result["output_path"])
-    assert "投标人：REDACTED" in "\n".join(p.text for p in rendered.paragraphs)
+    assert "投标人：重庆示例电力工程有限责任公司" in "\n".join(p.text for p in rendered.paragraphs)
 
 
 def test_render_single_docx_section_splits_relative_path_anchor(tmp_path: Path, monkeypatch) -> None:
@@ -255,14 +255,14 @@ def test_render_single_docx_section_splits_relative_path_anchor(tmp_path: Path, 
         lambda conn, *, item_id: {
             "ready": True,
             "missing_required_bindings": [],
-            "context": {"company": {"company_name": "REDACTED"}},
+            "context": {"company": {"company_name": "重庆示例电力工程有限责任公司"}},
         },
     )
 
     result = render_template_item_docx(None, item_id=item_id, output_dir=tmp_path / "out")
 
     rendered = Document(result["output_path"])
-    assert "投标人：REDACTED" in "\n".join(p.text for p in rendered.paragraphs)
+    assert "投标人：重庆示例电力工程有限责任公司" in "\n".join(p.text for p in rendered.paragraphs)
 
 
 def test_render_single_docx_section_extracts_target_chapter_only(tmp_path: Path, monkeypatch) -> None:
@@ -310,7 +310,7 @@ def test_render_single_docx_section_extracts_target_chapter_only(tmp_path: Path,
             "missing_required_bindings": [],
             "context": {
                 "company": {
-                    "company_name": "REDACTED",
+                    "company_name": "重庆示例电力工程有限责任公司",
                     "legal_representative": "张三",
                 }
             },
@@ -322,7 +322,7 @@ def test_render_single_docx_section_extracts_target_chapter_only(tmp_path: Path,
     rendered = Document(result["output_path"])
     paragraphs = "\n".join(paragraph.text for paragraph in rendered.paragraphs)
     tables = "\n".join(cell.text for table in rendered.tables for row in table.rows for cell in row.cells)
-    assert "5.1 正文：REDACTED" in paragraphs
+    assert "5.1 正文：重庆示例电力工程有限责任公司" in paragraphs
     assert "法定代表人：张三" in paragraphs
     assert "5.2.企业业绩表" not in paragraphs
     assert "5.2 正文不应进入输出" not in paragraphs

@@ -148,7 +148,7 @@ def test_personnel_selection_flow() -> None:
         _reset_personnel_tables(conn)
         conn.execute(
             "INSERT INTO library_company (id, company_key, company_name) VALUES (%s, %s, %s)",
-            (library_company_id, "REDACTED", "REDACTED"),
+            (library_company_id, "cq-demo-personnel", "重庆示例电力工程有限责任公司"),
         )
         conn.execute("INSERT INTO project (id, name) VALUES (%s, %s)", (project_id, "测试项目"))
         conn.execute("INSERT INTO project (id, name) VALUES (%s, %s)", (other_project_id, "其他项目"))

@@ -63,7 +63,7 @@ def _extract_zip(service: TenderDocumentIngestionService, archive_path: Path, ou
 
 
 def test_detect_upload_type_accepts_zip_and_pdf() -> None:
-    assert detect_upload_type("包1_完整招标文件.zip", "application/octet-stream") == "zip"
+    assert detect_upload_type("tender_package.zip", "application/octet-stream") == "zip"
     assert detect_upload_type("招标文件.pdf", "application/pdf") == "pdf"
 
 

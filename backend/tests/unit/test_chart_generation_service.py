@@ -44,7 +44,7 @@ def test_chart_context_redactor_removes_blind_bid_sensitive_values() -> None:
             {"snapshot_json": {"name": "张三", "certificate_no": "ABC123", "role": "安全负责人"}},
         ],
         "company_assets": {
-            "company_profiles": [{"company_name": "REDACTED", "profile_json": {"platform": "REDACTED"}}],
+            "company_profiles": [{"company_name": "示例电力工程公司", "profile_json": {"platform": "示例智慧工地"}}],
             "performances": [{"project_name": "重庆10kV示范工程", "client_name": "国网重庆电力"}],
         },
     }
@@ -54,7 +54,7 @@ def test_chart_context_redactor_removes_blind_bid_sensitive_values() -> None:
 
     assert "张三" not in rendered
     assert "ABC123" not in rendered
-    assert "REDACTED" not in rendered
+    assert "示例电力工程公司" not in rendered
     assert "重庆市渝中区" not in rendered
     assert "SGCC-2026-001" not in rendered
     assert "安全负责人" in rendered
@@ -64,14 +64,14 @@ def test_blind_bid_keyword_scan_detects_sensitive_spec_labels() -> None:
     issues = scan_blind_bid_keywords(
         {
             "chart_type": "quality_system",
-            "title": "REDACTED质量体系图",
+            "title": "示例电力工程公司质量体系图",
             "nodes": [{"id": "manager", "label": "张三"}],
             "edges": [],
         },
-        blacklist=["REDACTED", "张三"],
+        blacklist=["示例电力工程公司", "张三"],
     )
 
-    assert {issue["keyword"] for issue in issues} == {"REDACTED", "张三"}
+    assert {issue["keyword"] for issue in issues} == {"示例电力工程公司", "张三"}
 
 
 def test_create_or_update_marks_blind_bid_sensitive_spec_as_needs_review(monkeypatch, tmp_path) -> None:

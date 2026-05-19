@@ -222,7 +222,7 @@ def test_master_data_crud_flow(monkeypatch: pytest.MonkeyPatch) -> None:
         company = client.post(
             "/api/master-data/company-profiles",
             json={
-                "company_name": "REDACTED",
+                "company_name": "重庆示例电力工程有限责任公司",
                 "registered_address": "重庆市江北区金源路7号",
                 "contact_name": "王莉莉",
                 "contact_phone": "13800000000",
@@ -277,7 +277,7 @@ def test_master_data_crud_flow(monkeypatch: pytest.MonkeyPatch) -> None:
                 "certificate_name": "质量管理体系认证证书",
                 "certificate_type": "ISO",
                 "certificate_no": "ISO-001",
-                "holder_name": "REDACTED",
+                "holder_name": "重庆示例电力工程有限责任公司",
                 "valid_to": "2026-06-30",
             },
         )
@@ -434,7 +434,7 @@ def test_company_contract_performance_export_excludes_pdf_columns(monkeypatch: p
     try:
         library = client.post(
             "/api/master-data/library-companies",
-            json={"company_name": "REDACTED", "company_type": "施工总承包"},
+            json={"company_name": "重庆示例电力工程有限责任公司", "company_type": "施工总承包"},
         )
         assert library.status_code == 201
         library_id = library.json()["id"]
@@ -505,7 +505,7 @@ def test_company_contract_performance_update_and_delete(monkeypatch: pytest.Monk
     try:
         library = client.post(
             "/api/master-data/library-companies",
-            json={"company_name": "REDACTED", "company_type": "施工总承包"},
+            json={"company_name": "重庆示例电力工程有限责任公司", "company_type": "施工总承包"},
         )
         assert library.status_code == 201
         library_id = library.json()["id"]
