@@ -173,9 +173,9 @@
 - Modify: `backend/tender_backend/services/template_service/business_chapter_bindings.py`
 - Test: `backend/tests/unit/test_business_chapter_bindings.py`
 
-- [ ] **Step 1:** 实现 `build_no_violation_commitment_context`（章 2）、`build_sgcc_personnel_relation_context`（章 7）、`build_company_name_change_context`（章 20）、`build_small_taxpayer_context`（章 21）。
-- [ ] **Step 2:** 上下文字段固定为 `tender.purchaser_name`、`tender.project_name`、`company.company_name`、`company.legal_representative`、`commit_date`、`signature_block`；缺失值必须进入 `missing_materials`。
-- [ ] **Step 3:** 单测覆盖 4 类 builder 的完整数据与缺失数据场景。
+- [x] **Step 1:** 实现 `build_no_violation_commitment_context`（章 2）、`build_sgcc_personnel_relation_context`（章 7）、`build_company_name_change_context`（章 20）、`build_small_taxpayer_context`（章 21）。
+- [x] **Step 2:** 上下文字段固定为 `tender.purchaser_name`、`tender.project_name`、`company.company_name`、`company.legal_representative`、`commit_date`、`signature_block`；缺失值必须进入 `missing_materials`。
+- [x] **Step 3:** 单测覆盖 4 类 builder 的完整数据与缺失数据场景。
 
 ### Task B.3：companybase 财务与专项 sheet 接入
 

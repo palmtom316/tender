@@ -6,7 +6,11 @@ from tender_backend.services.bid_outline_templates import SGCC_DISTRIBUTION_BUSI
 from tender_backend.services.template_service.business_chapter_bindings import (
     BUSINESS_CHAPTER_BINDINGS,
     ChapterBinding,
+    build_company_name_change_context,
     build_business_chapter_context,
+    build_no_violation_commitment_context,
+    build_sgcc_personnel_relation_context,
+    build_small_taxpayer_context,
     get_business_chapter_binding,
 )
 
@@ -18,8 +22,8 @@ def _full_materials() -> dict:
         for category in binding.asset_categories
     }
     return {
-        "company": {"company_name": "REDACTED"},
-        "tender": {"project_name": "配网工程"},
+        "company": {"company_name": "REDACTED", "legal_representative": "张三"},
+        "tender": {"project_name": "配网工程", "purchaser_name": "REDACTED"},
         "assets": [
             {"asset_category": category, "file_name": f"{category}.pdf"}
             for category in sorted(asset_categories)
@@ -37,6 +41,7 @@ def _full_materials() -> dict:
         "innovation_policies": [{"title": "创新激励制度"}],
         "awards": [{"award_name": "质量奖"}],
         "bid_bonds": [{"amount": "10000"}],
+        "commit_date": "2026-05-19",
         "signature_block": {"signer": "法定代表人"},
     }
 
@@ -95,16 +100,45 @@ def test_commitment_builders_return_company_tender_and_signature_block(chapter_c
     result = build_business_chapter_context(
         chapter_code,
         {
-            "company": {"company_name": "REDACTED"},
-            "tender": {"project_name": "配网工程"},
+            "company": {"company_name": "REDACTED", "legal_representative": "张三"},
+            "tender": {"project_name": "配网工程", "purchaser_name": "REDACTED"},
+            "commit_date": "2026-05-19",
             "signature_block": {"signer": "法定代表人"},
         },
     )
 
     assert result["context"]["company"]["company_name"] == "REDACTED"
+    assert result["context"]["company"]["legal_representative"] == "张三"
     assert result["context"]["tender"]["project_name"] == "配网工程"
+    assert result["context"]["tender"]["purchaser_name"] == "REDACTED"
+    assert result["context"]["commit_date"] == "2026-05-19"
     assert result["context"]["signature_block"]["signer"] == "法定代表人"
     assert result["missing_materials"] == []
+
+
+@pytest.mark.parametrize(
+    ("chapter_code", "builder"),
+    [
+        ("2", build_no_violation_commitment_context),
+        ("7", build_sgcc_personnel_relation_context),
+        ("20", build_company_name_change_context),
+        ("21", build_small_taxpayer_context),
+    ],
+)
+def test_named_commitment_builders_require_fixed_fields(chapter_code: str, builder) -> None:
+    binding = get_business_chapter_binding(chapter_code)
+
+    result = builder(chapter_code, {}, binding)
+
+    assert result["chapter_code"] == chapter_code
+    assert result["missing_materials"] == [
+        {"chapter_code": chapter_code, "material_key": "company.company_name", "reason": "missing_required_material"},
+        {"chapter_code": chapter_code, "material_key": "company.legal_representative", "reason": "missing_required_material"},
+        {"chapter_code": chapter_code, "material_key": "tender.purchaser_name", "reason": "missing_required_material"},
+        {"chapter_code": chapter_code, "material_key": "tender.project_name", "reason": "missing_required_material"},
+        {"chapter_code": chapter_code, "material_key": "commit_date", "reason": "missing_required_material"},
+        {"chapter_code": chapter_code, "material_key": "signature_block", "reason": "missing_required_material"},
+    ]
 
 
 @pytest.mark.parametrize(

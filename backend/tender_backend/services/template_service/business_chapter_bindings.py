@@ -161,18 +161,77 @@ def _commitment_context(chapter_code: str, materials: Mapping[str, Any], binding
     return {**context, "chapter_code": chapter_code, "missing_materials": missing_materials}
 
 
+def _required_nested_value(
+    context: dict[str, Any],
+    missing_materials: list[dict[str, str]],
+    *,
+    chapter_code: str,
+    section_key: str,
+    field_key: str,
+) -> None:
+    section = context.get(section_key)
+    if not isinstance(section, dict) or not section.get(field_key):
+        missing_materials.append(_missing(chapter_code, f"{section_key}.{field_key}"))
+
+
+def _required_material_value(
+    context: dict[str, Any],
+    missing_materials: list[dict[str, str]],
+    *,
+    chapter_code: str,
+    materials: Mapping[str, Any],
+    material_key: str,
+) -> None:
+    value = materials.get(material_key)
+    if value:
+        context[material_key] = value
+    else:
+        missing_materials.append(_missing(chapter_code, material_key))
+
+
+def _business_commitment_context(chapter_code: str, materials: Mapping[str, Any], binding: ChapterBinding) -> dict[str, Any]:
+    context, missing_materials = _base_context(chapter_code, materials, binding, require_company=False, require_tender=False)
+    _required_nested_value(context, missing_materials, chapter_code=chapter_code, section_key="company", field_key="company_name")
+    _required_nested_value(context, missing_materials, chapter_code=chapter_code, section_key="company", field_key="legal_representative")
+    _required_nested_value(context, missing_materials, chapter_code=chapter_code, section_key="tender", field_key="purchaser_name")
+    _required_nested_value(context, missing_materials, chapter_code=chapter_code, section_key="tender", field_key="project_name")
+    _required_material_value(context, missing_materials, chapter_code=chapter_code, materials=materials, material_key="commit_date")
+    signature = _record(materials, "signature_block")
+    if signature:
+        context["signature_block"] = signature
+    else:
+        missing_materials.append(_missing(chapter_code, "signature_block"))
+    return {**context, "chapter_code": chapter_code, "missing_materials": missing_materials}
+
+
+def build_no_violation_commitment_context(chapter_code: str, materials: Mapping[str, Any], binding: ChapterBinding) -> dict[str, Any]:
+    return _business_commitment_context(chapter_code, materials, binding)
+
+
+def build_sgcc_personnel_relation_context(chapter_code: str, materials: Mapping[str, Any], binding: ChapterBinding) -> dict[str, Any]:
+    return _business_commitment_context(chapter_code, materials, binding)
+
+
+def build_company_name_change_context(chapter_code: str, materials: Mapping[str, Any], binding: ChapterBinding) -> dict[str, Any]:
+    return _business_commitment_context(chapter_code, materials, binding)
+
+
+def build_small_taxpayer_context(chapter_code: str, materials: Mapping[str, Any], binding: ChapterBinding) -> dict[str, Any]:
+    return _business_commitment_context(chapter_code, materials, binding)
+
+
 def _ledger_builder(ledger_key: str) -> ContextBuilder:
     return lambda chapter_code, materials, binding: _specialty_ledger_context(ledger_key, chapter_code, materials, binding)
 
 
 BUSINESS_CHAPTER_BINDINGS: dict[str, ChapterBinding] = {
     "1": ChapterBinding("1", _generic_attachment_context, ("business_deviation",)),
-    "2": ChapterBinding("2", _commitment_context, ("commitment",)),
+    "2": ChapterBinding("2", build_no_violation_commitment_context, ("commitment",)),
     "3": ChapterBinding("3", _generic_attachment_context, ("business_license",)),
     "4": ChapterBinding("4", _generic_attachment_context, ("legal_representative_id",)),
     "5": ChapterBinding("5", _company_profile_context, ("company_profile", "business_license")),
     "6": ChapterBinding("6", _people_context, ("credit_report", "personnel_certificate")),
-    "7": ChapterBinding("7", _commitment_context, ("relationship_statement",)),
+    "7": ChapterBinding("7", build_sgcc_personnel_relation_context, ("relationship_statement",)),
     "8": ChapterBinding("8", _financial_context, ("financial_report", "audit_report")),
     "9": ChapterBinding("9", _generic_attachment_context, ("consortium_agreement",)),
     "10": ChapterBinding("10", _ledger_builder("bank_accounts"), ("bank_account",)),
@@ -185,8 +244,8 @@ BUSINESS_CHAPTER_BINDINGS: dict[str, ChapterBinding] = {
     "17": ChapterBinding("17", _people_context, ("research_team",)),
     "18": ChapterBinding("18", _ledger_builder("awards"), ("quality_award", "industry_award")),
     "19": ChapterBinding("19", _certificate_context, ("high_tech_certificate",)),
-    "20": ChapterBinding("20", _commitment_context, ("name_change_certificate",)),
-    "21": ChapterBinding("21", _commitment_context, ("taxpayer_certificate",)),
+    "20": ChapterBinding("20", build_company_name_change_context, ("name_change_certificate",)),
+    "21": ChapterBinding("21", build_small_taxpayer_context, ("taxpayer_certificate",)),
     "22": ChapterBinding("22", _generic_attachment_context, ("tax_rate_evidence",)),
     "23": ChapterBinding("23", _ledger_builder("bid_bonds"), ("bid_bond", "deposit_voucher")),
     "24": ChapterBinding("24", _performance_context, ("credit_report", "other_business"), narrative_generator="business_strength"),
@@ -220,6 +279,10 @@ def build_business_chapter_context(chapter_code: str, materials: Mapping[str, An
 __all__ = [
     "BUSINESS_CHAPTER_BINDINGS",
     "ChapterBinding",
+    "build_company_name_change_context",
     "build_business_chapter_context",
+    "build_no_violation_commitment_context",
+    "build_sgcc_personnel_relation_context",
+    "build_small_taxpayer_context",
     "get_business_chapter_binding",
 ]
