@@ -93,6 +93,7 @@ def test_render_volume_docx_injects_equipment_tables_for_business_and_technical(
             return 4
 
     monkeypatch.setattr(docx_exporter, "EquipmentTableInjector", _Injector)
+    monkeypatch.setattr(docx_exporter, "PersonnelTableInjector", _Injector)
 
     business_output = tmp_path / "business.docx"
     technical_output = tmp_path / "technical.docx"
@@ -113,11 +114,45 @@ def test_render_volume_docx_injects_equipment_tables_for_business_and_technical(
 
     assert "主要施工设备表" in business_text
     assert "{{equipment_table:vehicle}}" in business_text
+    assert "项目管理机构人员表" in business_text
+    assert "{{personnel_table}}" in business_text
     assert "主要施工设备表" in technical_text
     assert "{{equipment_table:vehicle}}" in technical_text
+    assert "项目管理机构人员表" in technical_text
+    assert "{{personnel_table}}" in technical_text
     assert "主要施工设备表" not in qualification_text
     assert "{{equipment_table:vehicle}}" not in qualification_text
-    assert injected.count(("inject", "done")) == 2
+    assert "项目管理机构人员表" not in qualification_text
+    assert "{{personnel_table}}" not in qualification_text
+    assert injected.count(("inject", "done")) == 4
+
+
+def test_render_business_volume_docx_uses_rendered_chapter_artifact(tmp_path: Path) -> None:
+    artifact = tmp_path / "chapter-5.docx"
+    artifact_doc = Document()
+    artifact_doc.add_heading("5 基本情况", level=1)
+    artifact_doc.add_paragraph("来自单章 DOCX artifact 的正文")
+    artifact_doc.save(artifact)
+
+    output = tmp_path / "business.docx"
+    drafts = [
+        {
+            "chapter_code": "5",
+            "content_md": "fallback content should not be used",
+            "chapter_title": "基本情况",
+            "volume_type": "business",
+            "sort_order": 5,
+            "rendered_docx_path": str(artifact),
+            "rendered_artifact_json": {"template_item_id": "template-5"},
+        },
+    ]
+
+    render_volume_docx(_Conn(drafts), project_id=uuid4(), volume_type="business", output_path=output)
+
+    document = Document(str(output))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "来自单章 DOCX artifact 的正文" in text
+    assert "fallback content should not be used" not in text
 
 
 def _multi_chapter_drafts() -> list[dict]:
@@ -128,6 +163,8 @@ def _multi_chapter_drafts() -> list[dict]:
             "chapter_title": "资格响应",
             "volume_type": "qualification",
             "sort_order": 1,
+            "rendered_docx_path": None,
+            "rendered_artifact_json": {},
         },
         {
             "chapter_code": "2.1",
@@ -135,6 +172,8 @@ def _multi_chapter_drafts() -> list[dict]:
             "chapter_title": "商务方案",
             "volume_type": "business",
             "sort_order": 2,
+            "rendered_docx_path": None,
+            "rendered_artifact_json": {},
         },
     ]
 

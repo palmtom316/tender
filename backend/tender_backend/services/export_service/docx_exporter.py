@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 from uuid import UUID
 
@@ -252,7 +253,7 @@ def _should_include_equipment_tables(volume_type: str | None) -> bool:
 
 
 def _should_include_personnel_table(volume_type: str | None) -> bool:
-    return volume_type in (None, "technical")
+    return volume_type in (None, "business", "technical")
 
 
 def _append_equipment_table_anchors(document: Document) -> None:
@@ -279,6 +280,32 @@ def _is_skeleton_only(content_md: str) -> bool:
     return len(normalized) < 500
 
 
+def _append_rendered_artifact_if_available(document: Document, draft: dict) -> bool:
+    if str(draft.get("volume_type") or "") != "business":
+        return False
+
+    rendered_docx_path = draft.get("rendered_docx_path")
+    if not rendered_docx_path:
+        return False
+
+    artifact_path = Path(str(rendered_docx_path))
+    if not artifact_path.exists():
+        logger.warning(
+            "business_chapter_artifact_file_missing",
+            chapter_code=str(draft.get("chapter_code") or ""),
+            rendered_docx_path=str(artifact_path),
+        )
+        return False
+
+    source = Document(str(artifact_path))
+    # MVP merge: preserves basic paragraphs/tables; complex section-level layout is P1.
+    for element in source.element.body:
+        if element.tag.endswith("}sectPr"):
+            continue
+        document.element.body.append(deepcopy(element))
+    return True
+
+
 def _render_plain_docx(
     conn: Connection,
     *,
@@ -291,7 +318,9 @@ def _render_plain_docx(
         if volume_type:
             drafts = cur.execute(
                 """
-                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order, bc.metadata_json
+                SELECT cd.chapter_code, cd.volume_type, cd.content_md,
+                       cd.rendered_docx_path, cd.rendered_artifact_json,
+                       bc.chapter_title, bc.sort_order, bc.metadata_json
                 FROM chapter_draft cd
                 LEFT JOIN bid_chapter bc
                   ON bc.project_id = cd.project_id
@@ -305,7 +334,9 @@ def _render_plain_docx(
         else:
             drafts = cur.execute(
                 """
-                SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order, bc.metadata_json
+                SELECT cd.chapter_code, cd.volume_type, cd.content_md,
+                       cd.rendered_docx_path, cd.rendered_artifact_json,
+                       bc.chapter_title, bc.sort_order, bc.metadata_json
                 FROM chapter_draft cd
                 LEFT JOIN bid_chapter bc
                   ON bc.project_id = cd.project_id
@@ -365,7 +396,15 @@ def _render_plain_docx(
         deviation_data = metadata_json.get("deviation_table")
         if deviation_data:
             _add_deviation_table(document, str(chapter_title), deviation_data)
+        elif _append_rendered_artifact_if_available(document, draft):
+            continue
         else:
+            if str(draft.get("volume_type") or "") == "business":
+                logger.warning(
+                    "business_chapter_artifact_missing",
+                    project_id=str(project_id),
+                    chapter_code=str(chapter_code),
+                )
             _add_markdown_content(document, draft["content_md"])
 
     if _should_include_equipment_tables(volume_type):
@@ -481,7 +520,9 @@ def _load_chapter_drafts(conn: Connection, project_id: UUID) -> list[dict]:
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(
             """
-            SELECT cd.chapter_code, cd.volume_type, cd.content_md, bc.chapter_title, bc.sort_order
+            SELECT cd.chapter_code, cd.volume_type, cd.content_md,
+                   cd.rendered_docx_path, cd.rendered_artifact_json,
+                   bc.chapter_title, bc.sort_order
             FROM chapter_draft cd
             LEFT JOIN bid_chapter bc
               ON bc.project_id = cd.project_id

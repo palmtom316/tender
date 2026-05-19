@@ -129,11 +129,11 @@
 - Modify: `backend/tender_backend/services/export_service/docx_exporter.py`
 - Test: `backend/tests/integration/test_docx_export.py`
 
-- [ ] **Step 1:** `_load_chapter_drafts` 增加读取 `cd.rendered_docx_path`、`cd.rendered_artifact_json`。
-- [ ] **Step 2:** `_render_plain_docx` 在 `volume_type='business'` 且 `rendered_docx_path` 存在时，按章节顺序把渲染产物合并进整卷；缺失 artifact 时继续使用 `content_md` 路径并在导出日志/evidence 中记录 warning。
-- [ ] **Step 3:** 明确 python-docx 合并是 MVP：段落/表格基础内容可合并，但页眉页脚、复杂样式、图片锚定不保证完全无损。若验收要求保真，另起 P1 使用 OpenXML package 级合并或输出章节 DOCX zip 包。
-- [ ] **Step 4:** 将 `_should_include_personnel_table(volume_type)` 调整为业务分册也可注入人员表，或在商务导出路径通过 artifact 自带人员表，避免章 6 只有技术标人员表。
-- [ ] **Step 5:** 跑：`pytest backend/tests/integration/test_docx_export.py -v`。
+- [x] **Step 1:** `_load_chapter_drafts` 增加读取 `cd.rendered_docx_path`、`cd.rendered_artifact_json`。
+- [x] **Step 2:** `_render_plain_docx` 在 `volume_type='business'` 且 `rendered_docx_path` 存在时，按章节顺序把渲染产物合并进整卷；缺失 artifact 时继续使用 `content_md` 路径并在导出日志/evidence 中记录 warning。
+- [x] **Step 3:** 明确 python-docx 合并是 MVP：段落/表格基础内容可合并，但页眉页脚、复杂样式、图片锚定不保证完全无损。若验收要求保真，另起 P1 使用 OpenXML package 级合并或输出章节 DOCX zip 包。
+- [x] **Step 4:** 将 `_should_include_personnel_table(volume_type)` 调整为业务分册也可注入人员表，或在商务导出路径通过 artifact 自带人员表，避免章 6 只有技术标人员表。
+- [x] **Step 5:** 跑：`pytest backend/tests/unit/test_docx_exporter.py -v`（当前仓库无 `backend/tests/integration/test_docx_export.py`，使用既有 DOCX exporter 回归测试文件）。
 
 ### Task A.8：商务标 e2e 验收与 evidence
 
