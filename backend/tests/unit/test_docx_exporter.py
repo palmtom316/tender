@@ -22,8 +22,9 @@ from tender_backend.services.export_service.docx_exporter import (
 
 
 class _Cursor:
-    def __init__(self, drafts: list[dict] | None = None):
+    def __init__(self, drafts: list[dict] | None = None, facts: list[dict] | None = None):
         self._drafts = drafts
+        self._facts = facts or []
         self.result = []
 
     def __enter__(self):
@@ -48,7 +49,7 @@ class _Cursor:
         elif "FROM project_requirement" in query:
             self.result = []
         elif "SELECT fact_key" in query:
-            self.result = []
+            self.result = self._facts
         else:
             self.result = []
         return self
@@ -61,11 +62,12 @@ class _Cursor:
 
 
 class _Conn:
-    def __init__(self, drafts: list[dict] | None = None):
+    def __init__(self, drafts: list[dict] | None = None, facts: list[dict] | None = None):
         self._drafts = drafts
+        self._facts = facts or []
 
     def cursor(self, *args, **kwargs):
-        return _Cursor(self._drafts)
+        return _Cursor(self._drafts, self._facts)
 
 
 def test_render_docx_without_template_creates_plain_word_file(tmp_path: Path, monkeypatch) -> None:
@@ -153,6 +155,37 @@ def test_render_business_volume_docx_uses_rendered_chapter_artifact(tmp_path: Pa
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "来自单章 DOCX artifact 的正文" in text
     assert "fallback content should not be used" not in text
+
+
+def test_render_volume_docx_adds_three_part_header_and_cross_page_seal(tmp_path: Path) -> None:
+    output = tmp_path / "business.docx"
+    conn = _Conn(
+        _multi_chapter_drafts(),
+        facts=[{"fact_key": "company_name", "fact_value": "某某电力工程有限公司"}],
+    )
+
+    render_volume_docx(conn, project_id=uuid4(), volume_type="business", output_path=output)
+
+    document = Document(str(output))
+    header_text = "\n".join(
+        paragraph.text
+        for section in document.sections
+        for paragraph in section.header.paragraphs
+    )
+    header_table_text = "\n".join(
+        cell.text
+        for section in document.sections
+        for table in section.header.tables
+        for row in table.rows
+        for cell in row.cells
+    )
+    body_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert "投标人=某某电力工程有限公司" in header_table_text
+    assert "测试项目" in header_table_text
+    assert "商务标" in header_table_text
+    assert "投标文件" not in header_text
+    assert body_text.count("骑缝章：____________") == len(_multi_chapter_drafts())
 
 
 def _multi_chapter_drafts() -> list[dict]:

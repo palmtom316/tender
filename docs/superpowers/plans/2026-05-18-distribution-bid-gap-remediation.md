@@ -206,10 +206,10 @@
 - Modify: `backend/tender_backend/services/export_service/docx_exporter.py`
 - Test: `backend/tests/integration/test_docx_export.py`
 
-- [ ] **Step 1:** 在 deviation table metadata 或持久化字段中区分 `volume_type in {"business","technical"}`；API 校验非法值。
-- [ ] **Step 2:** 页眉改为三栏：左 `投标人={{ company.company_name }}`，中 `{{ tender.project_name }}`，右 `{{ volume_label }}`。
-- [ ] **Step 3:** 每章末尾增加骑缝章占位段落；不使用会破坏 Word 兼容性的浮动文本框作为 P0。
-- [ ] **Step 4:** 回归 business/technical 两个分册导出。
+- [x] **Step 1:** 在 deviation table metadata 或持久化字段中区分 `volume_type in {"business","technical"}`；API 校验非法值。
+- [x] **Step 2:** 页眉改为三栏：左 `投标人={{ company.company_name }}`，中 `{{ tender.project_name }}`，右 `{{ volume_label }}`。
+- [x] **Step 3:** 每章末尾增加骑缝章占位段落；不使用会破坏 Word 兼容性的浮动文本框作为 P0。
+- [x] **Step 4:** 回归 business/technical 两个分册导出。
 
 ---
 

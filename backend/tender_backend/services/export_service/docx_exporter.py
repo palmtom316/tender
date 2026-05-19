@@ -61,6 +61,11 @@ EXPORT_MODES: tuple[str, ...] = (
     EXPORT_MODE_MULTI_DOCX_ZIP,
     EXPORT_MODE_MULTI_DOC_ZIP,
 )
+_VOLUME_LABELS = {
+    "business": "商务标",
+    "technical": "技术标",
+    "qualification": "资格标",
+}
 
 
 def _add_markdown_content(document: Document, content: str) -> None:
@@ -172,7 +177,26 @@ def _load_project_name(conn: Connection, project_id: UUID) -> str:
     return str(row[0]) if row and row[0] else str(project_id)
 
 
-def _apply_basic_style(document: Document) -> None:
+def _load_project_facts(conn: Connection, project_id: UUID) -> dict[str, str]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            "SELECT fact_key, fact_value FROM project_fact WHERE project_id = %s",
+            (project_id,),
+        ).fetchall()
+    return {str(row["fact_key"]): str(row["fact_value"]) for row in rows}
+
+
+def _volume_label(volume_type: str | None) -> str:
+    return _VOLUME_LABELS.get(str(volume_type or ""), str(volume_type or "投标文件"))
+
+
+def _apply_basic_style(
+    document: Document,
+    *,
+    company_name: str = "投标人",
+    project_name: str = "",
+    volume_label: str = "投标文件",
+) -> None:
     style = document.styles["Normal"]
     style.font.name = "宋体"
     style.font.size = Pt(10.5)
@@ -181,7 +205,22 @@ def _apply_basic_style(document: Document) -> None:
         section.bottom_margin = Pt(72)
         section.left_margin = Pt(72)
         section.right_margin = Pt(72)
-        section.header.paragraphs[0].text = "投标文件"
+        section.header.paragraphs[0].text = ""
+        header_width = section.page_width - section.left_margin - section.right_margin
+        table = section.header.add_table(rows=1, cols=3, width=header_width)
+        cells = table.rows[0].cells
+        cells[0].text = f"投标人={company_name or '投标人'}"
+        cells[1].text = project_name
+        cells[2].text = volume_label
+        for index, cell in enumerate(cells):
+            for paragraph in cell.paragraphs:
+                if index == 1:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif index == 2:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                for run in paragraph.runs:
+                    run.font.name = "宋体"
+                    run.font.size = Pt(9)
         footer = section.footer.paragraphs[0]
         footer.text = "第 "
         run = footer.add_run()
@@ -197,6 +236,14 @@ def _apply_basic_style(document: Document) -> None:
         run._r.append(fld_char_end)
         footer.add_run(" 页")
         footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+def _append_cross_page_seal_placeholder(document: Document) -> None:
+    para = document.add_paragraph("骑缝章：____________")
+    para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    for run in para.runs:
+        run.font.name = "宋体"
+        run.font.size = Pt(10.5)
 
 
 def _convert_to_chinese_number(num: int) -> str:
@@ -314,6 +361,13 @@ def _render_plain_docx(
     volume_type: str | None = None,
 ) -> Path:
     project_name = _load_project_name(conn, project_id)
+    project_facts = _load_project_facts(conn, project_id)
+    company_name = (
+        project_facts.get("company.company_name")
+        or project_facts.get("company_name")
+        or project_facts.get("bidder_name")
+        or "投标人"
+    )
     with conn.cursor(row_factory=dict_row) as cur:
         if volume_type:
             drafts = cur.execute(
@@ -356,7 +410,12 @@ def _render_plain_docx(
             )
 
     document = Document()
-    _apply_basic_style(document)
+    _apply_basic_style(
+        document,
+        company_name=company_name,
+        project_name=project_name,
+        volume_label=_volume_label(volume_type),
+    )
     title = f"{project_name} 投标文件"
     if volume_type:
         title += f"（{volume_type} 分册）"
@@ -397,7 +456,7 @@ def _render_plain_docx(
         if deviation_data:
             _add_deviation_table(document, str(chapter_title), deviation_data)
         elif _append_rendered_artifact_if_available(document, draft):
-            continue
+            pass
         else:
             if str(draft.get("volume_type") or "") == "business":
                 logger.warning(
@@ -406,6 +465,7 @@ def _render_plain_docx(
                     chapter_code=str(chapter_code),
                 )
             _add_markdown_content(document, draft["content_md"])
+        _append_cross_page_seal_placeholder(document)
 
     if _should_include_equipment_tables(volume_type):
         EquipmentTableInjector(document, conn, project_id=project_id).inject_all()
@@ -543,7 +603,7 @@ def _render_chapter_docx(
     output_path: Path,
 ) -> Path:
     document = Document()
-    _apply_basic_style(document)
+    _apply_basic_style(document, project_name=project_name, volume_label=_volume_label(draft.get("volume_type")))
     chapter_code = str(draft.get("chapter_code") or "").strip()
     chapter_title = str(draft.get("chapter_title") or "").strip()
     heading = " ".join(part for part in (chapter_code, chapter_title) if part) or "章节"
