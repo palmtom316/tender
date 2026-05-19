@@ -391,7 +391,7 @@ Track E 遗留收口
 - [ ] **Track A:** 单 DOCX 样章脱敏确认；`single_docx_section` 渲染单测全绿；`BusinessBidAssembler` 写入 24 章 business `chapter_draft`；`run_business_bid_acceptance.py` 在真实 project 上产出可打开的商务整卷 DOCX。
 - [ ] **Track B:** 财务与 6 类专项 sheet 可导入；4 类承诺/说明文 context builder 单测全绿；正文型章节生成不编造缺失材料。
 - [ ] **Track C:** 技术 16 章均有 strategy；非 longform 章节不只依赖泛化 fallback；`run_technical_bid_full_acceptance.py` 5 维门禁通过率 >= 90%；暗标校验覆盖技术 16 章 + 商务 24 章。
-- [ ] **Track D:** 5 类新 chart_type 有 fixture 与非空渲染测试；电力资质/业绩字段兼容旧数据；4 业务线 fixture 每线 >= 1 套。
+- [x] **Track D:** 5 类新 chart_type 有 fixture 与非空渲染测试；电力资质/业绩字段兼容旧数据；4 业务线 fixture 每线 >= 1 套。
 - [ ] **Track E:** GPT-Vis POC decision 落定；chapter-8 final / longform 8-9-10 / blind-review 三份 evidence 归档；Followup Roadmap v1.4 收口。
 
 ---
@@ -423,3 +423,4 @@ Track E 遗留收口
 | --- | --- | --- |
 | v1.0 | 2026-05-18 | 初版。基于 2026-05-18 两份 gap 报告（商务标 24 章 + 技术标 16 章）与 2026-05-17 三份计划遗留，编制五条 Track 修订计划。 |
 | v1.1 | 2026-05-18 | 按现有代码复核后修订：P0 改为统一单 DOCX + `single_docx_section` 主链路；多 DOCX importer 降为 P1；修正 Alembic 编号、`chapter_draft.attachment_bytes/metadata_json` 假设、暗标模块路径、longform 验收命令、companybase/repository 实施路径和 DOCX 合并保真风险。 |
+| v1.2 | 2026-05-19 | Track D 配网行业纵深完成：8.4 四类工序切片、5 类 chart_type、0059 电力行业主数据、0060 配网领域 ledger；回归 `203 passed in 1.89s`，Alembic 当前 `0060 (head)`。 |
