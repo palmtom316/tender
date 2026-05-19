@@ -52,18 +52,19 @@
 
 **Goal:** 基于统一单 DOCX 样章，使 24 章模板项可按章节抽取、渲染、记录为草稿 artifact，并能导出可验收的商务整卷 DOCX。
 
-### Task A.1：补齐统一单 DOCX 样章文件
+### Task A.1：支持外部机密统一单 DOCX 样章
 
 **Files:**
-- Restore: `docs/samples/template_import_ready/sgcc_distribution_business_1_24_package/国网配网工程商务标1-24章.docx`
-- Review: `docs/samples/template_import_ready/sgcc_distribution_business_1_24_package/manifest.json`
-- Modify only if approved: `.gitignore`
+- Use local only: `BUSINESS_BID_SAMPLE_DOCX_PATH=/secure/path/国网配网工程商务标1-24章.docx`
+- Use env allowlist: `TEMPLATE_IMPORT_ROOTS=/secure/path`
+- Create: `scripts/inspect_confidential_business_sample.py`
+- Test: `backend/tests/unit/test_confidential_business_sample_script.py`
 
-- [ ] **Step 1:** 与用户确认 `国网配网工程商务标1-24章.docx` 来源位置和脱敏状态。若样章含客户真实信息，先生成脱敏副本，不提交原件。
-- [ ] **Step 2:** 用 `python-docx` 扫描样章全文，至少检查公司名、项目名、法人、手机号、身份证号、统一社会信用代码等敏感模式；把扫描摘要落入本地 evidence，不把敏感文本写入仓库。
-- [ ] **Step 3:** 将脱敏后的统一单 DOCX 放入 `docs/samples/template_import_ready/sgcc_distribution_business_1_24_package/`，核对 `manifest.json` 中声明的文件名与实际文件一致。
-- [ ] **Step 4:** 若 `.gitignore` 排除了该路径，只为脱敏样章增加最小白名单；不对 `docs/samples/**/*.docx` 做宽泛放行。
-- [ ] **Step 5:** 验证：`find docs/samples/template_import_ready/sgcc_distribution_business_1_24_package -maxdepth 1 -name "*.docx" -print` 只显示已脱敏的统一样章。
+- [x] **Step 1:** 确认 `国网配网工程商务标1-24章.docx` 无法脱敏；按机密运行时输入处理，原件不提交、不复制进 `docs/samples`、不进入测试 fixture。
+- [x] **Step 2:** 增加本地扫描脚本，用 `python-docx` 读取样章全文并只输出 sha256、大小、段落数、章节编号、敏感模式计数；不把匹配文本写入仓库或 evidence。
+- [ ] **Step 3:** 在安全环境设置 `BUSINESS_BID_SAMPLE_DOCX_PATH` 与 `TEMPLATE_IMPORT_ROOTS`，从外部路径导入 `sgcc_distribution_business_v1`；不得把 DOCX 文件复制进 repo。
+- [ ] **Step 4:** 本地 evidence 只允许落 `docs/acceptance/private/` 或外部安全目录；若需提交报告，只提交脱敏汇总，不提交原始 evidence。
+- [ ] **Step 5:** 验证：`python scripts/inspect_confidential_business_sample.py --sample-docx "$BUSINESS_BID_SAMPLE_DOCX_PATH" --output <secure-evidence.json>` 输出 JSON 不含公司名、项目名、法人、手机号、身份证号、统一社会信用代码等原文。
 
 ### Task A.2：稳定单 DOCX import，保留多 DOCX 明确错误
 

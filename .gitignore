@@ -25,6 +25,7 @@ frontend/vite.config.d.ts
 # Sample files (binary assets for dev/UAT only)
 docs/samples/**/*.pdf
 docs/samples/**/*.docx
+docs/acceptance/private/
 
 # Local runtime data
 tmp/
