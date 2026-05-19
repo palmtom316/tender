@@ -62,9 +62,9 @@
 
 - [x] **Step 1:** 确认 `国网配网工程商务标1-24章.docx` 无法脱敏；按机密运行时输入处理，原件不提交、不复制进 `docs/samples`、不进入测试 fixture。
 - [x] **Step 2:** 增加本地扫描脚本，用 `python-docx` 读取样章全文并只输出 sha256、大小、段落数、章节编号、敏感模式计数；不把匹配文本写入仓库或 evidence。
-- [ ] **Step 3:** 在安全环境设置 `BUSINESS_BID_SAMPLE_DOCX_PATH` 与 `TEMPLATE_IMPORT_ROOTS`，从外部路径导入 `sgcc_distribution_business_v1`；不得把 DOCX 文件复制进 repo。
-- [ ] **Step 4:** 本地 evidence 只允许落 `docs/acceptance/private/` 或外部安全目录；若需提交报告，只提交脱敏汇总，不提交原始 evidence。
-- [ ] **Step 5:** 验证：`python scripts/inspect_confidential_business_sample.py --sample-docx "$BUSINESS_BID_SAMPLE_DOCX_PATH" --output <secure-evidence.json>` 输出 JSON 不含公司名、项目名、法人、手机号、身份证号、统一社会信用代码等原文。
+- [x] **Step 3:** 在安全环境设置 `BUSINESS_BID_SAMPLE_DOCX_PATH` 与 `TEMPLATE_IMPORT_ROOTS`，从外部路径合并并验证可被 importer 拆分为 `single_docx_section`；不得把 DOCX 文件复制进 repo。数据库导入仍归 A.4 执行。
+- [x] **Step 4:** 本地 evidence 只允许落 `docs/acceptance/private/` 或外部安全目录；若需提交报告，只提交脱敏汇总，不提交原始 evidence。
+- [x] **Step 5:** 验证：`python scripts/inspect_confidential_business_sample.py --sample-docx "$BUSINESS_BID_SAMPLE_DOCX_PATH" --output <secure-evidence.json>` 输出 JSON 不含公司名、项目名、法人、手机号、身份证号、统一社会信用代码等原文。
 
 ### Task A.2：稳定单 DOCX import，保留多 DOCX 明确错误
 
