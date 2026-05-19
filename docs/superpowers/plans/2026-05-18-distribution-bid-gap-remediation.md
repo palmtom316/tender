@@ -233,9 +233,9 @@
 - Create: `scripts/run_technical_bid_full_acceptance.py`
 - Test: `backend/tests/integration/test_technical_bid_full_acceptance.py`
 
-- [ ] **Step 1:** 入参 `--project-id`、`--output-dir`；遍历 16 章检查 `chapter_draft`、附件绑定、签章/承诺函模板、暗标风险、页数/图表/表格占位。
-- [ ] **Step 2:** 输出 JSON evidence：每章 `draft_exists`、`required_assets_ready`、`blind_check_passed`、`charts_ready`、`export_ready`。
-- [ ] **Step 3:** hard stop：16 章均有结果；P0 章节失败时脚本返回非 0。
+- [x] **Step 1:** 入参 `--project-id`、`--output-dir`；遍历 16 章检查 `chapter_draft`、附件绑定、签章/承诺函模板、暗标风险、页数/图表/表格占位。
+- [x] **Step 2:** 输出 JSON evidence：每章 `draft_exists`、`required_assets_ready`、`blind_check_passed`、`charts_ready`、`export_ready`。
+- [x] **Step 3:** hard stop：16 章均有结果；P0 章节失败时脚本返回非 0。
 
 ### Task C.3：章节级暗标校验扩展
 
