@@ -259,9 +259,9 @@
 - Modify: `backend/tender_backend/services/technical_chapter_strategies/registry.py`
 - Test: `backend/tests/unit/test_technical_chapter_strategies.py`
 
-- [ ] **Step 1:** 在 8.4"主要施工方法及技术要求"下增 4 个工序子节：架空线、电缆、配电站房、台区改造。
-- [ ] **Step 2:** 每个子节附最小 SOP、风险点、质量控制点和可用 chart placeholders。
-- [ ] **Step 3:** 用 fixture 验证 prompt 输入包含配网工序信息，而不是泛化施工描述。
+- [x] **Step 1:** 在 8.4"主要施工方法及技术要求"下增 4 个工序子节：架空线、电缆、配电站房、台区改造。
+- [x] **Step 2:** 每个子节附最小 SOP、风险点、质量控制点和可用 chart placeholders。
+- [x] **Step 3:** 用 fixture 验证 prompt 输入包含配网工序信息，而不是泛化施工描述。
 
 ### Task D.2：5 类缺失 chart_type
 

@@ -37,3 +37,33 @@ def test_chapter_6_strategy_requires_team_certificates_appointment_and_commitmen
     )
     assert any("人证岗" in rule for rule in strategy.self_check_rules)
     assert any("任命" in rule for rule in strategy.self_check_rules)
+
+
+def test_chapter_8_4_strategy_slices_distribution_process_subsections() -> None:
+    strategy = strategy_for_chapter("8.4")
+
+    assert strategy is not None
+    section_text = "\n".join(f"{heading}\n{body}" for heading, body in strategy.sections)
+    for process_name in ("架空线", "电缆", "配电站房", "台区改造"):
+        assert process_name in section_text
+
+    for _heading, body in strategy.sections:
+        if any(process_name in body for process_name in ("架空线", "电缆", "配电站房", "台区改造")):
+            assert "SOP" in body
+            assert "风险点" in body
+            assert "质量控制点" in body
+            assert "{{chart:" in body
+
+
+def test_chapter_8_prompt_input_contains_distribution_process_guidance() -> None:
+    strategy = strategy_for_chapter("8")
+
+    assert strategy is not None
+    prompt_input_text = "\n".join(f"{heading}\n{body}" for heading, body in strategy.sections)
+    assert "8.4 主要施工方法及技术要求" in prompt_input_text
+    for process_name in ("架空线", "电缆", "配电站房", "台区改造"):
+        assert process_name in prompt_input_text
+    assert "SOP" in prompt_input_text
+    assert "质量控制点" in prompt_input_text
+    assert "{{chart:construction_flow}}" in prompt_input_text
+    assert "按测量、开挖、基础、电杆组立、架线、电缆敷设、设备安装、接地、恢复等工序形成SOP" not in prompt_input_text

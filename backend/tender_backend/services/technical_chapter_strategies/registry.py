@@ -43,11 +43,51 @@ SITE_CONDITION_KEYWORDS: tuple[str, ...] = (
 )
 
 
+DISTRIBUTION_PROCESS_SUBSECTIONS: tuple[tuple[str, str], ...] = (
+    (
+        "8.4.1 架空线施工工序",
+        "架空线施工工序：SOP=复测定位、基础复核、杆塔组立、金具绝缘子安装、导线展放、紧线弧垂、附件安装、接地和自检消缺；"
+        "风险点=邻近带电体、高处作业、跨越道路和导线张力失控；"
+        "质量控制点=杆位偏差、基础强度、弧垂相间一致、压接和接地电阻；"
+        "图表占位符={{chart:construction_flow}}、{{chart:risk_matrix}}、{{chart:quality_system}}。",
+    ),
+    (
+        "8.4.2 电缆施工工序",
+        "电缆施工工序：SOP=通道复核、沟槽或排管检查、支架桥架安装、电缆展放牵引、终端中间头制作、标识防火和试验移交；"
+        "风险点=地下管线、牵引损伤、弯曲半径不足、有限空间和受潮污染；"
+        "质量控制点=通道尺寸、敷设余量、相序标识、接头工艺、耐压试验和封堵防火；"
+        "图表占位符={{chart:construction_flow}}、{{chart:risk_matrix}}、{{chart:quality_system}}。",
+    ),
+    (
+        "8.4.3 配电站房施工工序",
+        "配电站房施工工序：SOP=土建交接、基础槽钢复核、柜体就位找平、母排连接、二次接线、接地连通、联调试验和送电前验收；"
+        "风险点=吊装就位、柜体受潮、二次回路错接、接地遗漏和带电间隔误入；"
+        "质量控制点=基础水平度、柜间缝隙、母排力矩、二次线号、保护定值、五防和资料一致性；"
+        "图表占位符={{chart:construction_flow}}、{{chart:risk_matrix}}、{{chart:quality_system}}。",
+    ),
+    (
+        "8.4.4 台区改造施工工序",
+        "台区改造施工工序：SOP=用户负荷核查、旧设备隔离、变压器和低压柜更换、低压线路改接、表箱接入、送电核相和用户复电确认；"
+        "风险点=停复电窗口压缩、用户侧反送电、负荷转供、低压交叉作业和居民投诉；"
+        "质量控制点=容量匹配、相序核验、接线紧固、三相负荷平衡、剩余电流保护和用户复电记录；"
+        "图表占位符={{chart:construction_flow}}、{{chart:risk_matrix}}、{{chart:quality_system}}。",
+    ),
+)
+
+DISTRIBUTION_PROCESS_GUIDANCE = " ".join(
+    f"{heading}：{body}" for heading, body in DISTRIBUTION_PROCESS_SUBSECTIONS
+)
+
+
 CHAPTER_8_SECTIONS: tuple[tuple[str, str], ...] = (
     ("8.1 编制依据与标准", "基于招标文件、已确认约束和本地标准库建立标准-条款-响应矩阵；未匹配到来源的标准只列为待补充依据。"),
     ("8.2 工程概况与施工重难点分析", "围绕工程范围、现场条件、交叉跨越、停电窗口、地下管线和关键风险进行重难点分析。"),
     ("8.3 施工组织与部署", "说明施工区段、项目组织、资源投入、现场布置、材料供应和外部协调机制。"),
-    ("8.4 主要施工方法及技术要求", "按测量、开挖、基础、电杆组立、架线、电缆敷设、设备安装、接地、恢复等工序形成SOP。"),
+    (
+        "8.4 主要施工方法及技术要求",
+        "按配网业务线拆分架空线、电缆、配电站房、台区改造四类工序，分别给出SOP、风险点、质量控制点和图表占位符。"
+        + DISTRIBUTION_PROCESS_GUIDANCE,
+    ),
     ("8.5 质量管理体系与措施", "将质量目标、检验批、WHS控制点、旁站监督、材料设备质量和问题闭环嵌入施工过程。"),
     ("8.6 安全管理体系与措施", "识别危险源，设置安全组织、HSE检查、专项应急、培训交底和现场安全技术措施。"),
     ("8.7 施工进度计划与保障", "分解里程碑、关键路径、资源保障、气候影响、进度预警和纠偏机制。"),
@@ -577,10 +617,13 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
 
 for _heading, _body in CHAPTER_8_SECTIONS:
     _chapter_code, _title = _heading.split(" ", 1)
+    _sections = ((_title, _body),)
+    if _chapter_code == "8.4":
+        _sections = _sections + DISTRIBUTION_PROCESS_SUBSECTIONS
     CHAPTER_STRATEGIES[_chapter_code] = TechnicalChapterStrategy(
         key=f"construction_plan_{_chapter_code.replace('.', '_')}",
         purpose=f"编制第8章内部子目录《{_title}》，并保持其不提升为技术标一级章节。",
-        sections=((_title, _body),),
+        sections=_sections,
         required_facts=("project_scope", "project_location", "construction_period", "quality_requirement"),
         required_standards=("construction_process", "construction_technical", "acceptance", "sgcc_management"),
         required_charts=CHAPTER_8_CHILD_CHARTS.get(_chapter_code, ()),
