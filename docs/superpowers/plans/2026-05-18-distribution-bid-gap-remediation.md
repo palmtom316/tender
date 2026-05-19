@@ -195,9 +195,9 @@
 - Modify: `backend/tender_backend/services/template_service/business_chapter_bindings.py`
 - Test: `backend/tests/unit/test_business_text_generators.py`
 
-- [ ] **Step 1:** 为章 11、13.1、15、17、24.5 定义生成器；输入为 companybase 数据、招标文件评分点、章节模板要求。
-- [ ] **Step 2:** 复用现有 AI gateway/technical writer 调用模式，输出结构为 `{"content_md": "...", "evidence_refs": [...], "missing_materials": [...]}`。
-- [ ] **Step 3:** 单测使用 fake gateway，断言 prompt 不泄露暗标敏感字段，且缺失材料不会被模型编造。
+- [x] **Step 1:** 为章 11、13.1、15、17、24.5 定义生成器；输入为 companybase 数据、招标文件评分点、章节模板要求。
+- [x] **Step 2:** 复用现有 AI gateway/technical writer 调用模式，输出结构为 `{"content_md": "...", "evidence_refs": [...], "missing_materials": [...]}`。
+- [x] **Step 3:** 单测使用 fake gateway，断言 prompt 不泄露暗标敏感字段，且缺失材料不会被模型编造。
 
 ### Task B.5：商务/技术偏差表分离、页眉与骑缝章占位
 

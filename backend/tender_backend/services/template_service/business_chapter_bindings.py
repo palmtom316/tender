@@ -224,6 +224,15 @@ def _ledger_builder(ledger_key: str) -> ContextBuilder:
     return lambda chapter_code, materials, binding: _specialty_ledger_context(ledger_key, chapter_code, materials, binding)
 
 
+BUSINESS_TEXT_GENERATOR_BINDINGS: dict[str, str] = {
+    "11": "green_development",
+    "13.1": "esg_report",
+    "15": "technology_achievement",
+    "17": "research_team",
+    "24.5": "business_strength",
+}
+
+
 BUSINESS_CHAPTER_BINDINGS: dict[str, ChapterBinding] = {
     "1": ChapterBinding("1", _generic_attachment_context, ("business_deviation",)),
     "2": ChapterBinding("2", build_no_violation_commitment_context, ("commitment",)),
@@ -241,7 +250,7 @@ BUSINESS_CHAPTER_BINDINGS: dict[str, ChapterBinding] = {
     "14": ChapterBinding("14", _ledger_builder("green_certificates"), ("green_certificate",)),
     "15": ChapterBinding("15", _ledger_builder("technology_achievements"), ("technology_achievement",), narrative_generator="technology_achievement"),
     "16": ChapterBinding("16", _ledger_builder("innovation_policies"), ("innovation_policy",), narrative_generator="innovation_policy"),
-    "17": ChapterBinding("17", _people_context, ("research_team",)),
+    "17": ChapterBinding("17", _people_context, ("research_team",), narrative_generator="research_team"),
     "18": ChapterBinding("18", _ledger_builder("awards"), ("quality_award", "industry_award")),
     "19": ChapterBinding("19", _certificate_context, ("high_tech_certificate",)),
     "20": ChapterBinding("20", build_company_name_change_context, ("name_change_certificate",)),
@@ -278,6 +287,7 @@ def build_business_chapter_context(chapter_code: str, materials: Mapping[str, An
 
 __all__ = [
     "BUSINESS_CHAPTER_BINDINGS",
+    "BUSINESS_TEXT_GENERATOR_BINDINGS",
     "ChapterBinding",
     "build_company_name_change_context",
     "build_business_chapter_context",
