@@ -79,3 +79,16 @@ def test_hard_stop_fails_when_a_p0_chapter_lacks_draft_or_assets() -> None:
     assert evidence["hard_stop_passed"] is False
     assert "chapter 2 draft missing" in evidence["hard_stop_failures"]
     assert any("chapter 6 missing required assets" in failure for failure in evidence["hard_stop_failures"])
+
+
+def test_hard_stop_fails_when_coverage_has_p0_gap() -> None:
+    rows = _complete_rows()
+    rows[7]["coverage_report_json"] = {
+        "coverage_passed": False,
+        "issues": [{"code": "missing_section", "severity": "P0", "section_code": "8.4"}],
+    }
+
+    evidence = acceptance.collect_evidence(_Conn(rows), project_id=uuid4())
+
+    assert evidence["hard_stop_passed"] is False
+    assert "chapter 8 coverage failed" in evidence["hard_stop_failures"]

@@ -246,7 +246,7 @@ class TechnicalChapterContextBuilder:
                 SELECT id, project_id, company_key, ledger_type, evidence_asset_id, metadata_json,
                        created_at, updated_at
                 FROM distribution_domain_ledger
-                WHERE project_id = %s OR project_id IS NULL
+                WHERE project_id = %s
                 ORDER BY ledger_type, updated_at DESC, created_at DESC
                 """,
                 (project_id,),

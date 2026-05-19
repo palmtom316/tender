@@ -45,7 +45,12 @@ class _Cursor:
         elif "FROM evidence_asset" in query:
             self.result = self.conn.evidence_assets
         elif "FROM distribution_domain_ledger" in query:
-            self.result = self.conn.distribution_domain_ledgers
+            project_id = params[0] if params else None
+            self.result = [
+                row
+                for row in self.conn.distribution_domain_ledgers
+                if row.get("project_id") == project_id
+            ]
         else:
             self.result = []
         return self
@@ -244,3 +249,26 @@ def test_technical_chapter_context_matches_site_condition_keywords_from_location
     context = TechnicalChapterContextBuilder().build(conn, project_id=conn.project_id, chapter_id=conn.chapter_id)
 
     assert context["matched_keywords"] == ["高温", "山地", "交通管制", "高湿", "雾天"]
+
+
+def test_technical_chapter_context_excludes_non_project_distribution_ledgers():
+    conn = _Conn()
+    conn.distribution_domain_ledgers.append(
+        {
+            "id": uuid4(),
+            "project_id": None,
+            "company_key": "other_company",
+            "ledger_type": "distribution_automation",
+            "evidence_asset_id": uuid4(),
+            "metadata_json": {"system": "FA"},
+            "created_at": "2026-05-19T09:00:00",
+            "updated_at": "2026-05-19T09:00:00",
+        }
+    )
+
+    context = TechnicalChapterContextBuilder().build(conn, project_id=conn.project_id, chapter_id=conn.chapter_id)
+
+    assert [row["ledger_type"] for row in context["distribution_domain_ledgers"]] == [
+        "outage_window",
+        "live_work_plan",
+    ]

@@ -124,6 +124,8 @@ def _hard_stop_failures(chapters: list[dict]) -> list[str]:
                 f"chapter {code} missing required assets: "
                 + ", ".join(chapter["missing_required_assets"])
             )
+        if not chapter["coverage_passed"]:
+            failures.append(f"chapter {code} coverage failed")
         if not chapter["blind_check_passed"]:
             failures.append(f"chapter {code} blind check failed")
         if not chapter["charts_ready"]:
