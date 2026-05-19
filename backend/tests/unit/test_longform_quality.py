@@ -1,12 +1,44 @@
 from types import MappingProxyType
 
 from tender_backend.services.longform_quality import (
+    build_blind_bid_report,
     build_chart_closure_report,
     build_coverage_report,
     build_page_gate,
     estimate_markdown_pages,
     normalize_allowed_chart_keys,
 )
+
+
+def test_blind_bid_report_detects_configured_terms_and_common_sensitive_patterns() -> None:
+    report = build_blind_bid_report(
+        "REDACTED承诺参与渝中片区配网工程，联系人13800000000，日期2026年5月19日。",
+        sensitive_terms=["REDACTED", "渝中片区配网工程"],
+        chapter_code="2",
+        volume_type="business",
+    )
+
+    assert report["blind_check_passed"] is False
+    codes = {issue["code"] for issue in report["issues"]}
+    assert "blind_bid_sensitive_term" in codes
+    assert "blind_bid_phone_number" in codes
+    assert "blind_bid_specific_date" in codes
+    assert all(issue["chapter_code"] == "2" for issue in report["issues"])
+    assert all(issue["volume_type"] == "business" for issue in report["issues"])
+    assert "REDACTED" not in str(report["issues"])
+    assert all("matched_text_sha256" in issue for issue in report["issues"])
+
+
+def test_blind_bid_report_uses_configured_terms_not_hardcoded_customer_names() -> None:
+    report = build_blind_bid_report(
+        "REDACTED具备施工能力。",
+        sensitive_terms=[],
+        chapter_code="8",
+        volume_type="technical",
+    )
+
+    assert report["blind_check_passed"] is True
+    assert report["issues"] == []
 
 
 def test_estimate_markdown_pages_counts_chinese_text_tables_charts_and_breaks():

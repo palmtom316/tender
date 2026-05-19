@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from hashlib import sha256
 from collections.abc import Mapping
 from typing import Any
 
@@ -15,6 +16,11 @@ _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$", re.MULTILINE)
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*:?-{3,}:?\s*$")
 _PAGE_BREAK_RE = re.compile(r"page-break|<w:br[^>]+type=['\"]page['\"]|---PAGE BREAK---", re.IGNORECASE)
 _SECTION_HEADING_RE = re.compile(r"^(#{2,6})\s+([0-9]+(?:\.[0-9]+)*)\b.*$", re.MULTILINE)
+_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_ID_CARD_RE = re.compile(r"(?<![0-9A-Za-z])\d{17}[0-9Xx](?![0-9A-Za-z])")
+_SPECIFIC_DATE_RE = re.compile(
+    r"(?<!\d)(?:20\d{2}|19\d{2})(?:[-/.年](?:0?[1-9]|1[0-2])[-/.月](?:0?[1-9]|[12]\d|3[01])日?)(?!\d)"
+)
 
 
 def _weighted_text_units(content_md: str) -> int:
@@ -71,6 +77,70 @@ def estimate_markdown_pages(content_md: str, *, target_pages: int | None = None)
             "table_row_count": table_row_count,
             "explicit_page_break_count": explicit_page_break_count,
         },
+    }
+
+
+def build_blind_bid_report(
+    content_md: str,
+    *,
+    sensitive_terms: list[str] | tuple[str, ...] | set[str] | None = None,
+    chapter_code: str | None = None,
+    volume_type: str | None = None,
+) -> dict[str, Any]:
+    content = content_md or ""
+    issues: list[dict[str, Any]] = []
+    seen_terms: set[str] = set()
+    for term in sensitive_terms or []:
+        cleaned = str(term or "").strip()
+        if not cleaned or cleaned in seen_terms:
+            continue
+        seen_terms.add(cleaned)
+        if cleaned in content:
+            issues.append(
+                _blind_issue(
+                    "blind_bid_sensitive_term",
+                    chapter_code=chapter_code,
+                    volume_type=volume_type,
+                    matched_text=cleaned,
+                )
+            )
+
+    for pattern, code in (
+        (_PHONE_RE, "blind_bid_phone_number"),
+        (_ID_CARD_RE, "blind_bid_id_card_number"),
+        (_SPECIFIC_DATE_RE, "blind_bid_specific_date"),
+    ):
+        for match in pattern.finditer(content):
+            issues.append(
+                _blind_issue(
+                    code,
+                    chapter_code=chapter_code,
+                    volume_type=volume_type,
+                    matched_text=match.group(0),
+                )
+            )
+
+    return {
+        "blind_check_passed": not issues,
+        "issue_count": len(issues),
+        "issues": issues,
+    }
+
+
+def _blind_issue(
+    code: str,
+    *,
+    chapter_code: str | None,
+    volume_type: str | None,
+    matched_text: str,
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "severity": "P0",
+        "chapter_code": str(chapter_code) if chapter_code else None,
+        "volume_type": str(volume_type) if volume_type else None,
+        "match_length": len(matched_text),
+        "matched_text_sha256": sha256(matched_text.encode("utf-8")).hexdigest(),
     }
 
 

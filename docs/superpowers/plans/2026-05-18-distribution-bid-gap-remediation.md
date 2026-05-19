@@ -243,9 +243,9 @@
 - Modify: `backend/tender_backend/services/longform_quality.py`
 - Test: `backend/tests/unit/test_longform_quality.py`
 
-- [ ] **Step 1:** 将公司名、项目名、法人、联系方式、具体日期等敏感词规则扩到技术 16 章与商务 24 章。
-- [ ] **Step 2:** 暗标规则作为可配置输入，不在代码中硬编码真实客户名称。
-- [ ] **Step 3:** 写测试覆盖新增章节与商务承诺函场景。
+- [x] **Step 1:** 将公司名、项目名、法人、联系方式、具体日期等敏感词规则扩到技术 16 章与商务 24 章。
+- [x] **Step 2:** 暗标规则作为可配置输入，不在代码中硬编码真实客户名称。
+- [x] **Step 3:** 写测试覆盖新增章节与商务承诺函场景。
 
 ---
 
