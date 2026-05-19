@@ -117,11 +117,11 @@
 - Modify: `backend/tender_backend/services/business_bid_assembler.py`
 - Test: `backend/tests/integration/test_business_bid_assembler_docx.py`
 
-- [ ] **Step 1:** 写失败测试：给定 mock project/company/template item，调用 `BusinessBidAssembler.assemble(...)` 后，断言每个可渲染章节会 upsert 一条 `chapter_draft(volume_type='business')`。
-- [ ] **Step 2:** 新 migration 给 `chapter_draft` 增加 `rendered_docx_path TEXT`、`rendered_artifact_json JSONB NOT NULL DEFAULT '{}'::jsonb`；不新增 `attachment_bytes`，也不假设已有 `chapter_draft.metadata_json`。
-- [ ] **Step 3:** 渲染出的 DOCX 文件写入受控输出目录，`chapter_draft.content_md` 写入章节摘要/占位状态，`rendered_docx_path` 写文件路径，`rendered_artifact_json` 写 `template_item_id`、`render_mode`、`missing_materials`、`placeholder_status`。
-- [ ] **Step 4:** 增加灰度开关 `BUSINESS_BID_DOCXTPL_ENABLED`，默认先关闭；测试中显式打开。关闭时保留当前 response matrix / missing materials 行为。
-- [ ] **Step 5:** 跑 migration up/down 与 `pytest backend/tests/integration/test_business_bid_assembler_docx.py -v`。
+- [x] **Step 1:** 写失败测试：给定 mock project/company/template item，调用 `BusinessBidAssembler.assemble(...)` 后，断言每个可渲染章节会 upsert 一条 `chapter_draft(volume_type='business')`。
+- [x] **Step 2:** 新 migration 给 `chapter_draft` 增加 `rendered_docx_path TEXT`、`rendered_artifact_json JSONB NOT NULL DEFAULT '{}'::jsonb`；不新增 `attachment_bytes`，也不假设已有 `chapter_draft.metadata_json`。
+- [x] **Step 3:** 渲染出的 DOCX 文件写入受控输出目录，`chapter_draft.content_md` 写入章节摘要/占位状态，`rendered_docx_path` 写文件路径，`rendered_artifact_json` 写 `template_item_id`、`render_mode`、`missing_materials`、`placeholder_status`。
+- [x] **Step 4:** 增加灰度开关 `BUSINESS_BID_DOCXTPL_ENABLED`，默认先关闭；测试中显式打开。关闭时保留当前 response matrix / missing materials 行为。
+- [x] **Step 5:** 跑 migration up/down 与 `pytest backend/tests/integration/test_business_bid_assembler_docx.py -v`。
 
 ### Task A.7：商务整卷 DOCX 导出读取章节 artifact
 

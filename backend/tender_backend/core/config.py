@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     tender_zip_max_compression_ratio: float = 100.0
     template_render_root: Path = Path("/tmp/tender_template_renders")
     template_bundle_root: Path = Path("/tmp/tender_template_bundles")
+    business_bid_docxtpl_enabled: bool = False
     standard_ocr_worker_count: int = 1
     standard_mineru_model_version: str = "vlm"
     standard_mineru_language: str = "ch"
