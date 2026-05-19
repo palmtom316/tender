@@ -183,10 +183,10 @@
 - Modify: `backend/tender_backend/services/companybase_import_service.py`
 - Test: `backend/tests/integration/test_companybase_import_service.py`
 
-- [ ] **Step 1:** 现状 `MVP_SHEETS={"公司主体","公司资料","人员资料","附件索引"}`。新增 sheet 必须保持旧 MVP sheet 行为不变。
-- [ ] **Step 2:** 分批接入 `财务报表`、`银行账户`、`保证金`、`绿证`、`科技成果`、`ESG`、`奖项` parser/validator。
-- [ ] **Step 3:** 如果当前系统已有财务 API 或附件能力，仅在 importer 中建立映射，不重复发明平行数据源。
-- [ ] **Step 4:** 用样例 xlsx 跑集成测试，断言旧 4 sheet + 新 sheet 可同时导入。
+- [x] **Step 1:** 现状 `MVP_SHEETS={"公司主体","公司资料","人员资料","附件索引"}`。新增 sheet 必须保持旧 MVP sheet 行为不变。
+- [x] **Step 2:** 分批接入 `财务报表`、`银行账户`、`保证金`、`绿证`、`科技成果`、`ESG`、`奖项` parser/validator。
+- [x] **Step 3:** 如果当前系统已有财务 API 或附件能力，仅在 importer 中建立映射，不重复发明平行数据源。
+- [x] **Step 4:** 用样例 xlsx 跑集成测试，断言旧 4 sheet + 新 sheet 可同时导入。
 
 ### Task B.4：正文型章节生成
 

@@ -1,8 +1,4 @@
-"""Companybase workbook validation and MVP import.
-
-MVP scope: 公司主体、公司资料、人员资料、附件索引. Other sheets are counted and
-reported as unsupported rather than silently ignored.
-"""
+"""Companybase workbook validation and import."""
 
 from __future__ import annotations
 
@@ -24,8 +20,18 @@ from psycopg.rows import dict_row
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff"}
 MVP_SHEETS = {"公司主体", "公司资料", "人员资料", "附件索引"}
+FINANCIAL_SHEET = "财务报表"
+SPECIALTY_LEDGER_SHEETS = {
+    "银行账户": "bank_account",
+    "保证金": "bid_bond",
+    "绿证": "green_certificate",
+    "科技成果": "technology_achievement",
+    "ESG": "esg_report",
+    "奖项": "award",
+}
+SUPPORTED_SHEETS = MVP_SHEETS | {FINANCIAL_SHEET} | set(SPECIALTY_LEDGER_SHEETS)
 SUPPORTED_OWNER_TYPES = {"library_company", "company_profile", "person_profile"}
-JSON_FIELDS = {"metadata_json", "profile_json"}
+JSON_FIELDS = {"metadata_json", "profile_json", "statement_data"}
 DATE_FIELDS = {"issued_on", "expires_on"}
 
 
@@ -128,11 +134,16 @@ class CompanybaseImportService:
             "company_profile": {row.get("unique_key", "").strip() for row in tables.get("公司资料", []) if row.get("unique_key", "").strip()},
             "person_profile": {row.get("unique_key", "").strip() for row in tables.get("人员资料", []) if row.get("unique_key", "").strip()},
         }
+        attachment_keys = {
+            row.get("attachment_key", "").strip()
+            for row in tables.get("附件索引", [])
+            if row.get("attachment_key", "").strip()
+        }
 
         for sheet, rows in tables.items():
-            if sheet not in MVP_SHEETS:
+            if sheet not in SUPPORTED_SHEETS:
                 if rows:
-                    report.issues.append(CompanybaseIssue("P1", sheet, None, "sheet recognized but not imported in MVP"))
+                    report.issues.append(CompanybaseIssue("P1", sheet, None, "sheet not imported"))
                 continue
             seen: set[str] = set()
             key_field = "company_key" if sheet == "公司主体" else "attachment_key" if sheet == "附件索引" else "unique_key"
@@ -145,12 +156,15 @@ class CompanybaseImportService:
                 seen.add(key)
 
                 company_key = row.get("company_key", "").strip()
-                if sheet != "公司主体" and company_key and company_key not in company_keys:
-                    report.issues.append(CompanybaseIssue("P0", sheet, index, f"company_key not found: {company_key}"))
+                if sheet != "公司主体":
+                    if not company_key:
+                        report.issues.append(CompanybaseIssue("P0", sheet, index, "company_key is required"))
+                    elif company_key not in company_keys:
+                        report.issues.append(CompanybaseIssue("P0", sheet, index, f"company_key not found: {company_key}"))
 
                 for field_name in JSON_FIELDS:
                     raw = row.get(field_name, "").strip()
-                    if raw and not isinstance(self._json(raw), dict):
+                    if raw and "__invalid_json__" in self._json(raw):
                         report.issues.append(CompanybaseIssue("P0", sheet, index, f"{field_name} must be a JSON object"))
 
                 for field_name in DATE_FIELDS:
@@ -176,6 +190,19 @@ class CompanybaseImportService:
                             report.issues.append(CompanybaseIssue("P0", sheet, index, f"unsupported file extension: {rel}"))
                         if not path.is_file():
                             report.issues.append(CompanybaseIssue("P1", sheet, index, f"file does not exist yet: {rel}"))
+                if sheet == FINANCIAL_SHEET:
+                    fiscal_year = row.get("fiscal_year", row.get("year", "")).strip()
+                    if not fiscal_year.isdigit():
+                        report.issues.append(CompanybaseIssue("P0", sheet, index, "fiscal_year must be an integer"))
+                    if not row.get("statement_type", "").strip():
+                        report.issues.append(CompanybaseIssue("P0", sheet, index, "statement_type is required"))
+                if sheet in SPECIALTY_LEDGER_SHEETS:
+                    year = row.get("year", "").strip()
+                    if year and not year.isdigit():
+                        report.issues.append(CompanybaseIssue("P0", sheet, index, "year must be an integer"))
+                    evidence_key = row.get("evidence_attachment_key", "").strip()
+                    if evidence_key and evidence_key not in attachment_keys:
+                        report.issues.append(CompanybaseIssue("P0", sheet, index, f"evidence_attachment_key not found: {evidence_key}"))
         return report
 
     def _plan_actions(self, conn: Connection, tables: dict[str, list[dict[str, str]]]) -> dict[str, int]:
@@ -193,12 +220,26 @@ class CompanybaseImportService:
                 counts["skipped"] += 1
             else:
                 counts["updated" if self._find_by_import_key(conn, "evidence_asset", row.get("attachment_key", ""), json_column="metadata_json", key_name="attachment_key") else "created"] += 1
+        for row in tables.get(FINANCIAL_SHEET, []):
+            counts[
+                "updated"
+                if self._find_by_import_key(conn, "financial_statement", row.get("unique_key", ""), json_column="statement_data")
+                else "created"
+            ] += 1
+        for sheet in SPECIALTY_LEDGER_SHEETS:
+            for row in tables.get(sheet, []):
+                counts[
+                    "updated"
+                    if self._find_by_import_key(conn, "business_specialty_ledger", row.get("unique_key", ""), json_column="metadata_json")
+                    else "created"
+                ] += 1
         return counts
 
     def _apply_import(self, conn: Connection, tables: dict[str, list[dict[str, str]]]) -> dict[str, int]:
         counts = {"created": 0, "updated": 0, "skipped": 0}
         company_ids: dict[str, UUID] = {}
         owner_ids: dict[tuple[str, str], UUID] = {}
+        evidence_ids: dict[str, UUID] = {}
 
         for row in tables.get("公司主体", []):
             company_key = row.get("company_key", "").strip()
@@ -313,10 +354,62 @@ class CompanybaseImportService:
             }
             if existing:
                 self._update_record(conn, "evidence_asset", existing, fields, json_fields={"metadata_json"})
+                evidence_id = existing
                 counts["updated"] += 1
             else:
-                self._insert_evidence(conn, uuid4(), fields)
+                evidence_id = uuid4()
+                self._insert_evidence(conn, evidence_id, fields)
                 counts["created"] += 1
+            evidence_ids[unique_key] = evidence_id
+        for row in tables.get(FINANCIAL_SHEET, []):
+            unique_key = row.get("unique_key", "").strip()
+            existing = self._find_by_import_key(conn, "financial_statement", unique_key, json_column="statement_data")
+            fields = {
+                "library_company_id": company_ids.get(row.get("company_key", "").strip()) or self._find_library_company(conn, row.get("company_key", "")),
+                "fiscal_year": self._int(row.get("fiscal_year") or row.get("year")),
+                "statement_type": row.get("statement_type", "").strip(),
+                "statement_data": self._financial_statement_data(row, unique_key=unique_key),
+                "source_note": row.get("source_note", "").strip() or None,
+            }
+            if existing:
+                self._update_record(conn, "financial_statement", existing, fields, json_fields={"statement_data"})
+                counts["updated"] += 1
+            else:
+                self._insert_financial_statement(conn, uuid4(), fields)
+                counts["created"] += 1
+        for sheet, ledger_type in SPECIALTY_LEDGER_SHEETS.items():
+            for row in tables.get(sheet, []):
+                unique_key = row.get("unique_key", "").strip()
+                evidence_key = row.get("evidence_attachment_key", "").strip()
+                evidence_id = evidence_ids.get(evidence_key)
+                if evidence_key and evidence_id is None:
+                    evidence_id = self._find_by_import_key(
+                        conn,
+                        "evidence_asset",
+                        evidence_key,
+                        json_column="metadata_json",
+                        key_name="attachment_key",
+                    )
+                existing = self._find_by_import_key(
+                    conn,
+                    "business_specialty_ledger",
+                    unique_key,
+                    json_column="metadata_json",
+                )
+                fields = {
+                    "library_company_id": company_ids.get(row.get("company_key", "").strip()) or self._find_library_company(conn, row.get("company_key", "")),
+                    "company_key": row.get("company_key", "").strip() or None,
+                    "ledger_type": ledger_type,
+                    "year": self._int(row.get("year")),
+                    "evidence_asset_id": evidence_id,
+                    "metadata_json": self._specialty_ledger_metadata(row, unique_key=unique_key, source_sheet=sheet, ledger_type=ledger_type),
+                }
+                if existing:
+                    self._update_record(conn, "business_specialty_ledger", existing, fields, json_fields={"metadata_json"})
+                    counts["updated"] += 1
+                else:
+                    self._insert_business_specialty_ledger(conn, uuid4(), fields)
+                    counts["created"] += 1
         return counts
 
     @staticmethod
@@ -352,6 +445,27 @@ class CompanybaseImportService:
             "sensitive": row.get("is_blind_sensitive", "").strip().upper() == "TRUE",
             "redaction_note": row.get("redaction_note", "").strip(),
         }
+        return data
+
+    def _financial_statement_data(self, row: dict[str, str], *, unique_key: str) -> dict[str, Any]:
+        data = self._with_import(row.get("statement_data"), unique_key=unique_key)
+        data["import"]["source_sheet"] = FINANCIAL_SHEET
+        return data
+
+    def _specialty_ledger_metadata(
+        self,
+        row: dict[str, str],
+        *,
+        unique_key: str,
+        source_sheet: str,
+        ledger_type: str,
+    ) -> dict[str, Any]:
+        data = self._with_import(row.get("metadata_json"), unique_key=unique_key)
+        data["import"]["source_sheet"] = source_sheet
+        data["ledger_type"] = ledger_type
+        evidence_key = row.get("evidence_attachment_key", "").strip()
+        if evidence_key:
+            data["evidence_attachment_key"] = evidence_key
         return data
 
     @staticmethod
@@ -423,6 +537,41 @@ class CompanybaseImportService:
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
             """,
             (record_id, fields["library_company_id"], fields["owner_type"], fields["owner_id"], fields["asset_name"], fields["asset_domain"], fields["asset_category"], fields["asset_type"], fields["file_name"], fields["file_path"], fields["media_type"], fields["issuer_name"], fields["issued_on"], fields["expires_on"], json.dumps(fields["metadata_json"], ensure_ascii=False), fields["sort_order"]),
+        )
+
+    def _insert_financial_statement(self, conn: Connection, record_id: UUID, fields: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            INSERT INTO financial_statement (
+              id, library_company_id, fiscal_year, statement_type, statement_data, source_note
+            ) VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+            """,
+            (
+                record_id,
+                fields["library_company_id"],
+                fields["fiscal_year"],
+                fields["statement_type"],
+                json.dumps(fields["statement_data"], ensure_ascii=False),
+                fields["source_note"],
+            ),
+        )
+
+    def _insert_business_specialty_ledger(self, conn: Connection, record_id: UUID, fields: dict[str, Any]) -> None:
+        conn.execute(
+            """
+            INSERT INTO business_specialty_ledger (
+              id, library_company_id, company_key, ledger_type, year, evidence_asset_id, metadata_json
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            (
+                record_id,
+                fields["library_company_id"],
+                fields["company_key"],
+                fields["ledger_type"],
+                fields["year"],
+                fields["evidence_asset_id"],
+                json.dumps(fields["metadata_json"], ensure_ascii=False),
+            ),
         )
 
     def _update_record(self, conn: Connection, table: str, record_id: UUID, fields: dict[str, Any], *, json_fields: set[str]) -> None:
