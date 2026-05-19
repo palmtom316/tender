@@ -162,10 +162,10 @@
 - Modify: `backend/tender_backend/db/repositories/master_data_repo.py`
 - Test: `backend/tests/unit/test_master_data_repo.py`
 
-- [ ] **Step 1:** 从当前 Alembic head 后创建下一版本，不使用已占用的 `0051_project_template_instances.py`。
-- [ ] **Step 2:** 新增或扩展 6 类专项数据：银行账户、保证金、绿证、科技成果、ESG 报告、企业奖项。每类至少含 `company_id/company_key`、`year`、`evidence_asset_id` 或 `metadata_json.evidence_asset_ids`、`metadata_json`。
-- [ ] **Step 3:** repository 层遵循现有 `master_data_repo.py` dataclass + SQL 风格；当前仓库没有独立 `db/models/*.py` 实体，不新建不存在的 ORM 模型目录作为主路径。
-- [ ] **Step 4:** 写 CRUD 单测并跑：`pytest backend/tests/unit/test_master_data_repo.py -v`。
+- [x] **Step 1:** 从当前 Alembic head 后创建下一版本，不使用已占用的 `0051_project_template_instances.py`。
+- [x] **Step 2:** 新增或扩展 6 类专项数据：银行账户、保证金、绿证、科技成果、ESG 报告、企业奖项。每类至少含 `company_id/company_key`、`year`、`evidence_asset_id` 或 `metadata_json.evidence_asset_ids`、`metadata_json`。
+- [x] **Step 3:** repository 层遵循现有 `master_data_repo.py` dataclass + SQL 风格；当前仓库没有独立 `db/models/*.py` 实体，不新建不存在的 ORM 模型目录作为主路径。
+- [x] **Step 4:** 写 CRUD 单测并跑：`pytest backend/tests/unit/test_master_data_repo.py -v`。
 
 ### Task B.2：4 类承诺/说明文 context builder
 

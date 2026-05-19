@@ -138,6 +138,19 @@ class EvidenceAssetRow:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class BusinessSpecialtyLedgerRow:
+    id: UUID
+    library_company_id: UUID | None
+    company_key: str | None
+    ledger_type: str
+    year: int | None
+    evidence_asset_id: UUID | None
+    metadata_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
 _LIBRARY_COMPANY_COLUMNS = (
     "id, company_key, company_name, company_type, enabled, metadata_json, created_at, updated_at"
 )
@@ -166,6 +179,10 @@ _EVIDENCE_COLUMNS = (
     "id, library_company_id, owner_type, owner_id, asset_name, asset_domain, asset_category, "
     "asset_type, file_name, file_path, media_type, issuer_name, issued_on, expires_on, "
     "metadata_json, sort_order, created_at, updated_at"
+)
+_BUSINESS_SPECIALTY_LEDGER_COLUMNS = (
+    "id, library_company_id, company_key, ledger_type, year, evidence_asset_id, "
+    "metadata_json, created_at, updated_at"
 )
 
 
@@ -298,6 +315,20 @@ def _to_evidence_asset(row: dict[str, Any]) -> EvidenceAssetRow:
         expires_on=row["expires_on"],
         metadata_json=dict(row["metadata_json"] or {}),
         sort_order=row["sort_order"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _to_business_specialty_ledger(row: dict[str, Any]) -> BusinessSpecialtyLedgerRow:
+    return BusinessSpecialtyLedgerRow(
+        id=row["id"],
+        library_company_id=row.get("library_company_id"),
+        company_key=row.get("company_key"),
+        ledger_type=row["ledger_type"],
+        year=row["year"],
+        evidence_asset_id=row.get("evidence_asset_id"),
+        metadata_json=dict(row["metadata_json"] or {}),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -805,6 +836,101 @@ class MasterDataRepository:
 
     def delete_evidence_asset(self, conn: Connection, record_id: UUID) -> bool:
         return self._delete(conn, table="evidence_asset", record_id=record_id)
+
+    def list_business_specialty_ledgers(
+        self,
+        conn: Connection,
+        *,
+        library_company_id: UUID | None = None,
+        company_key: str | None = None,
+        ledger_type: str | None = None,
+        year: int | None = None,
+    ) -> list[BusinessSpecialtyLedgerRow]:
+        clauses: list[str] = []
+        values: list[Any] = []
+        if library_company_id is not None:
+            clauses.append("library_company_id = %s")
+            values.append(library_company_id)
+        if company_key:
+            clauses.append("company_key = %s")
+            values.append(company_key)
+        if ledger_type:
+            clauses.append("ledger_type = %s")
+            values.append(ledger_type)
+        if year is not None:
+            clauses.append("year = %s")
+            values.append(year)
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                f"""
+                SELECT {_BUSINESS_SPECIALTY_LEDGER_COLUMNS}
+                FROM business_specialty_ledger
+                {where_sql}
+                ORDER BY year DESC NULLS LAST, ledger_type, updated_at DESC, created_at DESC
+                """,
+                values,
+            ).fetchall()
+        return [_to_business_specialty_ledger(row) for row in rows]
+
+    def get_business_specialty_ledger(self, conn: Connection, record_id: UUID) -> BusinessSpecialtyLedgerRow | None:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"SELECT {_BUSINESS_SPECIALTY_LEDGER_COLUMNS} FROM business_specialty_ledger WHERE id = %s",
+                (record_id,),
+            ).fetchone()
+        return _to_business_specialty_ledger(row) if row else None
+
+    def create_business_specialty_ledger(self, conn: Connection, **fields: Any) -> BusinessSpecialtyLedgerRow:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                f"""
+                INSERT INTO business_specialty_ledger (
+                  id, library_company_id, company_key, ledger_type, year, evidence_asset_id, metadata_json
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+                RETURNING {_BUSINESS_SPECIALTY_LEDGER_COLUMNS}
+                """,
+                (
+                    uuid4(),
+                    fields.get("library_company_id"),
+                    fields.get("company_key"),
+                    fields["ledger_type"],
+                    fields.get("year"),
+                    fields.get("evidence_asset_id"),
+                    json.dumps(fields.get("metadata_json") or {}, ensure_ascii=False),
+                ),
+            ).fetchone()
+        conn.commit()
+        assert row is not None
+        return _to_business_specialty_ledger(row)
+
+    def update_business_specialty_ledger(
+        self,
+        conn: Connection,
+        record_id: UUID,
+        **fields: Any,
+    ) -> BusinessSpecialtyLedgerRow | None:
+        return self._update_json_record(
+            conn,
+            table="business_specialty_ledger",
+            record_id=record_id,
+            fields=fields,
+            allowed_fields={
+                "library_company_id",
+                "company_key",
+                "ledger_type",
+                "year",
+                "evidence_asset_id",
+                "metadata_json",
+            },
+            json_fields={"metadata_json"},
+            returning=_BUSINESS_SPECIALTY_LEDGER_COLUMNS,
+            mapper=_to_business_specialty_ledger,
+        )
+
+    def delete_business_specialty_ledger(self, conn: Connection, record_id: UUID) -> bool:
+        return self._delete(conn, table="business_specialty_ledger", record_id=record_id)
 
     def _update_json_record(
         self,
