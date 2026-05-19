@@ -17,6 +17,7 @@ class TechnicalChapterStrategy:
     required_charts: tuple[str, ...]
     innovation_slots: tuple[str, ...]
     self_check_rules: tuple[str, ...]
+    required_assets: tuple[str, ...] = ()
     forbidden_terms: tuple[str, ...] = ("报价", "投标报价", "最高限价", "单价", "总价")
     prompt_template_path: str | None = None
 
@@ -300,6 +301,76 @@ DEFAULT_TABLES: dict[str, dict[str, tuple[tuple[str, ...], ...]]] = {
 
 
 CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
+    "1": TechnicalChapterStrategy(
+        key="technical_deviation_table",
+        purpose="生成技术偏差表并明确无偏差或逐项偏差响应。",
+        sections=(
+            ("技术偏差表", "按招标技术条款逐项列示响应情况；无偏差时输出无偏差声明，不混入商务报价内容。"),
+        ),
+        required_facts=("technical_clauses", "confirmed_deviation_items"),
+        required_standards=("technical_specification",),
+        required_charts=(),
+        innovation_slots=(),
+        self_check_rules=("必须区分技术偏差与商务偏差", "无偏差不得编造偏差项", "不得出现报价信息"),
+        required_assets=("technical_deviation_table",),
+    ),
+    "2": TechnicalChapterStrategy(
+        key="personnel_practice_compliance_commitment",
+        purpose="形成关于施工监理项目人员执业合规的承诺函。",
+        sections=(
+            ("承诺主体与适用范围", "说明承诺适用于本项目拟派项目人员执业资格、在岗履约和合规管理。"),
+            ("人员执业合规承诺", "承诺人员证书真实有效、注册关系合规、到岗履约满足招标要求。"),
+            ("违约责任与资料留存", "说明证书、社保、任命和承诺资料随投标文件提交并接受核验。"),
+        ),
+        required_facts=("selected_personnel", "personnel_compliance_requirements", "project_roles"),
+        required_standards=("personnel_practice_compliance",),
+        required_charts=(),
+        innovation_slots=("人员证书核验清单",),
+        self_check_rules=("人员姓名、证书和岗位必须与人员附件一致", "承诺函不得写入报价信息", "缺少证书不得编造资质"),
+        required_assets=("personnel_certificates", "social_security_records", "personnel_commitment_template"),
+    ),
+    "3": TechnicalChapterStrategy(
+        key="schedule_response",
+        purpose="响应招标文件工期、里程碑和进度约束。",
+        sections=(
+            ("工期目标响应", "原文响应计划工期、开竣工节点、停电窗口和里程碑要求。"),
+            ("工期保障承诺", "说明组织、资源、材料、协调和风险纠偏保障，不承诺未确认赶工条件。"),
+        ),
+        required_facts=("construction_period", "milestones", "schedule_constraints"),
+        required_standards=("schedule_management",),
+        required_charts=("schedule_gantt",),
+        innovation_slots=("节点预警清单",),
+        self_check_rules=("工期数字必须来自招标文件或用户确认", "不得与10.3进度计划冲突", "不得出现报价信息"),
+        required_assets=("schedule_commitment", "milestone_plan"),
+    ),
+    "4": TechnicalChapterStrategy(
+        key="technical_qualification_status",
+        purpose="组织技术分册要求的资质证书和能力证明。",
+        sections=(
+            ("资质响应范围", "列示与技术标相关的企业资质、许可、体系证书和有效期。"),
+            ("证书核验说明", "说明证书来源、有效状态、附件索引和缺口材料。"),
+        ),
+        required_facts=("qualification_requirements", "qualification_certificates"),
+        required_standards=("qualification_compliance",),
+        required_charts=(),
+        innovation_slots=("证书有效期预警",),
+        self_check_rules=("证书名称、等级、有效期必须与附件一致", "缺少证书必须列缺口", "不得出现报价信息"),
+        required_assets=("qualification_certificates", "license_documents"),
+    ),
+    "5": TechnicalChapterStrategy(
+        key="technical_performance_status",
+        purpose="组织技术分册业绩材料和证明附件。",
+        sections=(
+            ("业绩响应范围", "按招标要求列示同类项目业绩、合同范围、完成状态和证明材料。"),
+            ("业绩证明索引", "将合同、验收、评价、发票等附件与业绩条目关联。"),
+        ),
+        required_facts=("performance_requirements", "project_performances"),
+        required_standards=("performance_compliance",),
+        required_charts=(),
+        innovation_slots=("业绩证明闭环索引",),
+        self_check_rules=("业绩数量和时间范围必须满足招标要求", "附件不得错配", "不得出现报价信息"),
+        required_assets=("performance_contracts", "acceptance_certificates", "performance_evaluations"),
+    ),
     "6": TechnicalChapterStrategy(
         key="project_team",
         purpose="说明项目管理组织、关键岗位配置和职责闭环。",
@@ -312,7 +383,22 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         required_standards=("project_management",),
         required_charts=("org_chart", "responsibility_matrix"),
         innovation_slots=("岗位履约看板", "关键岗位 AB 角备份"),
-        self_check_rules=("人员数量和证书要求必须逐项响应", "不得出现报价信息"),
+        self_check_rules=("人员数量和证书要求必须逐项响应", "必须校验人证岗匹配", "必须包含项目团队任命或到岗承诺", "不得出现报价信息"),
+        required_assets=("project_team_roster", "personnel_certificates", "appointment_letter", "team_commitment"),
+    ),
+    "7": TechnicalChapterStrategy(
+        key="other_qualification_conditions",
+        purpose="响应招标文件技术分册其他资格条件。",
+        sections=(
+            ("其他资格条件清单", "逐项列示除资质、业绩、人员外的其他技术资格条件。"),
+            ("响应资料索引", "将承诺函、截图、证书、制度文件和说明材料对应到资格条件。"),
+        ),
+        required_facts=("other_qualification_requirements",),
+        required_standards=("qualification_compliance",),
+        required_charts=(),
+        innovation_slots=("其他资格条件核验清单",),
+        self_check_rules=("不得遗漏否决性资格条件", "缺少附件必须列缺口", "不得出现报价信息"),
+        required_assets=("other_qualification_assets", "qualification_commitments"),
     ),
     "8": TechnicalChapterStrategy(
         key="construction_plan_and_technical_measures",
@@ -393,6 +479,32 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         ),
         prompt_template_path=SCHEDULE_PROMPT_PATH,
     ),
+    "10": TechnicalChapterStrategy(
+        key="performance_capability_quality_assurance",
+        purpose="作为第10章总章，承接履约能力、质量、安全绿色和进度保证措施。",
+        sections=(
+            ("第10章组成说明", "说明本章由10.1质量、10.2安全绿色、10.3进度三部分组成，并保持三部分承诺一致。"),
+        ),
+        required_facts=("quality_requirement", "safety_constraints", "construction_period"),
+        required_standards=("quality_acceptance", "safety", "schedule_management"),
+        required_charts=(),
+        innovation_slots=("质量安全进度协同索引",),
+        self_check_rules=("不得替代10.1、10.2、10.3的详细内容", "不得出现报价信息"),
+    ),
+    "11": TechnicalChapterStrategy(
+        key="service_commitment",
+        purpose="形成服务承诺章节，覆盖响应时限、保修、培训、资料移交和增值服务边界。",
+        sections=(
+            ("服务响应承诺", "响应招标文件服务、保修、响应时限和配合要求。"),
+            ("服务保障措施", "说明组织、人员、备件、资料、培训和回访机制。"),
+        ),
+        required_facts=("service_requirements", "warranty_requirements"),
+        required_standards=("service_management",),
+        required_charts=(),
+        innovation_slots=("服务闭环台账", "回访记录机制"),
+        self_check_rules=("响应时限必须有来源", "不得承诺无来源增值服务", "不得出现报价信息"),
+        required_assets=("service_commitment_template", "after_sales_capability_assets"),
+    ),
     "12": TechnicalChapterStrategy(
         key="technical_scoring_materials",
         purpose="逐项响应技术评分点并组织证明材料。",
@@ -418,6 +530,48 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         required_charts=(),
         innovation_slots=("标准条款响应矩阵",),
         self_check_rules=("只能引用本地标准库或用户确认标准",),
+    ),
+    "14": TechnicalChapterStrategy(
+        key="performance_evaluation_materials",
+        purpose="组织履约评价证明材料并说明适用范围。",
+        sections=(
+            ("履约评价证明清单", "列示履约评价、用户评价、考核结果等证明材料。"),
+            ("适用性说明", "说明证明材料与招标要求、项目类型和评价周期的对应关系。"),
+        ),
+        required_facts=("performance_evaluation_requirements", "performance_evaluations"),
+        required_standards=("performance_evaluation",),
+        required_charts=(),
+        innovation_slots=("履约评价索引",),
+        self_check_rules=("评价材料必须与附件一致", "不得夸大评价等级", "不得出现报价信息"),
+        required_assets=("performance_evaluation_certificates",),
+    ),
+    "15": TechnicalChapterStrategy(
+        key="other_technical_documents",
+        purpose="承载招标文件要求的其他技术文件和补充说明。",
+        sections=(
+            ("其他技术文件清单", "列示招标文件要求但未归入前述章节的技术材料。"),
+            ("补充说明", "说明每项材料对应的招标条款、附件和响应边界。"),
+        ),
+        required_facts=("other_technical_requirements",),
+        required_standards=("technical_specification",),
+        required_charts=(),
+        innovation_slots=("其他技术资料索引",),
+        self_check_rules=("不得把商务报价材料放入技术其他章节", "缺少材料必须列缺口", "不得出现报价信息"),
+        required_assets=("other_technical_assets",),
+    ),
+    "16": TechnicalChapterStrategy(
+        key="performance_commitment_letter",
+        purpose="形成履约承诺函并绑定签章、授权和承诺附件。",
+        sections=(
+            ("履约承诺范围", "承诺按招标文件、合同条件、技术规范和项目管理要求履约。"),
+            ("履约保障与责任", "说明人员到岗、质量安全、进度、资料移交、保修和违约责任。"),
+        ),
+        required_facts=("performance_commitment_requirements", "authorized_signatory"),
+        required_standards=("contract_performance", "sgcc_management"),
+        required_charts=(),
+        innovation_slots=("履约承诺闭环清单",),
+        self_check_rules=("承诺主体和签署人必须与授权资料一致", "不得承诺无来源服务或报价条件", "不得出现报价信息"),
+        required_assets=("performance_commitment_template", "authorization_letter", "seal_confirmation"),
     ),
 }
 

@@ -223,9 +223,9 @@
 - Modify: `backend/tender_backend/services/technical_chapter_strategies/registry.py`
 - Test: `backend/tests/unit/test_technical_chapter_strategies.py`
 
-- [ ] **Step 1:** 为章 2、3、7、11、14、15、16 建立专用 strategy：前置事实、模板/附件要求、required_assets、self_check_rules。
-- [ ] **Step 2:** 章 6 优先补项目团队人员、证书、任命/承诺附件装配和验收规则；是否升级 longform 作为 P1 决策，不作为本轮 P0 blocker。
-- [ ] **Step 3:** 单测断言 16 章均能从 registry 查到 strategy，且 2/3/7/11/14/15/16 不再只依赖泛化 fallback。
+- [x] **Step 1:** 为章 2、3、7、11、14、15、16 建立专用 strategy：前置事实、模板/附件要求、required_assets、self_check_rules。
+- [x] **Step 2:** 章 6 优先补项目团队人员、证书、任命/承诺附件装配和验收规则；是否升级 longform 作为 P1 决策，不作为本轮 P0 blocker。
+- [x] **Step 3:** 单测断言 16 章均能从 registry 查到 strategy，且 2/3/7/11/14/15/16 不再只依赖泛化 fallback。
 
 ### Task C.2：完整 16 章交付验收入口
 
