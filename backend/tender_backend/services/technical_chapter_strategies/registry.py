@@ -341,6 +341,59 @@ DEFAULT_TABLES: dict[str, dict[str, tuple[tuple[str, ...], ...]]] = {
 
 
 CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
+    "0": TechnicalChapterStrategy(
+        key="technical_key_material_index",
+        purpose="汇总技术标重点资料索引，便于评审快速定位评分支撑和技术规范应提交材料。",
+        sections=(
+            ("重点资料索引说明", "说明本章只作为索引章，不替代后续正文和附件证明。"),
+            ("资料定位规则", "按评分项、技术规范条款、所在章节、附件名称和页码建立可追溯索引。"),
+        ),
+        required_facts=("scoring_items", "technical_spec_submission_requirements"),
+        required_standards=("scoring_support", "technical_specification"),
+        required_charts=(),
+        innovation_slots=("重点资料闭环索引",),
+        self_check_rules=("索引条目必须能定位到正文章节或附件", "不得把索引章写成实质响应正文", "不得出现报价信息"),
+        required_assets=("scoring_support_index", "technical_spec_submission_index"),
+    ),
+    "0.1": TechnicalChapterStrategy(
+        key="technical_scoring_support_materials",
+        purpose="逐项响应技术评分标准并组织支撑材料索引。",
+        sections=(
+            ("技术评分标准支撑材料索引", "逐项识别技术评分标准，建立评分项、支撑材料、所在章节和附件页码对应关系。"),
+            ("评分支撑材料完整性说明", "说明业绩、人员、方案、标准、创新等材料的来源、适用范围和缺口。"),
+        ),
+        required_facts=("scoring_items",),
+        required_standards=("scoring_support",),
+        required_charts=(),
+        innovation_slots=("评分点闭环索引",),
+        self_check_rules=("评分点不得遗漏", "每个评分项必须有章节或附件定位", "不得出现报价信息"),
+        required_assets=("scoring_support_materials",),
+    ),
+    "0.2": TechnicalChapterStrategy(
+        key="technical_spec_required_submission_materials",
+        purpose="汇总技术规范书规定应该提交的材料并建立提交状态索引。",
+        sections=(
+            ("技术规范书应提交材料清单", "逐条列示技术规范书要求提交的文件、表格、证明和附件。"),
+            ("提交材料响应说明", "说明每项材料对应的规范条款、所在章节、附件位置和缺口处理。"),
+        ),
+        required_facts=("technical_spec_submission_requirements", "sgcc_constraints"),
+        required_standards=("technical_specification", "sgcc_standard"),
+        required_charts=(),
+        innovation_slots=("技术规范提交材料索引",),
+        self_check_rules=("技术规范书要求提交的材料不得遗漏", "只能引用本地标准库或用户确认标准", "不得出现报价信息"),
+        required_assets=("technical_spec_required_documents",),
+    ),
+    "0.3": TechnicalChapterStrategy(
+        key="technical_bid_directory",
+        purpose="输出技术标全文目录，作为第0章索引的一部分。",
+        sections=(("技术标目录", "根据技术标模板源头输出0章至13章及其子章节目录。"),),
+        required_facts=("technical_outline",),
+        required_standards=("tender_document_format",),
+        required_charts=(),
+        innovation_slots=("全文目录索引",),
+        self_check_rules=("目录必须来自技术标章节源头", "不得生成章节封面", "不得出现报价信息"),
+        required_assets=("technical_bid_directory",),
+    ),
     "1": TechnicalChapterStrategy(
         key="technical_deviation_table",
         purpose="生成技术偏差表并明确无偏差或逐项偏差响应。",
@@ -356,7 +409,7 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
     ),
     "2": TechnicalChapterStrategy(
         key="personnel_practice_compliance_commitment",
-        purpose="形成关于施工监理项目人员执业合规的承诺函。",
+        purpose="形成关于施工项目人员执业合规的承诺函。",
         sections=(
             ("承诺主体与适用范围", "说明承诺适用于本项目拟派项目人员执业资格、在岗履约和合规管理。"),
             ("人员执业合规承诺", "承诺人员证书真实有效、注册关系合规、到岗履约满足招标要求。"),
@@ -521,7 +574,7 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
     ),
     "10": TechnicalChapterStrategy(
         key="performance_capability_quality_assurance",
-        purpose="作为第10章总章，承接履约能力、质量、安全绿色和进度保证措施。",
+        purpose="作为第10章总章，承接质量、进度、安全和绿色施工保障措施。",
         sections=(
             ("第10章组成说明", "说明本章由10.1质量、10.2安全绿色、10.3进度三部分组成，并保持三部分承诺一致。"),
         ),
@@ -532,46 +585,6 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         self_check_rules=("不得替代10.1、10.2、10.3的详细内容", "不得出现报价信息"),
     ),
     "11": TechnicalChapterStrategy(
-        key="service_commitment",
-        purpose="形成服务承诺章节，覆盖响应时限、保修、培训、资料移交和增值服务边界。",
-        sections=(
-            ("服务响应承诺", "响应招标文件服务、保修、响应时限和配合要求。"),
-            ("服务保障措施", "说明组织、人员、备件、资料、培训和回访机制。"),
-        ),
-        required_facts=("service_requirements", "warranty_requirements"),
-        required_standards=("service_management",),
-        required_charts=(),
-        innovation_slots=("服务闭环台账", "回访记录机制"),
-        self_check_rules=("响应时限必须有来源", "不得承诺无来源增值服务", "不得出现报价信息"),
-        required_assets=("service_commitment_template", "after_sales_capability_assets"),
-    ),
-    "12": TechnicalChapterStrategy(
-        key="technical_scoring_materials",
-        purpose="逐项响应技术评分点并组织证明材料。",
-        sections=(
-            ("评分点响应索引", "逐项识别技术评分标准并建立章节、资料、证明材料对应关系。"),
-            ("支撑材料组织", "按评分维度组织业绩、人员、方案、标准和创新措施证明材料。"),
-        ),
-        required_facts=("scoring_items",),
-        required_standards=("scoring_support",),
-        required_charts=(),
-        innovation_slots=("评分点闭环索引",),
-        self_check_rules=("评分点不得遗漏",),
-    ),
-    "13": TechnicalChapterStrategy(
-        key="sgcc_technical_spec_response",
-        purpose="对技术规范书和国网标准符合性进行集中响应。",
-        sections=(
-            ("技术规范响应范围", "对技术规范书要求逐条确认响应范围、实施措施和验收依据。"),
-            ("国网标准符合性措施", "将国网工程施工、质量、安全、资料和验收要求嵌入实施过程。"),
-        ),
-        required_facts=("sgcc_constraints",),
-        required_standards=("sgcc_standard",),
-        required_charts=(),
-        innovation_slots=("标准条款响应矩阵",),
-        self_check_rules=("只能引用本地标准库或用户确认标准",),
-    ),
-    "14": TechnicalChapterStrategy(
         key="performance_evaluation_materials",
         purpose="组织履约评价证明材料并说明适用范围。",
         sections=(
@@ -585,7 +598,21 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         self_check_rules=("评价材料必须与附件一致", "不得夸大评价等级", "不得出现报价信息"),
         required_assets=("performance_evaluation_certificates",),
     ),
-    "15": TechnicalChapterStrategy(
+    "12": TechnicalChapterStrategy(
+        key="construction_subcontract_management",
+        purpose="响应施工外包管理要求，说明合法分包边界、总包管控和资料闭环。",
+        sections=(
+            ("施工外包管理原则", "说明不转包、不违法分包、不挂靠，依法合规实施专业分包或劳务分包。"),
+            ("外包过程管控措施", "说明分包准入、合同交底、人员机具、质量安全、资料归档和履约评价管控。"),
+        ),
+        required_facts=("subcontracting_requirements", "subcontracting_scope"),
+        required_standards=("subcontract_management", "sgcc_management"),
+        required_charts=(),
+        innovation_slots=("分包过程闭环台账",),
+        self_check_rules=("不得承诺违法分包或转包", "分包范围必须来自招标文件或用户确认", "不得出现报价信息"),
+        required_assets=("subcontract_management_commitment", "subcontractor_qualification_assets"),
+    ),
+    "13": TechnicalChapterStrategy(
         key="other_technical_documents",
         purpose="承载招标文件要求的其他技术文件和补充说明。",
         sections=(
@@ -598,20 +625,6 @@ CHAPTER_STRATEGIES: dict[str, TechnicalChapterStrategy] = {
         innovation_slots=("其他技术资料索引",),
         self_check_rules=("不得把商务报价材料放入技术其他章节", "缺少材料必须列缺口", "不得出现报价信息"),
         required_assets=("other_technical_assets",),
-    ),
-    "16": TechnicalChapterStrategy(
-        key="performance_commitment_letter",
-        purpose="形成履约承诺函并绑定签章、授权和承诺附件。",
-        sections=(
-            ("履约承诺范围", "承诺按招标文件、合同条件、技术规范和项目管理要求履约。"),
-            ("履约保障与责任", "说明人员到岗、质量安全、进度、资料移交、保修和违约责任。"),
-        ),
-        required_facts=("performance_commitment_requirements", "authorized_signatory"),
-        required_standards=("contract_performance", "sgcc_management"),
-        required_charts=(),
-        innovation_slots=("履约承诺闭环清单",),
-        self_check_rules=("承诺主体和签署人必须与授权资料一致", "不得承诺无来源服务或报价条件", "不得出现报价信息"),
-        required_assets=("performance_commitment_template", "authorization_letter", "seal_confirmation"),
     ),
 }
 

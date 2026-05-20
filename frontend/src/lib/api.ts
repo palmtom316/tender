@@ -940,6 +940,66 @@ export function confirmBidOutline(projectId: string): Promise<BidOutline> {
   });
 }
 
+
+export interface AdHocTaskCardInput {
+  key: string;
+  label: string;
+  input_type: string;
+  options?: string[];
+  required?: boolean;
+  answer?: unknown;
+}
+
+export interface AdHocTaskCard {
+  status: string;
+  chapter_type?: string;
+  source_anchors?: Array<Record<string, unknown>>;
+  must_respond?: string[];
+  missing_inputs?: AdHocTaskCardInput[];
+  outline?: Array<Record<string, unknown>>;
+}
+
+export interface AdHocTaskCardResponse {
+  chapter_id: string;
+  card: AdHocTaskCard;
+}
+
+export function fetchAdHocTaskCard(projectId: string, chapterId: string, options?: { signal?: AbortSignal }): Promise<AdHocTaskCardResponse> {
+  return request<AdHocTaskCardResponse>(`/projects/${projectId}/bid-chapters/${chapterId}/ad-hoc-task-card`, {
+    signal: options?.signal,
+  });
+}
+
+export function updateAdHocTaskCard(
+  projectId: string,
+  chapterId: string,
+  payload: { answers?: Record<string, unknown>; chapter_type?: string | null },
+): Promise<AdHocTaskCardResponse> {
+  return request<AdHocTaskCardResponse>(`/projects/${projectId}/bid-chapters/${chapterId}/ad-hoc-task-card`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function generateAdHocTaskCardOutline(projectId: string, chapterId: string): Promise<AdHocTaskCardResponse> {
+  return request<AdHocTaskCardResponse>(`/projects/${projectId}/bid-chapters/${chapterId}/ad-hoc-task-card/outline`, {
+    method: "POST",
+  });
+}
+
+export function confirmAdHocTaskCardOutline(
+  projectId: string,
+  chapterId: string,
+  outline: Array<Record<string, unknown>>,
+): Promise<AdHocTaskCardResponse> {
+  return request<AdHocTaskCardResponse>(`/projects/${projectId}/bid-chapters/${chapterId}/ad-hoc-task-card/confirm-outline`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ outline }),
+  });
+}
+
 export function generateBidChapter(projectId: string, chapterId: string): Promise<Draft> {
   return request<Draft>(`/projects/${projectId}/bid-chapters/${chapterId}/generate`, {
     method: "POST",
@@ -1121,6 +1181,9 @@ export interface ExportGates {
     chart_closure_passed?: boolean;
     chart_closure_issue_count?: number;
     chart_closure_issues?: Array<{ code: string; chart_key?: string; severity?: string }>;
+    ad_hoc_task_cards_ready?: boolean;
+    ad_hoc_task_card_issue_count?: number;
+    ad_hoc_task_card_issues?: Array<{ chapter_code?: string; chapter_title?: string; message: string; hint?: string }>;
     format_passed: boolean;
     format_status: "passed" | "failed" | "warning_not_checked";
     format_message?: string;

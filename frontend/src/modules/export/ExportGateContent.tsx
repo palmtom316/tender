@@ -204,6 +204,15 @@ export function ExportGateContent() {
             }
           />
           <GateIndicator
+            passed={gates.ad_hoc_task_cards_ready ?? true}
+            label="新增章节任务卡"
+            detail={
+              gates.ad_hoc_task_cards_ready ?? true
+                ? "新增章节任务卡均已完成"
+                : `${gates.ad_hoc_task_card_issue_count ?? 0} 个新增章节任务卡未完成${gates.ad_hoc_task_card_issues?.[0]?.hint ? `：${gates.ad_hoc_task_card_issues[0].hint}` : ""}`
+            }
+          />
+          <GateIndicator
             passed={gates.format_passed}
             label="格式校验"
             detail={

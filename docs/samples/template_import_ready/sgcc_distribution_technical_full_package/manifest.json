@@ -1,0 +1,269 @@
+{
+  "package_name": "国网配网工程技术标完整模板",
+  "package_key": "sgcc_distribution_technical_full_v1",
+  "package_type": "technical",
+  "category_code": "sgcc_distribution",
+  "chapter_count": 46,
+  "output_docx": "docs/samples/template_import_ready/sgcc_distribution_technical_full_package/国网配网工程技术标_完整模板.docx",
+  "chapters": [
+    {
+      "chapter_code": "0",
+      "chapter_name": "技术标重点资料索引",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "0.1",
+      "chapter_name": "技术评分标准支撑材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "0.2",
+      "chapter_name": "技术规范书规定应该提交的材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "0.3",
+      "chapter_name": "标书目录",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "1",
+      "chapter_name": "技术偏差表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "2",
+      "chapter_name": "关于施工项目人员执业合规的承诺函",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "3",
+      "chapter_name": "工期响应",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "4",
+      "chapter_name": "资质情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5",
+      "chapter_name": "业绩情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.1",
+      "chapter_name": "类似工程业绩情况汇总表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.2",
+      "chapter_name": "近年完成的类似项目情况及证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.3",
+      "chapter_name": "正在施工的和新承接的类似项目情况及证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "6",
+      "chapter_name": "现场管理机构设置",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "7",
+      "chapter_name": "其他资格条件情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8",
+      "chapter_name": "施工方案与技术措施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.1",
+      "chapter_name": "编制依据与标准",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.2",
+      "chapter_name": "工程概况与施工重难点分析",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.3",
+      "chapter_name": "施工组织与部署",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.4",
+      "chapter_name": "主要施工方法及技术要求",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.5",
+      "chapter_name": "质量管理体系与措施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.6",
+      "chapter_name": "安全管理体系与措施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.7",
+      "chapter_name": "施工进度计划与保障",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.8",
+      "chapter_name": "环境保护、绿色低碳与碳足迹管理",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.9",
+      "chapter_name": "科技创新与智能化应用",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.10",
+      "chapter_name": "地域特性专题方案",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.11",
+      "chapter_name": "竣工验收与数字化移交",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.12",
+      "chapter_name": "售后服务、培训及增值服务",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.13",
+      "chapter_name": "拟投入施工车辆、机具、工器具、检测设备、安全工器具及设施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.14",
+      "chapter_name": "施工项目部组织架构创新设计",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.15",
+      "chapter_name": "国网年度框架施工工程投标其他创新内容",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9",
+      "chapter_name": "工作规划描述",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.1",
+      "chapter_name": "项目理解与总体工作思路",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.2",
+      "chapter_name": "工作目标分解与任务策划",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.3",
+      "chapter_name": "项目管理组织与制度规划",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.4",
+      "chapter_name": "协调配合工作规划",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.5",
+      "chapter_name": "技术管理与创新应用规划",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.6",
+      "chapter_name": "风险防控与应急管理规划",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.7",
+      "chapter_name": "履约创优与标准化管理规划",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9.8",
+      "chapter_name": "跨章节协同与边界管理",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "10",
+      "chapter_name": "质量进度安全绿色施工保障措施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "10.1",
+      "chapter_name": "质量保障措施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "10.2",
+      "chapter_name": "安全和绿色施工保障措施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "10.3",
+      "chapter_name": "工程进度计划及保证措施",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "11",
+      "chapter_name": "履约评价证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "12",
+      "chapter_name": "施工外包管理",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "13",
+      "chapter_name": "其他",
+      "render_mode": "single_docx_section"
+    }
+  ],
+  "template_policy": {
+    "chapter_0_is_index_directory_without_cover": true,
+    "cover_page_top_level_chapters": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+      "13"
+    ],
+    "ai_generated_chapters": [
+      "8",
+      "9",
+      "10.1",
+      "10.2",
+      "10.3"
+    ],
+    "no_internal_instruction_text_in_docx": true,
+    "historical_performance_removed": true,
+    "historical_personnel_removed": true,
+    "images_removed": true
+  }
+}

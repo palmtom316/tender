@@ -22,6 +22,10 @@ const {
   updateBidChapterMock,
   fetchBusinessTemplatePreviewMock,
   fetchProjectTemplateInstanceMock,
+  fetchAdHocTaskCardMock,
+  updateAdHocTaskCardMock,
+  generateAdHocTaskCardOutlineMock,
+  confirmAdHocTaskCardOutlineMock,
 } = vi.hoisted(() => ({
   useNavigationMock: vi.fn(),
   fetchDraftsMock: vi.fn(),
@@ -41,6 +45,10 @@ const {
   updateBidChapterMock: vi.fn(),
   fetchBusinessTemplatePreviewMock: vi.fn(),
   fetchProjectTemplateInstanceMock: vi.fn(),
+  fetchAdHocTaskCardMock: vi.fn(),
+  updateAdHocTaskCardMock: vi.fn(),
+  generateAdHocTaskCardOutlineMock: vi.fn(),
+  confirmAdHocTaskCardOutlineMock: vi.fn(),
 }));
 
 vi.mock("../../lib/NavigationContext", () => ({
@@ -68,6 +76,10 @@ vi.mock("../../lib/api", async () => {
     updateBidChapter: updateBidChapterMock,
     fetchBusinessTemplatePreview: fetchBusinessTemplatePreviewMock,
     fetchProjectTemplateInstance: fetchProjectTemplateInstanceMock,
+    fetchAdHocTaskCard: fetchAdHocTaskCardMock,
+    updateAdHocTaskCard: updateAdHocTaskCardMock,
+    generateAdHocTaskCardOutline: generateAdHocTaskCardOutlineMock,
+    confirmAdHocTaskCardOutline: confirmAdHocTaskCardOutlineMock,
   };
 
   it("blocks business generation when project template instance is not confirmed", async () => {
@@ -180,6 +192,20 @@ describe("EditorContent chart workflow", () => {
     updateBidChapterMock.mockResolvedValue({ id: "chapter-1", metadata_json: { target_pages: 96 } });
     updateDraftMock.mockResolvedValue({});
     fetchBusinessTemplatePreviewMock.mockResolvedValue({ package_title: "国网配网工程商务标", chapters: [] });
+    fetchAdHocTaskCardMock.mockResolvedValue({
+      chapter_id: "chapter-ad-hoc",
+      card: {
+        status: "needs_input",
+        chapter_type: "technical_special_plan",
+        source_anchors: [],
+        must_respond: [],
+        missing_inputs: [],
+        outline: [],
+      },
+    });
+    updateAdHocTaskCardMock.mockResolvedValue({ chapter_id: "chapter-ad-hoc", card: { status: "needs_input" } });
+    generateAdHocTaskCardOutlineMock.mockResolvedValue({ chapter_id: "chapter-ad-hoc", card: { status: "outline_ready", outline: [] } });
+    confirmAdHocTaskCardOutlineMock.mockResolvedValue({ chapter_id: "chapter-ad-hoc", card: { status: "outline_confirmed", outline: [] } });
   });
 
   it("generates a chart task draft and inserts the placeholder into the current draft", async () => {
@@ -321,7 +347,7 @@ describe("EditorContent chart workflow", () => {
   });
 
   it("shows material composition language for non-technical chapters", async () => {
-    fetchBidOutlineMock.mockResolvedValueOnce({
+    fetchBidOutlineMock.mockResolvedValue({
       id: "outline-1",
       project_id: "proj-1",
       outline_name: "默认目录",
@@ -375,7 +401,7 @@ describe("EditorContent chart workflow", () => {
   });
 
   it("shows business template chapter preview pages for business chapters", async () => {
-    fetchBidOutlineMock.mockResolvedValueOnce({
+    fetchBidOutlineMock.mockResolvedValue({
       id: "outline-1",
       project_id: "proj-1",
       outline_name: "默认目录",
@@ -438,7 +464,7 @@ describe("EditorContent chart workflow", () => {
   });
 
   it("switches preview pages and material checklist when selecting another business chapter", async () => {
-    fetchBidOutlineMock.mockResolvedValueOnce({
+    fetchBidOutlineMock.mockResolvedValue({
       id: "outline-1",
       project_id: "proj-1",
       outline_name: "默认目录",
@@ -480,7 +506,7 @@ describe("EditorContent chart workflow", () => {
   });
 
   it("uses a unified chapter directory instead of a separate business template list", async () => {
-    fetchBidOutlineMock.mockResolvedValueOnce({
+    fetchBidOutlineMock.mockResolvedValue({
       id: "outline-1",
       project_id: "proj-1",
       outline_name: "默认目录",
@@ -736,6 +762,159 @@ describe("EditorContent chart workflow", () => {
 
     expect(await screen.findByLabelText("图表任务")).toBeInTheDocument();
     expect(screen.queryByLabelText("资料候选区")).not.toBeInTheDocument();
+  });
+
+  it("routes ad hoc required chapters without drafts to the task card workflow", async () => {
+    fetchDraftsMock.mockResolvedValueOnce([]);
+    fetchBidOutlineMock.mockResolvedValue({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        {
+          id: "chapter-ad-hoc",
+          project_id: "proj-1",
+          outline_id: "outline-1",
+          chapter_code: "8.4",
+          chapter_title: "施工现场总平面布置专项方案",
+          volume_type: "technical",
+          sort_order: 1,
+          metadata_json: { ad_hoc_required: true },
+        },
+      ],
+    });
+    fetchAdHocTaskCardMock.mockResolvedValueOnce({
+      chapter_id: "chapter-ad-hoc",
+      card: {
+        status: "needs_input",
+        chapter_type: "technical_special_plan",
+        source_anchors: [
+          {
+            requirement_id: "req-1",
+            source_locator: "P32 技术评分标准第4项",
+            text: "应提供施工现场总平面布置及临电临水方案",
+          },
+        ],
+        must_respond: ["施工现场布置原则"],
+        missing_inputs: [
+          {
+            key: "site_type",
+            label: "项目现场类型",
+            input_type: "choice",
+            options: ["城区道路", "小区配网"],
+            required: true,
+            answer: null,
+          },
+        ],
+        outline: [],
+      },
+    });
+
+    render(withClient(<EditorContent />));
+    fireEvent.click(await screen.findByText("施工现场总平面布置专项方案"));
+
+    expect(await screen.findByLabelText("新增章节任务卡")).toBeInTheDocument();
+    expect(screen.getByText("还缺 1 项必填信息")).toBeInTheDocument();
+    expect(screen.getByText("P32 技术评分标准第4项")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成正文" })).toBeDisabled();
+    expect(screen.queryByLabelText("章节写作要求")).not.toBeInTheDocument();
+    expect(screen.queryByText("完整提示词")).not.toBeInTheDocument();
+  });
+
+  it("saves ad hoc answers before generating the outline", async () => {
+    fetchDraftsMock.mockResolvedValueOnce([]);
+    fetchBidOutlineMock.mockResolvedValue({
+      id: "outline-1",
+      project_id: "proj-1",
+      outline_name: "默认目录",
+      status: "confirmed",
+      chapters: [
+        {
+          id: "chapter-ad-hoc",
+          project_id: "proj-1",
+          outline_id: "outline-1",
+          chapter_code: "8.4",
+          chapter_title: "施工现场总平面布置专项方案",
+          volume_type: "technical",
+          sort_order: 1,
+          metadata_json: { ad_hoc_required: true },
+        },
+      ],
+    });
+    fetchAdHocTaskCardMock.mockResolvedValueOnce({
+      chapter_id: "chapter-ad-hoc",
+      card: {
+        status: "needs_input",
+        chapter_type: "technical_special_plan",
+        source_anchors: [],
+        must_respond: [],
+        missing_inputs: [
+          {
+            key: "site_type",
+            label: "项目现场类型",
+            input_type: "choice",
+            options: ["城区道路", "小区配网"],
+            required: true,
+            answer: null,
+          },
+        ],
+        outline: [],
+      },
+    });
+    updateAdHocTaskCardMock.mockResolvedValueOnce({
+      chapter_id: "chapter-ad-hoc",
+      card: {
+        status: "needs_input",
+        chapter_type: "technical_special_plan",
+        source_anchors: [],
+        must_respond: [],
+        missing_inputs: [
+          {
+            key: "site_type",
+            label: "项目现场类型",
+            input_type: "choice",
+            options: ["城区道路", "小区配网"],
+            required: true,
+            answer: "城区道路",
+          },
+        ],
+        outline: [],
+      },
+    });
+    generateAdHocTaskCardOutlineMock.mockResolvedValueOnce({
+      chapter_id: "chapter-ad-hoc",
+      card: {
+        status: "outline_ready",
+        chapter_type: "technical_special_plan",
+        source_anchors: [],
+        must_respond: [],
+        missing_inputs: [
+          {
+            key: "site_type",
+            label: "项目现场类型",
+            input_type: "choice",
+            options: ["城区道路", "小区配网"],
+            required: true,
+            answer: "城区道路",
+          },
+        ],
+        outline: [{ heading: "编制依据", purpose: "围绕招标来源和已确认项目输入编写编制依据。" }],
+      },
+    });
+
+    render(withClient(<EditorContent />));
+    fireEvent.click(await screen.findByText("施工现场总平面布置专项方案"));
+    fireEvent.change(await screen.findByLabelText("项目现场类型"), { target: { value: "城区道路" } });
+    fireEvent.click(screen.getByRole("button", { name: "生成章节大纲" }));
+
+    await waitFor(() =>
+      expect(updateAdHocTaskCardMock).toHaveBeenCalledWith("proj-1", "chapter-ad-hoc", {
+        answers: { site_type: "城区道路" },
+      }),
+    );
+    expect(generateAdHocTaskCardOutlineMock).toHaveBeenCalledWith("proj-1", "chapter-ad-hoc");
+    expect(await screen.findByDisplayValue(/编制依据/)).toBeInTheDocument();
   });
 
   it("shows chart task cards with purpose, source, approval and insert actions", async () => {

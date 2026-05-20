@@ -1,0 +1,80 @@
+{
+  "package_name": "国网配网工程技术标第1-7及11-13章模板",
+  "package_key": "sgcc_distribution_technical_ch1_7_11_13_v1",
+  "package_type": "technical",
+  "category_code": "sgcc_distribution",
+  "chapter_count": 13,
+  "chapters": [
+    {
+      "chapter_code": "1",
+      "chapter_name": "技术偏差表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "2",
+      "chapter_name": "关于施工项目人员执业合规的承诺函",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "3",
+      "chapter_name": "工期响应",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "4",
+      "chapter_name": "资质情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5",
+      "chapter_name": "业绩情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.1",
+      "chapter_name": "类似工程业绩情况汇总表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.2",
+      "chapter_name": "近年完成的类似项目情况及证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.3",
+      "chapter_name": "正在施工的和新承接的类似项目情况及证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "6",
+      "chapter_name": "现场管理机构设置",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "7",
+      "chapter_name": "其他资格条件情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "11",
+      "chapter_name": "履约评价证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "12",
+      "chapter_name": "施工外包管理",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "13",
+      "chapter_name": "其他",
+      "render_mode": "single_docx_section"
+    }
+  ],
+  "template_policy": {
+    "preserve_original_format": true,
+    "historical_performance_removed": true,
+    "historical_personnel_removed": true,
+    "images_removed": true
+  }
+}

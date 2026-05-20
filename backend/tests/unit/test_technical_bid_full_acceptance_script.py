@@ -33,8 +33,7 @@ class _Conn:
 
 def _complete_rows() -> list[dict]:
     rows = []
-    for index in range(1, 17):
-        code = str(index)
+    for code in acceptance.TECHNICAL_TOP_LEVEL_CHAPTER_CODES:
         strategy = strategy_for_chapter(code)
         required_assets = list(strategy.required_assets if strategy else ())
         rows.append(
@@ -54,7 +53,7 @@ def _complete_rows() -> list[dict]:
     return rows
 
 
-def test_collect_evidence_reports_16_ready_technical_chapters() -> None:
+def test_collect_evidence_reports_requested_ready_technical_chapters() -> None:
     project_id = uuid4()
 
     evidence = acceptance.collect_evidence(_Conn(_complete_rows()), project_id=project_id)
@@ -62,7 +61,8 @@ def test_collect_evidence_reports_16_ready_technical_chapters() -> None:
     assert evidence["project_id"] == str(project_id)
     assert evidence["hard_stop_passed"] is True
     assert evidence["hard_stop_failures"] == []
-    assert len(evidence["chapters"]) == 16
+    assert evidence["chapter_codes"] == ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]
+    assert len(evidence["chapters"]) == 14
     assert all(chapter["draft_exists"] for chapter in evidence["chapters"])
     assert all(chapter["required_assets_ready"] for chapter in evidence["chapters"])
     assert all(chapter["export_ready"] for chapter in evidence["chapters"])
@@ -70,9 +70,9 @@ def test_collect_evidence_reports_16_ready_technical_chapters() -> None:
 
 def test_hard_stop_fails_when_a_p0_chapter_lacks_draft_or_assets() -> None:
     rows = _complete_rows()
-    rows[1]["draft_id"] = None
-    rows[1]["content_md"] = ""
-    rows[5]["metadata_json"]["required_assets"] = []
+    rows[2]["draft_id"] = None
+    rows[2]["content_md"] = ""
+    rows[6]["metadata_json"]["required_assets"] = []
 
     evidence = acceptance.collect_evidence(_Conn(rows), project_id=uuid4())
 
@@ -83,7 +83,7 @@ def test_hard_stop_fails_when_a_p0_chapter_lacks_draft_or_assets() -> None:
 
 def test_hard_stop_fails_when_coverage_has_p0_gap() -> None:
     rows = _complete_rows()
-    rows[7]["coverage_report_json"] = {
+    rows[8]["coverage_report_json"] = {
         "coverage_passed": False,
         "issues": [{"code": "missing_section", "severity": "P0", "section_code": "8.4"}],
     }

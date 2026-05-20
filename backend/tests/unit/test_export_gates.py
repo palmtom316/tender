@@ -794,3 +794,206 @@ def test_export_gate_blocks_when_chart_closure_report_has_p0_issue(monkeypatch):
     assert state["gates"]["chart_closure_passed"] is False
     assert state["gates"]["chart_closure_issue_count"] == 1
     assert state["can_export"] is False
+
+
+def test_export_gate_blocks_pending_ad_hoc_task_card(monkeypatch):
+    project_id = uuid4()
+
+    class _ReqRepo:
+        def unconfirmed_veto_count(self, conn, *, project_id):
+            return 0
+
+    class _ChartRepo:
+        def list_by_project(self, conn, *, project_id):
+            return []
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"items": []}
+
+        def latest(self, conn, *, project_id):
+            return {"items": []}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+
+        def fetchone(self):
+            if "metadata_json FROM project" in self.query:
+                return {"metadata_json": {}}
+            if "COUNT(*)" in self.query or " AS count" in self.query:
+                return {"count": 0, "stale_template_artifact_count": 0}
+            return None
+
+        def fetchall(self):
+            if "FROM bid_chapter" in self.query:
+                return [
+                    {
+                        "chapter_code": "99",
+                        "chapter_title": "新增专项方案",
+                        "metadata_json": {"ad_hoc_task_card": {"status": "outline_ready"}},
+                        "draft_id": None,
+                        "coverage_report_json": {},
+                    }
+                ]
+            if "FROM chapter_draft" in self.query:
+                return []
+            return []
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    monkeypatch.setattr("tender_backend.services.export_gate_service.RequirementRepository", _ReqRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.ChartAssetRepository", _ChartRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.get_blocking_issues", lambda conn, *, project_id: [])
+
+    state = build_export_gate_state(_Conn(), project_id=project_id)
+
+    assert state["gates"]["ad_hoc_task_cards_ready"] is False
+    assert state["gates"]["ad_hoc_task_card_issue_count"] == 1
+    assert state["gates"]["ad_hoc_task_card_issues"][0]["message"] == "新增章节任务卡未完成"
+    assert "outline_ready" not in state["gates"]["ad_hoc_task_card_issues"][0]["message"]
+    assert state["can_export"] is False
+
+
+def test_export_gate_allows_draft_ready_ad_hoc_task_card(monkeypatch):
+    project_id = uuid4()
+
+    class _ReqRepo:
+        def unconfirmed_veto_count(self, conn, *, project_id):
+            return 0
+
+    class _ChartRepo:
+        def list_by_project(self, conn, *, project_id):
+            return []
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"items": []}
+
+        def latest(self, conn, *, project_id):
+            return {"items": []}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+
+        def fetchone(self):
+            if "metadata_json FROM project" in self.query:
+                return {"metadata_json": {}}
+            if "COUNT(*)" in self.query or " AS count" in self.query:
+                return {"count": 0, "stale_template_artifact_count": 0}
+            return None
+
+        def fetchall(self):
+            if "FROM bid_chapter" in self.query:
+                return [
+                    {
+                        "chapter_code": "99",
+                        "chapter_title": "新增专项方案",
+                        "metadata_json": {"ad_hoc_task_card": {"status": "draft_ready"}},
+                        "draft_id": "draft-99",
+                        "coverage_report_json": {"coverage_passed": True},
+                    }
+                ]
+            if "FROM chapter_draft" in self.query:
+                return []
+            return []
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    monkeypatch.setattr("tender_backend.services.export_gate_service.RequirementRepository", _ReqRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.ChartAssetRepository", _ChartRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.get_blocking_issues", lambda conn, *, project_id: [])
+
+    state = build_export_gate_state(_Conn(), project_id=project_id)
+
+    assert state["gates"]["ad_hoc_task_cards_ready"] is True
+    assert state["can_export"] is True
+
+
+
+def test_export_gate_blocks_uninitialized_ad_hoc_required_chapter(monkeypatch):
+    project_id = uuid4()
+
+    class _ReqRepo:
+        def unconfirmed_veto_count(self, conn, *, project_id):
+            return 0
+
+    class _ChartRepo:
+        def list_by_project(self, conn, *, project_id):
+            return []
+
+    class _ConstraintService:
+        def latest_confirmed(self, conn, *, project_id):
+            return {"items": []}
+
+        def latest(self, conn, *, project_id):
+            return {"items": []}
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.query = query
+            return self
+
+        def fetchone(self):
+            if "metadata_json FROM project" in self.query:
+                return {"metadata_json": {}}
+            if "COUNT(*)" in self.query or " AS count" in self.query:
+                return {"count": 0, "stale_template_artifact_count": 0}
+            return None
+
+        def fetchall(self):
+            if "FROM bid_chapter" in self.query:
+                return [
+                    {
+                        "chapter_code": "99",
+                        "chapter_title": "新增专项方案",
+                        "metadata_json": {"ad_hoc_required": True},
+                        "draft_id": None,
+                        "coverage_report_json": {},
+                    }
+                ]
+            if "FROM chapter_draft" in self.query:
+                return []
+            return []
+
+    class _Conn:
+        def cursor(self, *args, **kwargs):
+            return _Cursor()
+
+    monkeypatch.setattr("tender_backend.services.export_gate_service.RequirementRepository", _ReqRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.ChartAssetRepository", _ChartRepo)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.TenderConstraintService", _ConstraintService)
+    monkeypatch.setattr("tender_backend.services.export_gate_service.get_blocking_issues", lambda conn, *, project_id: [])
+
+    state = build_export_gate_state(_Conn(), project_id=project_id)
+
+    assert state["gates"]["ad_hoc_task_cards_ready"] is False
+    assert state["gates"]["ad_hoc_task_card_issue_count"] == 1
+    assert state["can_export"] is False

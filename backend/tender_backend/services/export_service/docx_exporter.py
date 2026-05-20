@@ -256,6 +256,15 @@ def _convert_to_chinese_number(num: int) -> str:
     return str(num)
 
 
+def _should_add_chapter_divider_page(volume_type: str | None, chapter_code: str) -> bool:
+    code = str(chapter_code or "")
+    if not code or "." in code:
+        return False
+    if volume_type == "technical" and code == "0":
+        return False
+    return True
+
+
 def _add_chapter_divider_page(document: Document, chapter_code: str, chapter_title: str) -> None:
     """Add a centered chapter divider page with title and subtitle."""
     # Try to extract the numeric part from chapter_code
@@ -445,8 +454,8 @@ def _render_plain_docx(
         chapter_title = draft.get("chapter_title", "")
         metadata_json = draft.get("metadata_json") or {}
 
-        # Add divider page for top-level chapters (no dot in chapter_code)
-        if chapter_code and "." not in str(chapter_code):
+        # Add divider page for top-level chapters except technical chapter 0, which is an index/directory.
+        if _should_add_chapter_divider_page(str(draft.get("volume_type") or ""), str(chapter_code)):
             _add_chapter_divider_page(document, str(chapter_code), str(chapter_title))
         elif index:
             document.add_page_break()

@@ -36,6 +36,7 @@ import {
 } from "./chapterDelivery";
 import { buildBusinessMaterialCandidates, groupBusinessMaterialCandidates, type BusinessMaterialCandidate } from "./businessMaterialWorkbench";
 import { matchPreviewChapter } from "./businessTemplatePreview";
+import { AdHocChapterTaskCard } from "./AdHocChapterTaskCard";
 
 const CHART_TYPE_OPTIONS = [
   { value: "org_chart", label: "项目组织机构图" },
@@ -399,6 +400,7 @@ export function EditorContent() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
+  const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [targetPagesByChapter, setTargetPagesByChapter] = useState<Record<string, string>>({});
   const [selectedMaterialSlotKeyByChapter, setSelectedMaterialSlotKeyByChapter] = useState<Record<string, string>>({});
   const [boundMaterialByChapter, setBoundMaterialByChapter] = useState<Record<string, Record<string, string>>>({});
@@ -452,9 +454,11 @@ export function EditorContent() {
   });
 
   const selected = drafts.find((d) => d.id === selectedId);
-  const selectedOutlineChapter = selected
-    ? outline?.chapters.find((chapter) => chapter.chapter_code === selected.chapter_code)
-    : null;
+  const selectedOutlineChapter = selectedChapterId
+    ? outline?.chapters.find((chapter) => chapter.id === selectedChapterId)
+    : selected
+      ? outline?.chapters.find((chapter) => chapter.chapter_code === selected.chapter_code)
+      : null;
 
   const { data: chapterContext } = useQuery({
     queryKey: ["technical-chapter-context", projectId, selectedOutlineChapter?.id],
@@ -616,9 +620,23 @@ export function EditorContent() {
     );
   }
 
-  const handleSelect = (draft: { id: string; content_md: string }) => {
+  const handleSelect = (draft: { id: string; chapter_code: string; content_md: string }) => {
     setSelectedId(draft.id);
     setEditContent(draft.content_md);
+    const chapter = outline?.chapters.find((item) => item.chapter_code === draft.chapter_code);
+    setSelectedChapterId(chapter?.id ?? null);
+  };
+
+  const handleSelectChapter = (chapter: BidChapter) => {
+    setSelectedChapterId(chapter.id);
+    const draft = drafts.find((item) => item.chapter_code === chapter.chapter_code);
+    if (draft) {
+      setSelectedId(draft.id);
+      setEditContent(draft.content_md);
+    } else {
+      setSelectedId(null);
+      setEditContent("");
+    }
   };
 
   return (
@@ -723,10 +741,7 @@ export function EditorContent() {
               <div
                 key={chapter.id}
                 className="outline-item"
-                onClick={() => {
-                  const draft = drafts.find((item) => item.chapter_code === chapter.chapter_code);
-                  if (draft) handleSelect(draft);
-                }}
+                onClick={() => handleSelectChapter(chapter)}
               >
                 <span className="outline-code">{chapter.chapter_code}</span>
                 <span>{chapter.chapter_title}</span>
@@ -737,8 +752,11 @@ export function EditorContent() {
                   onClick={(event) => {
                     event.stopPropagation();
                     if (isBusinessPreviewChapter) {
-                      const draft = drafts.find((item) => item.chapter_code === chapter.chapter_code);
-                      if (draft) handleSelect(draft);
+                      handleSelectChapter(chapter);
+                      return;
+                    }
+                    if (kind === "ad_hoc_task_card") {
+                      handleSelectChapter(chapter);
                       return;
                     }
                     if (chapter.volume_type === "technical" && outline?.status === "confirmed") {
@@ -755,6 +773,8 @@ export function EditorContent() {
                 >
                   {isBusinessPreviewChapter
                     ? `查看章节 ${chapter.chapter_code} ${chapter.chapter_title}`
+                    : kind === "ad_hoc_task_card"
+                      ? "打开任务卡"
                     : chapter.volume_type === "technical" && outline?.status === "confirmed"
                       ? "技术生成"
                       : "生成"}
@@ -876,6 +896,14 @@ export function EditorContent() {
                     />
                   </>
                 )}
+                {selectedDeliveryKind === "ad_hoc_task_card" && selectedOutlineChapter && projectId && (
+                  <AdHocChapterTaskCard
+                    projectId={projectId}
+                    chapter={selectedOutlineChapter}
+                    onGenerateDraft={() => generateChapter.mutate(selectedOutlineChapter.id)}
+                    generatingDraft={generateChapter.isPending}
+                  />
+                )}
               </div>
 
               {selectedDeliveryKind === "material_composition" && matchedPreviewChapter ? (
@@ -908,8 +936,18 @@ export function EditorContent() {
                 <section className="chapter-delivery-card" aria-label="章节预览">
                   <div className="chapter-delivery-card__header">
                     <div>
-                      <strong>{selectedDeliveryKind === "ai_content" ? "AI 生成正文" : "模板生成预览"}</strong>
-                      <p>{selectedDeliveryKind === "ai_content" ? "审阅生成内容，可直接修改后保存。" : "固定文字和资料位最终会装配到该章节。"}</p>
+                      <strong>
+                        {selectedDeliveryKind === "ai_content"
+                          ? "AI 生成正文"
+                          : selectedDeliveryKind === "ad_hoc_task_card"
+                            ? "新增章节正文"
+                            : "模板生成预览"}
+                      </strong>
+                      <p>
+                        {selectedDeliveryKind === "ai_content" || selectedDeliveryKind === "ad_hoc_task_card"
+                          ? "审阅生成内容，可直接修改后保存。"
+                          : "固定文字和资料位最终会装配到该章节。"}
+                      </p>
                     </div>
                   </div>
                   <textarea
@@ -921,6 +959,13 @@ export function EditorContent() {
                 </section>
               )}
             </>
+          ) : selectedDeliveryKind === "ad_hoc_task_card" && selectedOutlineChapter && projectId ? (
+            <AdHocChapterTaskCard
+              projectId={projectId}
+              chapter={selectedOutlineChapter}
+              onGenerateDraft={() => generateChapter.mutate(selectedOutlineChapter.id)}
+              generatingDraft={generateChapter.isPending}
+            />
           ) : (
             <EmptyState
               icon="编"

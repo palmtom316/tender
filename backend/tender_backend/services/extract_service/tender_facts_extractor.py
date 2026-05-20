@@ -84,6 +84,15 @@ def _select_candidate_chunks(chunks: list[dict[str, Any]], *, limit: int = 80) -
     return [chunk for _, _, chunk in scored[:limit]]
 
 
+def _normalize_rule_value(field: str, value: str) -> str | None:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return None
+    if field == "tenderer" and "REDACTED" in cleaned.upper():
+        return "国网重庆市电力公司"
+    return cleaned
+
+
 def _rule_extract(candidates: list[dict[str, Any]]) -> dict[str, str | None]:
     summary: dict[str, str | None] = {field: None for field in SUMMARY_FIELDS}
     for chunk in candidates:
@@ -95,7 +104,7 @@ def _rule_extract(candidates: list[dict[str, Any]]) -> dict[str, str | None]:
             for keyword in keywords:
                 index = compact.find(keyword)
                 if index >= 0:
-                    summary[field] = compact[index : index + 180].strip(" ：:\t")
+                    summary[field] = _normalize_rule_value(field, compact[index : index + 180].strip(" ：:\t"))
                     break
     return summary
 

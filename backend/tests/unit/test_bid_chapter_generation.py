@@ -26,6 +26,7 @@ class _Cursor:
         elif "FROM requirement_match" in query:
             self.result = self.conn.matches
         elif "INSERT INTO chapter_draft" in query:
+            coverage_param = params[8] if len(params) > 8 else (params[6] if len(params) > 6 else {})
             self.conn.saved = {
                 "id": uuid4(),
                 "project_id": params[1],
@@ -33,6 +34,7 @@ class _Cursor:
                 "chapter_code": params[3],
                 "content_md": params[4],
                 "referenced_chart_keys": params[5] if len(params) > 5 else [],
+                "coverage_report_json": getattr(coverage_param, "obj", coverage_param),
             }
             self.result = [self.conn.saved]
         else:
@@ -82,6 +84,193 @@ def test_generate_bid_chapter_draft_excludes_pricing_body() -> None:
     assert "投标报价不得写入技术文件" not in row["content_md"]
     assert "硬约束处理" in row["content_md"]
 
+
+def test_generate_chapter_0_1_renders_scoring_material_location_table() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "0.1",
+        "chapter_title": "技术评分标准支撑材料",
+        "volume_type": "technical",
+    }
+    conn.requirements = [
+        {
+            "id": uuid4(),
+            "title": "质量保证措施",
+            "requirement_text": "技术评分标准：质量保证措施完整、可行得5分。",
+            "source_file": "技术评分标准.xlsx",
+            "source_locator": "sheet:技术评分标准!B12",
+            "priority_level": "scoring",
+            "is_veto": False,
+            "is_hard_constraint": False,
+        }
+    ]
+
+    row = generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    content = row["content_md"]
+    assert "| 序号 | 解析来源 | 资料名称 | 技术标资料位置 | 对应评分/规范要求 | 状态 |" in content
+    assert "| 1 | 技术评分标准.xlsx sheet:技术评分标准!B12 | 质量保证措施 | 第10.1章 质量保障措施 | 技术评分标准：质量保证措施完整、可行得5分。 | 待确认 |" in content
+    assert "### 管控措施" not in content
+
+
+def test_generate_chapter_0_2_renders_technical_spec_material_location_table() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "0.2",
+        "chapter_title": "技术规范书规定应该提交的材料",
+        "volume_type": "technical",
+    }
+    conn.requirements = [
+        {
+            "id": uuid4(),
+            "title": "施工外包管理承诺",
+            "requirement_text": "技术规范书要求提交施工外包管理承诺及证明材料。",
+            "source_file": "技术规范书.pdf",
+            "source_locator": "page:27",
+            "priority_level": "normal",
+            "is_veto": False,
+            "is_hard_constraint": False,
+        }
+    ]
+
+    row = generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    content = row["content_md"]
+    assert "| 序号 | 解析来源 | 资料名称 | 技术标资料位置 | 对应评分/规范要求 | 状态 |" in content
+    assert "| 1 | 技术规范书.pdf page:27 | 施工外包管理承诺 | 第12章 施工外包管理 | 技术规范书要求提交施工外包管理承诺及证明材料。 | 待确认 |" in content
+    assert "### 管控措施" not in content
+
+
+
+
+def test_generate_chapter_0_uses_unnumbered_index_headings_without_instruction_text() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "0",
+        "chapter_title": "技术标重点资料索引",
+        "volume_type": "technical",
+    }
+    conn.requirements = []
+
+    row = generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    content = row["content_md"]
+    assert content.startswith("# 技术标重点资料索引")
+    assert "## 技术标重点资料索引" in content
+    assert "## 技术评分标准支撑材料" in content
+    assert "## 技术规范书规定应该提交的材料" in content
+    assert "0. 技术标重点资料索引" not in content
+    assert "0.1" not in content
+    assert "0.2" not in content
+    assert "0.3" not in content
+    assert "本章作为目录和索引章使用" not in content
+    assert "不设置章节封面" not in content
+
+def test_generate_chapter_0_3_renders_bid_directory_from_technical_outline() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "0.3",
+        "chapter_title": "标书目录",
+        "volume_type": "technical",
+    }
+    conn.requirements = []
+
+    row = generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    content = row["content_md"]
+    assert content.startswith("# 标书目录")
+    assert "## 标书目录" in content
+    assert "0. 技术标重点资料索引" not in content
+    assert "0.1. 技术评分标准支撑材料" not in content
+    assert "0.2. 技术规范书规定应该提交的材料" not in content
+    assert "0.3. 标书目录" not in content
+    assert "1. 技术偏差表..........第 页" in content
+    assert "    5.1. 类似工程业绩情况汇总表..........第 页" in content
+    assert "8. 施工方案与技术措施..........第 页" in content
+    assert "10. 质量进度安全绿色施工保障措施..........第 页" in content
+    assert "本目录根据技术标模板章节源头生成" not in content
+    assert "### 管控措施" not in content
+
+
+def test_generate_ad_hoc_chapter_blocks_when_outline_not_confirmed() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "99",
+        "chapter_title": "施工现场总平面布置及临电临水方案",
+        "volume_type": "technical",
+        "metadata_json": {
+            "ad_hoc_required": True,
+            "ad_hoc_task_card": {
+                "status": "outline_ready",
+                "chapter_type": "technical_special_plan",
+                "source_anchors": [],
+                "must_respond": ["临时用电方案"],
+                "missing_inputs": [],
+                "outline": [{"heading": "临时用电方案", "purpose": "响应临电要求", "must_cover": ["临时用电方案"]}],
+            },
+        },
+    }
+
+    try:
+        generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+    except ValueError as exc:
+        assert "outline must be confirmed" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_generate_ad_hoc_chapter_uses_confirmed_outline_and_saves_coverage() -> None:
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "chapter_code": "99",
+        "chapter_title": "施工现场总平面布置及临电临水方案",
+        "volume_type": "technical",
+        "metadata_json": {
+            "ad_hoc_required": True,
+            "ad_hoc_task_card": {
+                "status": "outline_confirmed",
+                "chapter_type": "technical_special_plan",
+                "source_anchors": [
+                    {"requirement_id": "r1", "source_file": "招标文件.pdf", "source_locator": "P32", "text": "应提供临时用电方案"}
+                ],
+                "must_respond": ["临时用电方案"],
+                "missing_inputs": [
+                    {"key": "site_type", "input_type": "choice", "options": ["城区道路"], "required": True, "answer": "城区道路"},
+                    {"key": "has_site_drawing", "input_type": "choice", "options": ["uploaded"], "required": True, "answer": "uploaded"},
+                ],
+                "outline": [
+                    {"heading": "编制依据", "purpose": "说明来源", "must_cover": ["招标文件P32"]},
+                    {"heading": "临时用电方案", "purpose": "响应临电要求", "must_cover": ["临时用电方案"]},
+                    {"heading": "招标要求响应表", "purpose": "逐项响应", "must_cover": ["临时用电方案"]},
+                ],
+            },
+        },
+    }
+    conn.requirements = [
+        {
+            "id": "r1",
+            "title": "临时用电方案",
+            "requirement_text": "应提供临时用电方案",
+            "source_file": "招标文件.pdf",
+            "source_locator": "P32",
+            "priority_level": "normal",
+            "is_veto": False,
+            "is_hard_constraint": False,
+        }
+    ]
+
+    row = generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    assert "## 编制依据" in row["content_md"]
+    assert "## 临时用电方案" in row["content_md"]
+    assert "## 招标要求响应表" in row["content_md"]
+    assert row["coverage_report_json"]["coverage_passed"] is True
 
 def test_generate_quality_chapter_uses_substantial_strategy_sections() -> None:
     conn = _Conn()
@@ -476,3 +665,51 @@ def test_generate_chapter_8_renders_fifteen_subsections_without_promoting_to_top
     assert "### 标准与验收" in content
     assert "{{chart:construction_flow}}" in content
     assert "risk_matrix" in row["referenced_chart_keys"]
+
+
+
+def test_generate_regular_chapter_wraps_coverage_report_as_jsonb() -> None:
+    from psycopg.types.json import Jsonb
+
+    conn = _Conn()
+    generate_bid_chapter_draft(conn, project_id=uuid4(), chapter_id=conn.chapter["id"])
+
+    insert_params = next(params for query, params in conn.queries if "INSERT INTO chapter_draft" in query)
+    assert isinstance(insert_params[8], Jsonb)
+
+
+def test_generate_ad_hoc_chapter_wraps_coverage_and_metadata_as_jsonb() -> None:
+    from psycopg.types.json import Jsonb
+
+    conn = _Conn()
+    conn.chapter = {
+        "id": uuid4(),
+        "project_id": uuid4(),
+        "chapter_code": "99",
+        "chapter_title": "施工现场总平面布置及临电临水方案",
+        "volume_type": "technical",
+        "metadata_json": {
+            "ad_hoc_required": True,
+            "ad_hoc_task_card": {
+                "status": "outline_confirmed",
+                "chapter_type": "technical_special_plan",
+                "source_anchors": [],
+                "must_respond": ["临时用电方案"],
+                "missing_inputs": [
+                    {"key": "site_type", "input_type": "choice", "options": ["城区道路"], "required": True, "answer": "城区道路"},
+                    {"key": "has_site_drawing", "input_type": "choice", "options": ["uploaded"], "required": True, "answer": "uploaded"},
+                ],
+                "outline": [{"heading": "临时用电方案", "purpose": "响应临电要求", "must_cover": ["临时用电方案"]}],
+            },
+        },
+    }
+    conn.requirements = [
+        {"id": "r1", "title": "临时用电方案", "requirement_text": "应提供临时用电方案", "source_locator": "P32"}
+    ]
+
+    generate_bid_chapter_draft(conn, project_id=conn.chapter["project_id"], chapter_id=conn.chapter["id"])
+
+    insert_params = next(params for query, params in conn.queries if "INSERT INTO chapter_draft" in query)
+    update_params = next(params for query, params in conn.queries if "UPDATE bid_chapter" in query)
+    assert isinstance(insert_params[6], Jsonb)
+    assert isinstance(update_params[0], Jsonb)

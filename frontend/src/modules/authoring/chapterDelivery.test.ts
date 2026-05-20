@@ -31,6 +31,12 @@ describe("chapterDelivery", () => {
     expect(deliveryKindLabel("material_composition")).toBe("资料编排");
   });
 
+  it("classifies ad hoc chapters from task card or required marker", () => {
+    expect(chapterDeliveryKind(chapter({ metadata_json: { ad_hoc_required: true } }))).toBe("ad_hoc_task_card");
+    expect(chapterDeliveryKind(chapter({ metadata_json: { ad_hoc_task_card: { status: "needs_input" } } }))).toBe("ad_hoc_task_card");
+    expect(deliveryKindLabel("ad_hoc_task_card")).toBe("新增章节任务卡");
+  });
+
   it("builds material slots from business assembly missing materials", () => {
     const slots = buildMaterialSlots(chapter({ chapter_code: "3" }), {
       missing_materials: [

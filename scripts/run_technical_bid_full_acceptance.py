@@ -21,7 +21,11 @@ from tender_backend.services.bid_outline_templates import SGCC_DISTRIBUTION_TECH
 from tender_backend.services.technical_chapter_strategies.registry import strategy_for_chapter
 
 
-TECHNICAL_TOP_LEVEL_CHAPTER_CODES = tuple(str(index) for index in range(1, 17))
+TECHNICAL_TOP_LEVEL_CHAPTER_CODES = tuple(
+    str(chapter["chapter_code"])
+    for chapter in SGCC_DISTRIBUTION_TECHNICAL_CHAPTERS
+    if "." not in str(chapter["chapter_code"])
+)
 
 
 def _load_chapter_rows(conn: psycopg.Connection, *, project_id: UUID) -> list[dict]:
@@ -110,7 +114,7 @@ def _chapter_evidence(row: dict) -> dict:
 def _hard_stop_failures(chapters: list[dict]) -> list[str]:
     failures: list[str] = []
     by_code = {chapter["chapter_code"]: chapter for chapter in chapters}
-    missing = sorted(set(TECHNICAL_TOP_LEVEL_CHAPTER_CODES) - set(by_code), key=int)
+    missing = [code for code in TECHNICAL_TOP_LEVEL_CHAPTER_CODES if code not in by_code]
     if missing:
         failures.append("missing technical chapters: " + ", ".join(missing))
     for code in TECHNICAL_TOP_LEVEL_CHAPTER_CODES:

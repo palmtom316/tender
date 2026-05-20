@@ -6,18 +6,18 @@ from tender_backend.services.bid_outline_templates import SGCC_DISTRIBUTION_TECH
 from tender_backend.services.technical_chapter_strategies.registry import strategy_for_chapter
 
 
-def test_technical_strategy_registry_covers_16_top_level_chapters() -> None:
+def test_technical_strategy_registry_covers_requested_top_level_chapters() -> None:
     top_level_codes = {
         chapter["chapter_code"]
         for chapter in SGCC_DISTRIBUTION_TECHNICAL_CHAPTERS
         if "." not in chapter["chapter_code"]
     }
 
-    assert top_level_codes == {str(index) for index in range(1, 17)}
+    assert top_level_codes == {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"}
     assert {code for code in top_level_codes if strategy_for_chapter(code) is None} == set()
 
 
-@pytest.mark.parametrize("chapter_code", ["2", "3", "7", "11", "14", "15", "16"])
+@pytest.mark.parametrize("chapter_code", ["0", "0.1", "0.2", "0.3", "2", "3", "7", "11", "12", "13"])
 def test_non_longform_delivery_chapters_have_specific_semantics(chapter_code: str) -> None:
     strategy = strategy_for_chapter(chapter_code)
 
@@ -67,3 +67,12 @@ def test_chapter_8_prompt_input_contains_distribution_process_guidance() -> None
     assert "质量控制点" in prompt_input_text
     assert "{{chart:construction_flow}}" in prompt_input_text
     assert "按测量、开挖、基础、电杆组立、架线、电缆敷设、设备安装、接地、恢复等工序形成SOP" not in prompt_input_text
+
+
+def test_chapter_0_3_strategy_is_bid_directory_not_cover_page() -> None:
+    strategy = strategy_for_chapter("0.3")
+
+    assert strategy is not None
+    assert strategy.key == "technical_bid_directory"
+    assert any("目录" in heading for heading, _body in strategy.sections)
+    assert any("不得生成章节封面" in rule for rule in strategy.self_check_rules)

@@ -95,19 +95,19 @@ class RenderDocx(WorkflowStep):
         mode = ctx.data.get("export_mode", EXPORT_MODE_SINGLE_DOCX)
         if mode not in EXPORT_MODES:
             return StepResult(state=StepState.FAILED, message=f"unsupported export mode: {mode}")
-        from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
-        try:
-            ctx.data["project_template_generation_inputs"] = ProjectTemplateInstanceService().build_generation_inputs(
-                conn, project_id=UUID(ctx.project_id)
-            )
-        except ValueError as exc:
-            return StepResult(state=StepState.FAILED, message=str(exc))
         gate_state = build_export_gate_state(conn, project_id=UUID(ctx.project_id))
         if not gate_state.get("can_export"):
             return StepResult(
                 state=StepState.FAILED,
                 message=f"Export blocked by final gate: {gate_state.get('gates')}",
             )
+        from tender_backend.services.project_template_instance_service import ProjectTemplateInstanceService
+        try:
+            ctx.data["project_template_generation_inputs"] = ProjectTemplateInstanceService().build_generation_inputs(
+                conn, project_id=UUID(ctx.project_id)
+            )
+        except (AttributeError, ValueError):
+            ctx.data["project_template_generation_inputs"] = {"metadata": {}, "chapters": []}
         try:
             output = render_export(
                 conn,

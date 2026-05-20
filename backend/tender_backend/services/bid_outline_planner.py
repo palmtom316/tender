@@ -11,6 +11,7 @@ from psycopg import Connection
 from tender_backend.db.repositories.bid_outline_repo import BidOutlineRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.services.tender_constraint_service import TenderConstraintService
+from tender_backend.services.template_directory_reconciliation_service import TemplateDirectoryReconciliationService
 from tender_backend.services.bid_outline_templates import (
     PRIORITY_POLICY,
     SGCC_DISTRIBUTION_BUSINESS_TEMPLATE_KEY,
@@ -25,9 +26,9 @@ SUBTYPE_CHAPTERS = {
     "quality_target": [("technical", "8.5"), ("technical", "10.1")],
     "schedule_target": [("technical", "3"), ("technical", "8.7"), ("technical", "10.3")],
     "safety_civilized": [("technical", "8.6"), ("technical", "10.2")],
-    "sgcc_standard_compliance": [("technical", "8"), ("technical", "8.1"), ("technical", "8.4"), ("technical", "8.15"), ("technical", "13")],
+    "sgcc_standard_compliance": [("technical", "0.2"), ("technical", "8"), ("technical", "8.1"), ("technical", "8.4"), ("technical", "8.15")],
     "construction_method": [("technical", "8"), ("technical", "8.3"), ("technical", "8.4")],
-    "technical_scoring_response": [("technical", "12")],
+    "technical_scoring_response": [("technical", "0.1")],
     "submission_format": [("business", "24.6")],
     "signature_seal": [("business", "24.6")],
     "veto_rejection": [("business", "1"), ("technical", "1")],
@@ -82,6 +83,81 @@ def _constraint_subtype(requirement: dict[str, Any]) -> str | None:
     return str(metadata.get("constraint_subtype") or "").strip() or None
 
 
+
+
+def _directory_code(requirement: dict[str, Any]) -> str:
+    metadata = requirement.get("source_metadata") or requirement.get("metadata_json") or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return _clean_text(requirement.get("directory_code") or requirement.get("chapter_code") or metadata.get("directory_code"))
+
+
+def _volume_type_for_directory_requirement(requirement: dict[str, Any]) -> str:
+    metadata = requirement.get("source_metadata") or requirement.get("metadata_json") or {}
+    if isinstance(metadata, dict) and metadata.get("volume_type"):
+        return str(metadata.get("volume_type"))
+    category = str(requirement.get("category") or "").lower()
+    if category in {"business", "qualification"}:
+        return category
+    return "technical"
+
+
+def _baseline_keys(chapters: list[dict[str, Any]]) -> set[tuple[str, str]]:
+    return {(str(chapter.get("volume_type")), str(chapter.get("chapter_code"))) for chapter in chapters}
+
+
+def _ad_hoc_chapters_from_directory_requirements(
+    *,
+    project_id: UUID | str,
+    active_requirements: list[dict[str, Any]],
+    base_chapters: list[dict[str, Any]],
+    start_sort_order: int,
+) -> list[dict[str, Any]]:
+    baseline = _baseline_keys(base_chapters)
+    chapters: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for requirement in active_requirements:
+        code = _directory_code(requirement)
+        if not code:
+            continue
+        volume_type = _volume_type_for_directory_requirement(requirement)
+        key = (volume_type, code)
+        if key in baseline or key in seen:
+            continue
+        seen.add(key)
+        title = _clean_text(requirement.get("title")) or f"新增章节 {code}"
+        parent_code = TemplateDirectoryReconciliationService()._parent_code(code)
+        mappings = [
+            {
+                "requirement_id": requirement["id"],
+                "source_constraint_id": (requirement.get("source_metadata") or {}).get("source_constraint_id"),
+                "mapping_reason": "招标文件目录要求新增章节，基准模板无匹配章节",
+                "priority_level": "special",
+            }
+        ]
+        chapters.append(
+            {
+                "project_id": project_id,
+                "volume_type": volume_type,
+                "chapter_code": code,
+                "chapter_title": title,
+                "sort_order": start_sort_order + len(chapters),
+                "outline_md": _build_outline_md({"chapter_code": code, "chapter_title": title}, [requirement]),
+                "requirement_ids": [requirement["id"]],
+                "requirement_mappings": mappings,
+                "metadata_json": {
+                    "requirement_count": 1,
+                    "priority_policy": PRIORITY_POLICY,
+                    "ad_hoc_required": True,
+                    "template_match_status": "missing",
+                    "suggested_initial_status": "task_card_pending",
+                    "required_parent_code": parent_code,
+                },
+                "parent_code": parent_code,
+            }
+        )
+    return chapters
+
 def _chapter_keys_for_requirement(requirement: dict[str, Any]) -> list[tuple[str, str]]:
     category = requirement.get("category")
     subtype = _constraint_subtype(requirement)
@@ -94,9 +170,9 @@ def _chapter_keys_for_requirement(requirement: dict[str, Any]) -> list[tuple[str
     if requirement.get("is_veto") or requirement.get("is_hard_constraint"):
         keys.append(("technical", "1"))
     if category == "scoring":
-        keys.append(("technical", "12"))
+        keys.append(("technical", "0.1"))
     if category == "special":
-        keys.append(("technical", "15"))
+        keys.append(("technical", "13"))
     return list(dict.fromkeys(keys))
 
 
@@ -166,7 +242,8 @@ def plan_bid_outline_from_requirements(
             requirements_by_chapter[chapter_key].append(requirement)
 
     chapters: list[dict[str, Any]] = []
-    for index, chapter in enumerate(base_bid_chapters(), start=1):
+    base_chapters = base_bid_chapters()
+    for index, chapter in enumerate(base_chapters, start=1):
         chapter_key = (chapter["volume_type"], chapter["chapter_code"])
         chapter_requirements = requirements_by_chapter.get(chapter_key, [])
         mappings = [
@@ -194,6 +271,15 @@ def plan_bid_outline_from_requirements(
                 "parent_code": chapter.get("parent_code"),
             }
         )
+
+    chapters.extend(
+        _ad_hoc_chapters_from_directory_requirements(
+            project_id=project_id,
+            active_requirements=active_requirements,
+            base_chapters=base_chapters,
+            start_sort_order=len(chapters) + 1,
+        )
+    )
 
     hard_requirement_ids = {
         str(row["id"])

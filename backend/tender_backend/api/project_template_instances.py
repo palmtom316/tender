@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from psycopg import Connection
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from tender_backend.core.project_access import require_project_access
 from tender_backend.core.security import CurrentUser, get_current_user, require_role, Role
@@ -604,6 +606,167 @@ async def reconcile_project_template_directory(
     )
 
 
+def _applied_add_chapter_requirement_id(suggestion: DirectoryReconciliationSuggestion) -> UUID | None:
+    raw = suggestion.payload.get("requirement_id") or suggestion.payload.get("project_requirement_id")
+    if raw:
+        try:
+            return UUID(str(raw))
+        except ValueError:
+            return None
+    if suggestion.required_code is None:
+        return None
+    # Fall back to directory code + title when the suggestion came from a
+    # project_requirement row but payload was built by the older reconciler.
+    return None
+
+
+def _latest_bid_outline_id(conn: Connection, *, project_id: UUID) -> UUID | None:
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            SELECT id
+            FROM bid_outline
+            WHERE project_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+    return row["id"] if row else None
+
+
+def _next_bid_chapter_sort_order(conn: Connection, *, outline_id: UUID, volume_type: str) -> int:
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort_order
+            FROM bid_chapter
+            WHERE bid_outline_id = %s AND volume_type = %s
+            """,
+            (outline_id, volume_type),
+        ).fetchone()
+    return int((row or {}).get("next_sort_order") or 1)
+
+
+def _find_existing_bid_chapter_id(conn: Connection, *, outline_id: UUID, volume_type: str, chapter_code: str) -> UUID | None:
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            SELECT id
+            FROM bid_chapter
+            WHERE bid_outline_id = %s AND volume_type = %s AND chapter_code = %s
+            """,
+            (outline_id, volume_type, chapter_code),
+        ).fetchone()
+    return row["id"] if row else None
+
+
+def _materialize_ad_hoc_bid_chapter(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    outline_id: UUID,
+    suggestion: DirectoryReconciliationSuggestion,
+) -> UUID | None:
+    if suggestion.suggestion_type != "add_chapter" or not suggestion.payload.get("ad_hoc_required"):
+        return None
+    if not suggestion.required_code or not suggestion.required_title:
+        return None
+    volume_type = str(suggestion.payload.get("volume_type") or "technical")
+    metadata = {
+        "ad_hoc_required": True,
+        "template_match_status": suggestion.payload.get("template_match_status") or "missing",
+        "suggested_initial_status": suggestion.payload.get("suggested_initial_status") or "task_card_pending",
+        "source_reconciliation_suggestion_id": suggestion.id,
+        "required_parent_code": suggestion.payload.get("required_parent_code"),
+    }
+    existing_id = _find_existing_bid_chapter_id(
+        conn,
+        outline_id=outline_id,
+        volume_type=volume_type,
+        chapter_code=suggestion.required_code,
+    )
+    if existing_id:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                """
+                UPDATE bid_chapter
+                SET chapter_title = %s,
+                    metadata_json = COALESCE(metadata_json, '{}'::jsonb) || %s::jsonb,
+                    updated_at = now()
+                WHERE id = %s
+                RETURNING id
+                """,
+                (suggestion.required_title, Jsonb(metadata), existing_id),
+            ).fetchone()
+        return row["id"] if row else existing_id
+
+    chapter_id = UUID(str(suggestion.payload.get("chapter_id"))) if suggestion.payload.get("chapter_id") else uuid4()
+    sort_order = _next_bid_chapter_sort_order(conn, outline_id=outline_id, volume_type=volume_type)
+    with conn.cursor(row_factory=dict_row) as cur:
+        row = cur.execute(
+            """
+            INSERT INTO bid_chapter (
+              id, bid_outline_id, project_id, parent_id, chapter_code, chapter_title,
+              volume_type, sort_order, outline_md, metadata_json
+            )
+            VALUES (%s, %s, %s, NULL, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                chapter_id,
+                outline_id,
+                project_id,
+                suggestion.required_code,
+                suggestion.required_title,
+                volume_type,
+                sort_order,
+                f"# {suggestion.required_code} {suggestion.required_title}\n\n- 招标文件要求新增章节，需通过新增章节任务卡补充业务输入后生成。",
+                Jsonb(metadata),
+            ),
+        ).fetchone()
+    return row["id"] if row else chapter_id
+
+
+def _map_ad_hoc_requirement(conn: Connection, *, chapter_id: UUID, suggestion: DirectoryReconciliationSuggestion) -> None:
+    requirement_id = _applied_add_chapter_requirement_id(suggestion)
+    if requirement_id is None:
+        return
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            INSERT INTO bid_chapter_requirement (id, bid_chapter_id, requirement_id, mapping_reason, priority_level)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (bid_chapter_id, requirement_id)
+            DO UPDATE SET mapping_reason = EXCLUDED.mapping_reason, priority_level = EXCLUDED.priority_level
+            """,
+            (
+                uuid4(),
+                chapter_id,
+                requirement_id,
+                "目录差异应用新增章节任务卡",
+                "special",
+            ),
+        )
+
+
+def _apply_ad_hoc_add_chapter_suggestions_to_bid_outline(
+    conn: Connection,
+    *,
+    project_id: UUID,
+    suggestions: list[DirectoryReconciliationSuggestion],
+) -> None:
+    if not hasattr(conn, "cursor"):
+        return
+    outline_id = _latest_bid_outline_id(conn, project_id=project_id)
+    if outline_id is None:
+        return
+    for suggestion in suggestions:
+        chapter_id = _materialize_ad_hoc_bid_chapter(conn, project_id=project_id, outline_id=outline_id, suggestion=suggestion)
+        if chapter_id is not None:
+            _map_ad_hoc_requirement(conn, chapter_id=chapter_id, suggestion=suggestion)
+
+
 @router.post("/projects/{project_id}/template-instance/apply-reconciliation", response_model=ApplyReconciliationOut)
 async def apply_project_template_directory_reconciliation(
     project_id: UUID,
@@ -632,6 +795,7 @@ async def apply_project_template_directory_reconciliation(
     metadata["reconciliation"] = {**summary, "applied_suggestion_ids": [item.id for item in applied]}
     if hasattr(_repo, "update_instance"):
         _repo.update_instance(conn, instance.id, {"metadata_json": metadata})
+    _apply_ad_hoc_add_chapter_suggestions_to_bid_outline(conn, project_id=project_id, suggestions=applied)
     _repo.record_revision(
         conn,
         instance.id,

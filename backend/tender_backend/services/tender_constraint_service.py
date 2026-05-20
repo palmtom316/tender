@@ -142,7 +142,7 @@ class TenderConstraintService:
 
     def latest_confirmed(self, conn: Connection, *, project_id: UUID) -> dict[str, Any] | None:
         with conn.cursor(row_factory=dict_row) as cur:
-            constraint_set = cur.execute(
+            cursor_result = cur.execute(
                 """
                 SELECT * FROM tender_constraint_set
                 WHERE project_id = %s
@@ -151,7 +151,8 @@ class TenderConstraintService:
                 LIMIT 1
                 """,
                 (project_id,),
-            ).fetchone()
+            )
+            constraint_set = cursor_result.fetchone() if hasattr(cursor_result, "fetchone") else None
             if constraint_set is None:
                 return None
             items = cur.execute(

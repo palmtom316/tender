@@ -26,6 +26,14 @@ _CELL_SUMMARY_THRESHOLD = 3
 _CELL_WRAP_CHARS = 10
 _INDICATOR_TABLE_ROW_HEIGHT = 28
 _INDICATOR_TABLE_TARGET_WIDTH = 720
+_INDICATOR_TABLE_CELL_CHARS = 28
+
+
+def _table_cell_display(value: object) -> str:
+    cleaned = "".join(str(value or "").split())
+    if len(cleaned) <= _INDICATOR_TABLE_CELL_CHARS:
+        return cleaned
+    return cleaned[:_INDICATOR_TABLE_CELL_CHARS] + "…"
 
 
 def risk_matrix_to_vega(spec: RiskMatrixSpec) -> dict[str, Any]:
@@ -196,10 +204,10 @@ def indicator_table_to_vega(spec: TableChartSpec) -> dict[str, Any]:
     column_count = max(len(spec.columns), 1)
     values: list[dict[str, Any]] = []
     for col_index, column in enumerate(spec.columns):
-        values.append({"row": 0, "col": col_index, "text": column, "is_header": True})
+        values.append({"row": 0, "col": col_index, "text": _table_cell_display(column), "is_header": True})
     for row_index, row in enumerate(spec.rows, start=1):
         for col_index, cell in enumerate(row.cells):
-            values.append({"row": row_index, "col": col_index, "text": str(cell), "is_header": False})
+            values.append({"row": row_index, "col": col_index, "text": _table_cell_display(cell), "is_header": False})
 
     total_rows = len(spec.rows) + 1
     width = _INDICATOR_TABLE_TARGET_WIDTH

@@ -121,7 +121,13 @@ class TemplateDirectoryReconciliationService:
                         severity=severity,
                         source_type=source_type,
                         skippable=skippable,
-                        payload={"required_parent_code": self._parent_code(req["code"])},
+                        payload={
+                            "required_parent_code": self._parent_code(req["code"]),
+                            "requirement_id": str(req.get("id")) if req.get("id") else None,
+                            "ad_hoc_required": True,
+                            "suggested_initial_status": "task_card_pending",
+                            "template_match_status": "missing",
+                        },
                     )
                 )
 

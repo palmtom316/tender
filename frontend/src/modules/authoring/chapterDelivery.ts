@@ -1,6 +1,6 @@
 import type { BidChapter, ChartAsset } from "../../lib/api";
 
-export type ChapterDeliveryKind = "material_composition" | "ai_content";
+export type ChapterDeliveryKind = "material_composition" | "ai_content" | "ad_hoc_task_card";
 export type MaterialSlotStatus = "ready" | "missing";
 export type ChartTaskStatus = "not_generated" | "draft" | "needs_review" | "approved" | "failed" | "rejected" | string;
 
@@ -101,11 +101,15 @@ function inferMaterialKey(label: string, fallback: string) {
 }
 
 export function chapterDeliveryKind(chapter: BidChapter | null | undefined): ChapterDeliveryKind {
+  const metadata = asRecord(chapter?.metadata_json);
+  if (metadata.ad_hoc_task_card || metadata.ad_hoc_required) return "ad_hoc_task_card";
   return chapter?.volume_type === "technical" ? "ai_content" : "material_composition";
 }
 
 export function deliveryKindLabel(kind: ChapterDeliveryKind) {
-  return kind === "ai_content" ? "AI 正文" : "资料编排";
+  if (kind === "ai_content") return "AI 正文";
+  if (kind === "ad_hoc_task_card") return "新增章节任务卡";
+  return "资料编排";
 }
 
 export function readableContextCount(context: Record<string, unknown> | undefined, key: string) {

@@ -104,3 +104,32 @@ def test_apply_rejects_skipping_critical_addendum_without_not_applicable_reason(
         assert "not_applicable" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("critical addendum skip must require explicit not_applicable reason")
+
+
+def test_missing_template_add_chapter_payload_marks_ad_hoc_required() -> None:
+    service = TemplateDirectoryReconciliationService()
+    suggestions = service.build_suggestions(
+        [_requirement("99", "施工现场总平面布置及临电临水方案", mandatory=True)],
+        [_chapter("1", "技术偏差表")],
+    )
+
+    suggestion = next(item for item in suggestions if item.suggestion_type == "add_chapter" and item.required_code == "99")
+
+    assert suggestion.payload["ad_hoc_required"] is True
+    assert suggestion.payload["requirement_id"]
+    assert suggestion.payload["suggested_initial_status"] == "task_card_pending"
+    assert suggestion.payload["template_match_status"] == "missing"
+
+
+def test_move_chapter_payload_does_not_mark_ad_hoc_required() -> None:
+    service = TemplateDirectoryReconciliationService()
+    stable_source = uuid4()
+    suggestions = service.build_suggestions(
+        [_requirement("2", "施工方案", source_template_item_id=stable_source)],
+        [_chapter("1", "施工方案", source_id=stable_source)],
+    )
+
+    suggestion = next(item for item in suggestions if item.suggestion_type == "move_chapter")
+
+    assert "ad_hoc_required" not in suggestion.payload
+    assert "template_match_status" not in suggestion.payload

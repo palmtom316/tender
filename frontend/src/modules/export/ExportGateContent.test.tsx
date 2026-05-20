@@ -68,6 +68,9 @@ describe("ExportGateContent", () => {
         chart_closure_passed: false,
         chart_closure_issue_count: 1,
         chart_closure_issues: [{ code: "chart_not_inserted", chart_key: "risk_matrix", severity: "P0" }],
+        ad_hoc_task_cards_ready: false,
+        ad_hoc_task_card_issue_count: 1,
+        ad_hoc_task_card_issues: [{ chapter_code: "99", chapter_title: "新增专项方案", message: "新增章节任务卡未完成", hint: "请先补充信息、确认大纲并生成正文。" }],
       },
     });
   });
@@ -92,5 +95,8 @@ describe("ExportGateContent", () => {
     expect(screen.getByText(/1 个覆盖缺口/)).toBeInTheDocument();
     expect(screen.getByText("图表闭环")).toBeInTheDocument();
     expect(screen.getByText(/risk_matrix/)).toBeInTheDocument();
+    expect(screen.getByText("新增章节任务卡")).toBeInTheDocument();
+    expect(screen.getByText(/请先补充信息、确认大纲并生成正文/)).toBeInTheDocument();
+    expect(screen.queryByText(/outline_ready|needs_input|task_card_pending|blocked_insufficient_evidence/)).not.toBeInTheDocument();
   });
 });

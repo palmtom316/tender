@@ -12,6 +12,7 @@ from tender_backend.db.repositories.chart_asset_repo import ChartAssetRepository
 from tender_backend.db.repositories.requirement_repo import RequirementRepository
 from tender_backend.services.longform_quality import build_page_gate
 from tender_backend.services.review_service.review_engine import get_blocking_issues
+from tender_backend.services.ad_hoc_chapter_task_card import BLOCKING_STATUSES
 from tender_backend.services.tender_constraint_service import TenderConstraintService
 
 _CHART_PLACEHOLDER_RE = re.compile(r"\{\{chart:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}")
@@ -170,6 +171,55 @@ def _draft_quality_evidence(conn: Connection, *, project_id: UUID) -> list[dict]
     return [dict(row) for row in rows]
 
 
+def _ad_hoc_task_card_gate(conn: Connection, *, project_id: UUID) -> dict:
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(
+            """
+            SELECT
+              bc.chapter_code,
+              bc.chapter_title,
+              bc.metadata_json,
+              cd.id AS draft_id,
+              cd.coverage_report_json
+            FROM bid_chapter bc
+            LEFT JOIN chapter_draft cd
+              ON cd.project_id = bc.project_id
+             AND cd.volume_type = bc.volume_type
+             AND cd.chapter_code = bc.chapter_code
+            WHERE bc.project_id = %s
+              AND (
+                bc.metadata_json ? 'ad_hoc_task_card'
+                OR COALESCE((bc.metadata_json ->> 'ad_hoc_required')::boolean, false) = true
+                OR bc.metadata_json ->> 'template_match_status' = 'missing'
+              )
+            """,
+            (project_id,),
+        ).fetchall()
+    issues = []
+    for row in rows:
+        metadata = row.get("metadata_json") or {}
+        card = metadata.get("ad_hoc_task_card") or {}
+        status = str(card.get("status") or "")
+        coverage = row.get("coverage_report_json") or {}
+        ready = status == "draft_ready" and bool(row.get("draft_id")) and bool(coverage.get("coverage_passed"))
+        if ready:
+            continue
+        if status in BLOCKING_STATUSES or status != "draft_ready" or not row.get("draft_id") or not coverage.get("coverage_passed"):
+            issues.append(
+                {
+                    "chapter_code": row.get("chapter_code"),
+                    "chapter_title": row.get("chapter_title"),
+                    "message": "新增章节任务卡未完成",
+                    "hint": "请先补充信息、确认大纲并生成正文。",
+                }
+            )
+    return {
+        "ad_hoc_task_cards_ready": not issues,
+        "ad_hoc_task_card_issue_count": len(issues),
+        "ad_hoc_task_card_issues": issues,
+    }
+
+
 def _longform_quality_gates(drafts: list[dict]) -> dict:
     page_gates = []
     coverage_issues = []
@@ -225,6 +275,7 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
     stale_template_artifact_count = _stale_template_artifact_count(conn, project_id=project_id)
     unresolved_critical_constraint_count = _unresolved_critical_constraint_count(latest_constraint_set)
     quality_gates = _longform_quality_gates(_draft_quality_evidence(conn, project_id=project_id))
+    ad_hoc_gate = _ad_hoc_task_card_gate(conn, project_id=project_id)
 
     gates = {
         "veto_confirmed": unconfirmed_veto == 0,
@@ -244,6 +295,7 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
         "stale_template_artifact_count": stale_template_artifact_count,
         **template_gate,
         **quality_gates,
+        **ad_hoc_gate,
         **format_gate,
     }
     return {
@@ -261,5 +313,6 @@ def build_export_gate_state(conn: Connection, *, project_id: UUID) -> dict:
             and gates["page_count_passed"]
             and gates["coverage_passed"]
             and gates["chart_closure_passed"]
+            and gates["ad_hoc_task_cards_ready"]
         ),
     }

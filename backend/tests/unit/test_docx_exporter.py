@@ -381,3 +381,11 @@ def test_render_plain_docx_rejects_skeleton_only_content(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="skeleton-only"):
         _render_plain_docx(_Conn(drafts), project_id=uuid4(), output_path=tmp_path / "out.docx")
+
+from tender_backend.services.export_service.docx_exporter import _should_add_chapter_divider_page
+
+
+def test_technical_chapter_0_does_not_get_divider_page() -> None:
+    assert _should_add_chapter_divider_page("technical", "0") is False
+    assert _should_add_chapter_divider_page("technical", "1") is True
+    assert _should_add_chapter_divider_page("technical", "0.1") is False

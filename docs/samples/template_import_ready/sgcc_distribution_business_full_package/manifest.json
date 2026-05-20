@@ -1,0 +1,317 @@
+{
+  "package_name": "国网配网工程商务标完整模板",
+  "package_key": "sgcc_distribution_business_full_v1",
+  "package_type": "business",
+  "category_code": "sgcc_distribution",
+  "chapter_count": 60,
+  "output_docx": "docs/samples/template_import_ready/sgcc_distribution_business_full_package/国网配网工程商务标_完整模板.docx",
+  "chapters": [
+    {
+      "chapter_code": "1",
+      "chapter_name": "商务偏差表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "2",
+      "chapter_name": "无违法失信行为的承诺函",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "3",
+      "chapter_name": "企业营业执照",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "4",
+      "chapter_name": "法定代表人身份证明",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5",
+      "chapter_name": "基本情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.1",
+      "chapter_name": "基本情况表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "5.2",
+      "chapter_name": "安全质量事故查询响应表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "6",
+      "chapter_name": "企业信用信息公示报告",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "6.1",
+      "chapter_name": "人员汇总表及人员简历表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "7",
+      "chapter_name": "与国家电网公司系统人员关系说明",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8",
+      "chapter_name": "近三年财务状况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.1",
+      "chapter_name": "2023年财务会计报表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.1.1",
+      "chapter_name": "资产负债表2023",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.1.2",
+      "chapter_name": "现金流量表2023",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.1.3",
+      "chapter_name": "利润表2023",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.1.4",
+      "chapter_name": "其他2023",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.2",
+      "chapter_name": "2024年财务会计报表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.2.1",
+      "chapter_name": "资产负债表2024",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.2.2",
+      "chapter_name": "现金流量表2024",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.2.3",
+      "chapter_name": "利润表2024",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.2.4",
+      "chapter_name": "其他2024",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.3",
+      "chapter_name": "2025年财务会计报表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.3.1",
+      "chapter_name": "资产负债表2025",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.3.2",
+      "chapter_name": "现金流量表2025",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.3.3",
+      "chapter_name": "利润表2025",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "8.3.4",
+      "chapter_name": "其他2025",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "9",
+      "chapter_name": "联合体协议书",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "10",
+      "chapter_name": "企业银行基本账户开户许可证、基本存款账户信息",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "11",
+      "chapter_name": "绿色发展顶层规划及执行情况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "12",
+      "chapter_name": "绿色管理体系认证",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "12.1",
+      "chapter_name": "能源管理体系认证证书",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "12.2",
+      "chapter_name": "质量管理体系认证证书",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "12.3",
+      "chapter_name": "职业健康安全管理体系认证证书",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "12.4",
+      "chapter_name": "环境管理体系认证证书",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "13",
+      "chapter_name": "ESG报告、环评能评报告、废水废气废固报告",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "13.1",
+      "chapter_name": "ESG报告",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "13.2",
+      "chapter_name": "环评／能评报告",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "13.3",
+      "chapter_name": "废水／废气／废固报告",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "13.4",
+      "chapter_name": "环境行政处罚",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "14",
+      "chapter_name": "绿色电力证书交易凭证和绿色电力证书",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "15",
+      "chapter_name": "取得的科技成果",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "16",
+      "chapter_name": "创新激励相关政策和机制",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "17",
+      "chapter_name": "研发团队规模",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "18",
+      "chapter_name": "中国质量奖、中国中国质量奖提名奖及中国工业大奖",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "19",
+      "chapter_name": "高新技术企业证书",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "20",
+      "chapter_name": "企业名称变更",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "21",
+      "chapter_name": "关于小规模纳税人的说明",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "22",
+      "chapter_name": "其他税率佐证材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "23",
+      "chapter_name": "保证金缴纳证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "23.1",
+      "chapter_name": "保证金明细表",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "23.2",
+      "chapter_name": "投标保证金缴纳证明材料",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24",
+      "chapter_name": "认为需要加以说明的其它商务内容",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.1",
+      "chapter_name": "不良行为处理情况通报",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.2",
+      "chapter_name": "公共信用信息报告、企业信用信息公示报告",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.3",
+      "chapter_name": "影响招投标工作公正性行为的凭证",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.4",
+      "chapter_name": "科研经费占比",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.5",
+      "chapter_name": "综合实力",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.6",
+      "chapter_name": "投标响应",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.7",
+      "chapter_name": "经营状况",
+      "render_mode": "single_docx_section"
+    },
+    {
+      "chapter_code": "24.8",
+      "chapter_name": "其他",
+      "render_mode": "single_docx_section"
+    }
+  ],
+  "template_policy": {
+    "cover_page_each_top_level_chapter": true,
+    "single_docx_package": true,
+    "no_internal_instruction_text_in_docx": true,
+    "historical_business_facts_removed": true,
+    "images_removed": true
+  }
+}
